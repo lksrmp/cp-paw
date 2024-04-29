@@ -290,6 +290,9 @@ OBJDOS=  \
 # Objects for paw_dosplot.x
 OBJDOSPLOT=  \
           ${OBJDIR}/paw_dosplot.o
+# Objects for paw_rixs.x
+OBJRIXS=  \
+          ${OBJDIR}/paw_rixs.o		  
 # Objects for paw_bands.x
 OBJBANDS=  \
           ${OBJDIR}/paw_bands.o
@@ -462,6 +465,9 @@ ${BINDIR}/paw_dosplot.x: ${OBJDOSPLOT} ${PAWLIB}
 #
 clean_dosplot:
 	rm -f ${OBJDOSPLOT}; rm -f ${BINDIR}/paw_dosplot.x
+#
+${BINDIR}/paw_rixs.x: ${OBJRIXS} ${PAWLIB}
+	${LINK} -o ${BINDIR}/paw_rixs.x ${OBJRIXS} -L${OBJDIR}  -lpaw ${LIBS}
 #
 ${BINDIR}/paw_bands.x: ${OBJBANDS} ${PAWLIBFULL}
 	${LINK} -o ${BINDIR}/paw_bands.x ${OBJBANDS} -L${OBJDIR}  -lpawfull ${LIBS}
@@ -636,6 +642,10 @@ ${OBJDOS}: ${OBJDIR}/%.o : ${TOOLDIR}/PDoS/%.f90
 	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
 #
 ${OBJDOSPLOT}: ${OBJDIR}/%.o : ${TOOLDIR}/PDoS/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJRIXS}: ${OBJDIR}/%.o : ${TOOLDIR}/Rixs/%.f90
 	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
 	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
 #
@@ -1046,6 +1056,13 @@ endif
  SPINDIR_MODULE.mod : ${OBJDIR}/paw_dos.o
  ORBITALS_MODULE.mod : ${OBJDIR}/paw_dos.o
  READCNTL_MODULE.mod : ${OBJDIR}/paw_dos.o
+ ## file:src/Tools/Rixs/paw_rixs.f90
+ ${OBJDIR}/paw_rixs.o : PDOS_MODULE.mod
+ ${OBJDIR}/paw_rixs.o : STRINGS_MODULE.mod
+ ${OBJDIR}/paw_rixs.o : LINKEDLIST_MODULE.mod
+ SPINDIR_MODULE.mod : ${OBJDIR}/paw_rixs.o
+ ORBITALS_MODULE.mod : ${OBJDIR}/paw_rixs.o
+ READCNTL_MODULE.mod : ${OBJDIR}/paw_rixs.o
  ## file:src/Tools/Bands/paw_bands.f90
  ${OBJDIR}/paw_bands.o : PDOS_MODULE.mod
  ${OBJDIR}/paw_bands.o : STRINGS_MODULE.mod
