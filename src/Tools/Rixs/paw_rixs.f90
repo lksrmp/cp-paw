@@ -138,7 +138,8 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
     LOGICAL(4) :: TPF=.FALSE.
   END TYPE RIXS_SET
   INTEGER(4) :: NSPECTRA
-  TYPE(SPECTRUM), ALLOCATABLE :: SPECTRA(:)
+  TYPE(SPECTRUM), ALLOCATABLE, TARGET :: SPECTRA(:)
+  TYPE(SPECTRUM), POINTER :: SPEC
   TYPE(RIXS_SET) :: RIXS_GENERAL
   REAL(8) :: EMIN
   REAL(8) :: EMAX
@@ -178,7 +179,6 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
      &                            ,LINKEDLIST$SELECT
       USE READCNTL_MODULE  ,ONLY : LL_CNTL
       USE SPINDIR_MODULE   ,ONLY : SPINDIR !(IS ONLY ALLOCATED)
-      USE RIXS_MODULE      ,ONLY : NSPECTRA
       IMPLICIT NONE
       INTEGER(4)                :: NFILO
       INTEGER(4)                :: NAT
@@ -198,6 +198,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       REAL(8)      ,ALLOCATABLE :: OCC(:,:)
       REAL(8)      ,ALLOCATABLE :: SET(:,:,:,:)
       CHARACTER(16),ALLOCATABLE :: ATOMID(:)
+      INTEGER(4)                :: NSPECTRA
       REAL(8)                   :: EMIN
       REAL(8)                   :: EMAX
       INTEGER(4)                :: NE
@@ -251,6 +252,9 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       CALL FILEHANDLER$UNIT('PDOS',NFILIN)
       REWIND(NFILIN)
       CALL PDOS$READ(NFILIN)
+
+
+! TODO: CHECK IF THE FOLLOWING IS NECESSARY
       CALL PDOS$GETI4('NAT',NAT)
       CALL PDOS$GETI4('NKPT',NKPT)
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
@@ -281,6 +285,12 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         CALL ERROR$STOP('PDOS MAIN')
       ENDIF
                             CALL TRACE$PASS('AFTER READPDOS')
+
+
+
+
+
+
 !
 !     ==========================================================================
 !     ==  POPULATE BRILLOUIN MODULE                                           ==
@@ -333,14 +343,14 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     ==========================================================================
 !     ==  WRITE ALL K POINTS TO FILE                                          ==
 !     ==========================================================================
-      ! CALL KPOINTWRITE
-      !                       CALL TRACE$PASS('AFTER KPOINTWRITE')
+      CALL KPOINTWRITE
+                            CALL TRACE$PASS('AFTER KPOINTWRITE')
 !
 !     ==========================================================================
 !     ==  WRITE ALL ENERGIES TO FILE                                          ==
 !     ==========================================================================
-      ! CALL ENERGYWRITE
-      !                       CALL TRACE$PASS('AFTER ENERGYWRITE')
+      CALL ENERGYWRITE
+                            CALL TRACE$PASS('AFTER ENERGYWRITE')
 !
 !     ==========================================================================
 !     ==  WRITE ISOSURFACE CUBE FILE                                          ==
@@ -355,6 +365,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     ==========================================================================
 !     ==  WRITE REPORT FOR EVERY RIXS SPECTRUM                                ==
 !     ==========================================================================
+      CALL RIXS$GETI4('NSPECTRA',NSPECTRA)
       DO IVAR=0,NSPECTRA
         CALL RIXS$REPORT(NFILO,IVAR)
       ENDDO
@@ -544,6 +555,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       END SUBROUTINE RIXS$CALCULATE
 
       SUBROUTINE RIXS$REPORT(NFIL,ID)  !MARK: RIXS$REPORT
+! TODO: UPDATE OUTPUT TO MATCH NEW FORMAT
       USE RIXS_MODULE
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -593,6 +605,199 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       ENDIF
                           CALL TRACE$POP
       END SUBROUTINE RIXS$REPORT
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$GETI4(ID,VAL)  !MARK: RIXS$GETI4
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
+      ! IF(.NOT.TREADRIXS) THEN
+      !   CALL ERROR$MSG('RIXS MODULE NOT INITIALIZED')
+      !   CALL ERROR$STOP('RIXS$GETI4')
+      ! ENDIF
+      IF(ID.EQ.'NSPECTRA') THEN
+        VAL=NSPECTRA
+      ELSE IF(ID.EQ.'NE') THEN
+        VAL=NE
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$GETI4')
+      ENDIF
+      END SUBROUTINE RIXS$GETI4
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$SETI4(ID,VAL)  !MARK: RIXS$SETI4
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'NSPECTRA') THEN
+        NSPECTRA=VAL
+        IF(ALLOCATED(SPECTRA)) THEN
+          CALL ERROR$MSG('SPECTRA ALREADY ALLOCATED')
+          CALL ERROR$MSG('TRYING TO CHANGE NUMBER OF SPECTRA')
+          CALL ERROR$STOP('RIXS$SETI4')
+        ENDIF
+      ELSE IF(ID.EQ.'NE') THEN
+        NE=VAL
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$SETI4')
+      ENDIF
+      END SUBROUTINE RIXS$SETI4
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$GETR8(ID,VAL)  !MARK: RIXS$GETR8
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(OUT) :: VAL
+!     **************************************************************************
+      ! IF(.NOT.TREADRIXS) THEN
+      !   CALL ERROR$MSG('RIXS MODULE NOT INITIALIZED')
+      !   CALL ERROR$STOP('RIXS$GETI4')
+      ! ENDIF
+      IF(ID.EQ.'EMIN') THEN
+        VAL=EMIN
+      ELSE IF(ID.EQ.'EMAX') THEN
+        VAL=EMAX
+      ELSE IF(ID.EQ.'DE') THEN
+        VAL=DE
+      ELSE IF(ID.EQ.'EBROAD') THEN
+        VAL=EBROAD
+      ELSE IF(ID.EQ.'EFEXP') THEN
+        VAL=EFEXP
+      ELSE IF(ID.EQ.'GAMMA') THEN
+        VAL=GAMMA
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$GETR8')
+      ENDIF
+      END SUBROUTINE RIXS$GETR8
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$SETR8(ID,VAL)  !MARK: RIXS$SETR8
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'EMIN') THEN
+        EMIN=VAL
+      ELSE IF(ID.EQ.'EMAX') THEN
+        EMAX=VAL
+      ELSE IF(ID.EQ.'DE') THEN
+        DE=VAL
+        NE=INT((EMAX-EMIN)/DE)+1
+      ELSE IF(ID.EQ.'EBROAD') THEN
+        EBROAD=VAL
+      ELSE IF(ID.EQ.'EFEXP') THEN
+        EFEXP=VAL
+      ELSE IF(ID.EQ.'GAMMA') THEN
+        GAMMA=VAL
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$SETR8')
+      ENDIF
+      END SUBROUTINE RIXS$SETR8
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$GETCH(ID,VAL)  !MARK: RIXS$GETCH
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
+      ! IF(.NOT.TREADRIXS) THEN
+      !   CALL ERROR$MSG('RIXS MODULE NOT INITIALIZED')
+      !   CALL ERROR$STOP('RIXS$GETI4')
+      ! ENDIF
+      IF(ID.EQ.'SPECIES') THEN
+        VAL=SPECIES
+      ELSE IF(ID.EQ.'ORBTYPE') THEN
+        VAL=ORBTYPE
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$GETCH')
+      ENDIF
+      END SUBROUTINE RIXS$GETCH
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$SETCH(ID,VAL)  !MARK: RIXS$SETCH
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
+! WARNING: NO PROTECTION AGAINST LENGTH OF CHARACTER
+      IF(ID.EQ.'SPECIES') THEN
+        SPECIES=VAL
+      ELSE IF(ID.EQ.'ORBTYPE') THEN
+        ORBTYPE=VAL
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$SETCH')
+      ENDIF
+      END SUBROUTINE RIXS$SETCH
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$GETR8A(ID,LEN,VAL)  !MARK: RIXS$GETR8A
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      REAL(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
+      ! IF(.NOT.TREADRIXS) THEN
+      !   CALL ERROR$MSG('RIXS MODULE NOT INITIALIZED')
+      !   CALL ERROR$STOP('RIXS$GETI4')
+      ! ENDIF
+      IF(ID.EQ.'NORMAL') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('INCONSISTENT SIZE')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        ENDIF
+        VAL=NORMAL(:)
+      ELSE
+        CALL ERROR$MSG('INVALID ID')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RIXS$GETR8A')
+      ENDIF
+      END SUBROUTINE RIXS$GETR8A
+!
+!     ..........................................................................
+      SUBROUTINE RIXS$SETPTR(ISPEC)  !MARK: RIXS$SETPTR
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: ISPEC
+!     **************************************************************************
+      ! IF(.NOT.TRIXS) THEN
+      !   CALL ERROR$MSG('RIXS MODULE NOT INITIALIZED')
+      !   CALL ERROR$STOP('RIXS$SETPTR')
+      ! ENDIF
+      IF(ISPEC.LT.1.OR.ISPEC.GT.NSPECTRA) THEN
+        CALL ERROR$MSG('INVALID SPECTRUM NUMBER')
+        CALL ERROR$I4VAL('ISPEC',ISPEC)
+        CALL ERROR$STOP('RIXS$SETPTR')
+      ENDIF
+      IF(.NOT.ALLOCATED(SPECTRA)) THEN
+        CALL ERROR$MSG('SPECTRA NOT ALLOCATED')
+        CALL ERROR$STOP('RIXS$SETPTR')
+      ENDIF
+      IF(ASSOCIATED(SPEC)) DEALLOCATE(SPEC)
+      SPEC=>SPECTRA(ISPEC)
+      END SUBROUTINE RIXS$SETPTR
+
 
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,Q,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
@@ -702,12 +907,13 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       END SUBROUTINE ENERGYWRITE
 
       SUBROUTINE KPOINTWRITE  !MARK: KPOINTWRITE
-        USE PDOS_MODULE   , ONLY : XK,RBAS
         IMPLICIT NONE
         INTEGER(4)  :: NFILO
         INTEGER(4) :: IKPT,ISPIN,IB
         REAL(8) :: EV
         REAL(8), ALLOCATABLE :: KPT(:,:)
+        REAL(8), ALLOCATABLE :: XK(:,:)
+        REAL(8) :: RBAS(3,3)
         REAL(8) :: GBAS(3,3)
         INTEGER(4) :: NKPT
         CHARACTER(255) :: FMT
@@ -715,9 +921,12 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         REAL(8) :: ANGSTROM
         CALL FILEHANDLER$UNIT('PROT',NFILO)
         CALL CONSTANTS('ANGSTROM',ANGSTROM)
-        CALL GBASS(RBAS,GBAS,VOL)
+        CALL PDOS$GETR8A('RBAS',3*3,RBAS)
         CALL PDOS$GETI4('NKPT',NKPT)
-        ALLOCATE(KPT(3,NKPT))
+        CALL GBASS(RBAS,GBAS,VOL)
+        
+        ALLOCATE(XK(3,NKPT))
+        CALL PDOS$GETR8A('XK',3*NKPT,XK)
         ISPIN=1
         WRITE(NFILO,*)
         WRITE(NFILO,FMT='(A5,I6)')'NKPT=',NKPT
@@ -725,7 +934,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
           WRITE(NFILO,FMT='(A5,I5,A4,3F6.3,A5,3F10.5)')'IKPT=',IKPT, &
 &                               ' XK=',XK(:,IKPT),' KPT=',MATMUL(GBAS,XK(:,IKPT))*ANGSTROM
         END DO
-        DEALLOCATE(KPT)
+        DEALLOCATE(XK)
         END SUBROUTINE KPOINTWRITE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -779,9 +988,10 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     ** INITIALIZE DATA MODULE                                               **
 !     **************************************************************************
       USE DATA_MODULE, ONLY: EIG,OCC,RPOS,TINIT,NATOMS,INDSPECIES,INDTYPE,IATMAP,INDMAP
-      USE RIXS_MODULE, ONLY: SPECIES,ORBTYPE
       USE STRINGS_MODULE
       IMPLICIT NONE
+      CHARACTER(16) :: SPECIES
+      CHARACTER(1) :: ORBTYPE
       INTEGER(4) :: NKPT
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NDIM
@@ -807,6 +1017,9 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         CALL ERROR$MSG('DATA MODULE ALREADY INITIALIZED')
         CALL ERROR$STOP('DATA$INIT')
       ENDIF
+
+      CALL RIXS$GETCH('SPECIES',SPECIES)
+      CALL RIXS$GETCH('ORBTYPE',ORBTYPE)
 
       CALL PDOS$GETI4('NKPT',NKPT)
       CALL PDOS$GETI4('NSPIN',NSPIN)
@@ -906,6 +1119,10 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         ENDDO 
       ENDDO
 
+
+
+! TODO: TWO SCHEMES OF LOOPING THROUGH ATOMS AND ORBITALS
+!       DETERMINE WHICH IS THE MOST CONVINIENT AND EFFICIENT
 !     ==  LOOP THROUGH ALL AND ONLY ACT ON SELECTED SPECIES AND ORBITALS  ======
 !     ==  DOES NOT REQUIRE INDMAP  =============================================
       IND=0
@@ -928,28 +1145,23 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
           DO M=1,2*L+1
             IND=IND+1
             LMN=LMN+1
-            WRITE(*,FMT='(9I6)')IAT,ISP,LN,L,M,LNX(ISP),LOX(LN,ISP),LMN,IND
+            ! DO SOMETHING
           ENDDO
         ENDDO
       ENDDO
-
 !     ==  LOOP THROUGH RELEVANT ATOMS AND ONLY ACT ON SELECTED SPECIES  ========
 !     ==  AND ORBITALS, REQUIRES INDMAP TO SKIP ATOMS NOT SELECTED  ============
-      DO I=1,NATOMS
-        WRITE(*,*)'INDMAP ',I,INDMAP(I)
-      ENDDO
       DO I=1,NATOMS
         IND=INDMAP(I)
         DO LN=1,LNX(INDSPECIES)
           L=LOX(LN,INDSPECIES)
           IF(L.NE.INDTYPE) THEN
-            write(*,*)'cycle adds:',2*L+1
             IND=IND+2*L+1
             CYCLE
           ENDIF
           DO M=1,2*L+1
             IND=IND+1
-            WRITE(*,FMT='(9I6)')I,INDSPECIES,LN,L,M,LNX(INDSPECIES),LOX(LN,INDSPECIES),LMN,IND
+            ! DO SOMETHING
           ENDDO
         ENDDO
       ENDDO
