@@ -379,7 +379,8 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         CALL RIXS$FILE(IVAR,'O')
 
         CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
-        WRITE(NFILO,*)'RIXS SPECTRUM ',IVAR
+! TODO: WRITE DETAILED HEADER WITH ALL PARAMETERS
+        WRITE(NFILO,*)'# RIXS SPECTRUM ',IVAR
         CALL RIXS$CALCULATE(IVAR,EF)
         
         CALL RIXS$FILE(IVAR,'C')
@@ -474,7 +475,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     ** CALCULATE RIXS SPECTRUM ISPEC                                        **
 !     **************************************************************************
       USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
-      USE RIXS_MODULE, ONLY: SPECTRA,GAMMA
+      USE RIXS_MODULE, ONLY: SPEC
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
       REAL(8), INTENT(IN) :: EF  ! FERMI ENERGY OF SIMULATION
@@ -482,13 +483,18 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       TYPE(STATE_TYPE), POINTER :: STATEJ
       REAL(8), ALLOCATABLE :: XK(:,:)
       REAL(8), ALLOCATABLE :: WKPT(:)
+      REAL(8) :: GAMMA
+      REAL(8) :: EMIN
+      REAL(8) :: EMAX
+      REAL(8) :: DE
+      INTEGER(4) :: NE
       INTEGER(4) :: NFIL
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NKPT
       LOGICAL(4) :: TINV
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IKPT, JKPT
-      INTEGER(4) :: IN, JN
+      INTEGER(4) :: IN, JN,I
       REAL(8) :: XKSHIFT(3)
       REAL(8) :: DELTAE
       REAL(8) :: AMPL
@@ -496,13 +502,27 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       REAL(8), ALLOCATABLE :: SPECTRUM(:)
       REAL(8), ALLOCATABLE :: RAW(:)
                           CALL TRACE$PUSH('RIXS$CALCULATE')
+                          WRITE(*,FMT='(A8,I4)')'SPECTRUM',ISPEC
       CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
+
+      CALL RIXS$SETPTR(ISPEC)
+      CALL RIXS$GETR8('GAMMA',GAMMA)
+      CALL RIXS$GETR8('EMIN',EMIN)
+      CALL RIXS$GETR8('EMAX',EMAX)
+      CALL RIXS$GETR8('DE',DE)
+      CALL RIXS$GETI4('NE',NE)
+      ALLOCATE(RAW(NE))
+      ALLOCATE(SPECTRUM(NE))
+
       CALL PDOS$GETI4('NSPIN',NSPIN)
       CALL PDOS$GETI4('NKPT',NKPT)
       ALLOCATE(XK(3,NKPT))
       CALL PDOS$GETR8A('XK',3*NKPT,XK)
       ALLOCATE(WKPT(NKPT))
       CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
+
+      RAW(:)=0.D0
+      SPECTRUM(:)=0.D0
 !     ==  SUM OVER SPIN  =======================================================
 ! TODO: SWAP SUM OVER SPIN TO MOST EFFICIENT ORDER
       DO ISPIN=1,NSPIN
@@ -512,7 +532,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !         ==  CALCULATE SHIFTED K-POINT AND ITS INDEX JKPT                    ==
 !         ======================================================================
 ! TODO: CHECK SIGN OF Q FOR CONSISTENCY
-          XKSHIFT(:)=XK(:,IKPT)-SPECTRA(ISPEC)%XQAPPROX(:)
+          XKSHIFT(:)=XK(:,IKPT)-SPEC%XQAPPROX(:)
           CALL BRILLOUIN$IKP(XKSHIFT,JKPT)
 !         ======================================================================
 !         ==  DETERMINE IF SHIFTED K-POINT COMES FROM INVERSION SYMMETRY AND  ==
@@ -540,23 +560,24 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
             DO JN=1,STATEJ%NB
 !           ==  CYCLE IF OCCUPATION IS NOT ONE  ================================
               IF((1.D0-STATEJ%OCC(JN)/WKPT(JKPT)).GT.1.D-5) CYCLE
-              
               ! CALCULATE APLITUDE SQUARED
-              CALL RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,SPECTRA(ISPEC)%XQ,AMPL)
+              CALL RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
               ! CALCULATE DENOMINATOR (LORENTZIAN)
-              SVAR=STATEI%EIG(IN)-EF-SPECTRA(ISPEC)%EIREL
+              SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
               SVAR=SVAR**2
               SVAR=SVAR+0.25D0*GAMMA**2
               AMPL=AMPL/SVAR
+! WARNING: WEIGHT OF K-POINT MISSING
               ! CALCULATE ENERGY DIFFERENCE
               DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
               ! ADD TO SPECTRUM
-
+              CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW)
             ENDDO  ! N'
           ENDDO  ! N
-
         ENDDO  ! KPT
       ENDDO  ! SPIN
+      CALL RIXS_SMEARGRID(NE,RAW,SPECTRUM)
+      CALL RIXS_WRITEGRID(NFIL,NE,SPECTRUM,EMIN,EMAX,DE)
       DEALLOCATE(XK)
       DEALLOCATE(WKPT)
                           CALL TRACE$POP
@@ -723,6 +744,102 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       ENDIF
                           CALL TRACE$POP
       END SUBROUTINE RIXS$REPORT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_MAPGRID(E,AMPL,NE,GRID)  !MARK: RIXS_MAPGRID
+!     **************************************************************************
+!     ** MAP ENERGY VALUES ONTO GRID                                          **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), INTENT(IN) :: E
+      REAL(8), INTENT(IN) :: AMPL
+      INTEGER(4), INTENT(IN) :: NE
+      REAL(8), INTENT(INOUT) :: GRID(NE)
+      REAL(8) :: X
+      INTEGER(4) :: I1
+      INTEGER(4) :: I2
+      REAL(8) :: W1
+      REAL(8) :: W2
+      REAL(8) :: EMIN
+      REAL(8) :: EMAX
+      REAL(8) :: DE
+      CALL RIXS$GETR8('EMIN',EMIN)
+      CALL RIXS$GETR8('EMAX',EMAX)
+      CALL RIXS$GETR8('DE',DE)
+
+      X=(E-EMIN)/DE+1.D0
+      I1=INT(X)
+      I2=I1+1
+      W2=(X-REAL(I1,KIND=8))
+      W1=1.D0-W2
+      IF(I1.GT.0.AND.I1.LE.NE) GRID(I1)=GRID(I1)+W1*AMPL
+      IF(I2.GT.0.AND.I2.LE.NE) GRID(I2)=GRID(I2)+W2*AMPL
+      END SUBROUTINE RIXS_MAPGRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_SMEARGRID(NE,GRID,SMOOTH)  !MARK: RIXS_SMEARGRID
+!     **************************************************************************
+!     ** SMOOTH GRID                                                          **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NE
+      REAL(8), INTENT(IN) :: GRID(NE)
+      REAL(8), INTENT(OUT) :: SMOOTH(NE)
+      REAL(8) :: EBROAD
+      REAL(8) :: DE
+      INTEGER(4) :: ND
+      REAL(8), ALLOCATABLE :: SMEAR(:)
+      INTEGER(4) :: I,J
+      INTEGER(4) :: IND1,IND2
+      REAL(8) :: WGHT
+
+      CALL RIXS$GETR8('EBROAD',EBROAD)
+!     ==  CATCH CASE OF ZERO BROADENING  =======================================
+      IF(EBROAD.LT.1.D-8) THEN
+        SMOOTH(:)=GRID(:)
+      ELSE
+        CALL RIXS$GETR8('DE',DE)
+        ND=NINT(EBROAD/DE*LOG(4.D0/1.D-2))
+        ALLOCATE(SMEAR(-ND:ND))
+        DO I=-ND,ND
+          SMEAR(I)=EBROAD/(0.5D0*COSH(0.5D0*REAL(I,KIND=8)*DE/EBROAD))**2
+        ENDDO
+        SMEAR=SMEAR/SUM(SMEAR)
+        DO I=-ND,ND
+          IND1=MAX(1,1-I)
+          IND2=MIN(NE,NE-I)
+          WGHT=SMEAR(I)
+          DO J=IND1,IND2
+            SMOOTH(J)=SMOOTH(J)+WGHT*GRID(J+I)
+          ENDDO
+        ENDDO
+      ENDIF
+      DO I=1,NE
+        IF(ABS(SMOOTH(I)).LE.1.D-99) SMOOTH(I)=0.D0
+      ENDDO
+      END SUBROUTINE RIXS_SMEARGRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_WRITEGRID(NFIL,NE,GRID,EMIN,EMAX,DE)  !MARK: RIXS_WRITEGRID
+!     **************************************************************************
+!     ** WRITE GRID TO FILE                                                   **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4), INTENT(IN) :: NE
+      REAL(8), INTENT(IN) :: GRID(NE)
+      REAL(8), INTENT(IN) :: EMIN
+      REAL(8), INTENT(IN) :: EMAX
+      REAL(8), INTENT(IN) :: DE
+      INTEGER(4) :: I
+      REAL(8) :: E
+      REAL(8) :: EV
+      CALL CONSTANTS('EV',EV)
+      DO I=1,NE
+        E=EMIN+DE*REAL(I-1,KIND=8)
+        WRITE(NFIL,FMT='(F14.8,F20.8)')E/EV,GRID(I)
+      ENDDO
+      END SUBROUTINE RIXS_WRITEGRID
 !
 !     ..........................................................................
       SUBROUTINE RIXS$GETI4(ID,VAL)  !MARK: RIXS$GETI4
@@ -912,7 +1029,6 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         CALL ERROR$MSG('SPECTRA NOT ALLOCATED')
         CALL ERROR$STOP('RIXS$SETPTR')
       ENDIF
-      IF(ASSOCIATED(SPEC)) DEALLOCATE(SPEC)
       SPEC=>SPECTRA(ISPEC)
       END SUBROUTINE RIXS$SETPTR
 
@@ -1650,7 +1766,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       REAL(8), INTENT(OUT) :: ORTHO(3)
       REAL(8) :: VECVAR(3)
       VECVAR = (/1.D0,0.D0,0.D0/)
-      IF(DOT_PRODUCT(A,VECVAR)==NORM2(A)) THEN
+      IF(DOT_PRODUCT(A,VECVAR).EQ.NORM2(A)) THEN
         VECVAR = (/0.D0,1.D0,0.D0/)
       ENDIF
       CALL CROSS_PROD(A,VECVAR,ORTHO)
@@ -2044,7 +2160,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       END SUBROUTINE READCNTL$RIXS
 !      
 !      ..1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE REPORT(NFILO) 
+      SUBROUTINE REPORT(NFILO)  !MARK: REPORT
 !     **************************************************************************
 !     **  WRITES PROJECTED CHARGES AND SPINS FOR EACH ATOM TO                 **
 !     **  DPROT FILE AND CALCULATES THE SPIN DIRECTIONS                       **
@@ -2374,7 +2490,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       END SUBROUTINE STANDARDFILES
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE ORTHONORMALIZESTATES()
+      SUBROUTINE ORTHONORMALIZESTATES()  !MARK: ORTHONORMALIZESTATES
 !     **************************************************************************
 !     ** TRANSFORMS THE LOCAL BASIS SET SO THAT IT IS ORTHONORMAL.            **
 !     ** A CHOLESKY DECOMPOSITION OF THE LOCAL ORBITALS TRANSFORMS THE        **
@@ -4929,7 +5045,7 @@ CALL LINKEDLIST$REPORT(LL_CNTL,6)
 !       END SUBROUTINE READCNTL$SETNUMBER
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE SET$ENOCC(NBB,NKPT_,EIG,OCC)
+      SUBROUTINE SET$ENOCC(NBB,NKPT_,EIG,OCC)  !MARK: SET$ENOCC
 !     **************************************************************************
 !     **  ENERGIES AND OCCUPATIONS ARE TREATED IN THE FOLLOWING DATA MODEL:   **
 !     **                                                                      **
