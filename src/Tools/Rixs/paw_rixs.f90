@@ -96,7 +96,9 @@ MODULE DATA_MODULE
 INTEGER(4) :: NATOMS  ! NUMBER OF ATOMS IN RIXS CALCULATION
 INTEGER(4) :: INDSPECIES  ! INTERNAL INDEX OF SPECIES
 INTEGER(4) :: INDTYPE  ! INTERNAL INDEX OF TYPE (S=0,P=1,D=2,F=3)
+REAL(8) :: EFERMI  ! FERMI ENERGY OF SIMULATION
 REAL(8), ALLOCATABLE :: RPOS(:,:)  ! POSITION OF ATOMS IN RIXS CALCULATION
+REAL(8), ALLOCATABLE :: RXPOS(:,:)  ! RELATIVE POSITION OF ATOMS IN RIXS CALCULATION
 REAL(8), ALLOCATABLE :: EIG(:,:)  ! EIGENVALUES OF STATES
 REAL(8), ALLOCATABLE :: OCC(:,:)  ! OCCUPATION OF STATES
 INTEGER(4), ALLOCATABLE :: IATMAP(:)  ! MAPS TO ATOMS OF SELECTED SPECIES
@@ -378,7 +380,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 
         CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
         WRITE(NFILO,*)'RIXS SPECTRUM ',IVAR
-        !CALL RIXS$CALCULATE(IVAR)
+        CALL RIXS$CALCULATE(IVAR,EF)
         
         CALL RIXS$FILE(IVAR,'C')
       ENDDO
@@ -471,13 +473,15 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     **************************************************************************
 !     ** CALCULATE RIXS SPECTRUM ISPEC                                        **
 !     **************************************************************************
-      USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR,XK
+      USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
       USE RIXS_MODULE, ONLY: SPECTRA,GAMMA
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
       REAL(8), INTENT(IN) :: EF  ! FERMI ENERGY OF SIMULATION
       TYPE(STATE_TYPE), POINTER :: STATEI
       TYPE(STATE_TYPE), POINTER :: STATEJ
+      REAL(8), ALLOCATABLE :: XK(:,:)
+      REAL(8), ALLOCATABLE :: WKPT(:)
       INTEGER(4) :: NFIL
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NKPT
@@ -495,6 +499,10 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
       CALL PDOS$GETI4('NSPIN',NSPIN)
       CALL PDOS$GETI4('NKPT',NKPT)
+      ALLOCATE(XK(3,NKPT))
+      CALL PDOS$GETR8A('XK',3*NKPT,XK)
+      ALLOCATE(WKPT(NKPT))
+      CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
 !     ==  SUM OVER SPIN  =======================================================
 ! TODO: SWAP SUM OVER SPIN TO MOST EFFICIENT ORDER
       DO ISPIN=1,NSPIN
@@ -527,11 +535,11 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
           DO IN=1,STATEI%NB
 ! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1
 !           ==  CYCLE IF OCCUPATION NOT ZERO  ==================================
-            IF(STATEI%OCC(IN).GT.1.D-5) CYCLE
+            IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.1.D-5) CYCLE
             ! SUM OVER N'
             DO JN=1,STATEJ%NB
 !           ==  CYCLE IF OCCUPATION IS NOT ONE  ================================
-              IF((1.D0-STATEJ%OCC(JN)).GT.1.D-5) CYCLE
+              IF((1.D0-STATEJ%OCC(JN)/WKPT(JKPT)).GT.1.D-5) CYCLE
               
               ! CALCULATE APLITUDE SQUARED
               CALL RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,SPECTRA(ISPEC)%XQ,AMPL)
@@ -549,10 +557,120 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 
         ENDDO  ! KPT
       ENDDO  ! SPIN
-      DEALLOCATE(RAW)
-      DEALLOCATE(SPECTRUM)
+      DEALLOCATE(XK)
+      DEALLOCATE(WKPT)
                           CALL TRACE$POP
       END SUBROUTINE RIXS$CALCULATE
+
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,Q,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
+!     **************************************************************************
+!     ** CALCULATE RIXS MATRIX ELEMENT                                        **
+!     ** DEPENDS ON:                                                          **
+!     **   K, Q, N, N', SPIN, POLARIASTION                                    **
+!     **************************************************************************
+! TODO: ACCESS THE RIGHT DATA AND REWRITE THE INDEXING
+! WARNING: MAKE SURE Q AND R ARE COMPATIBLE, BOTH EITHER ABSOLUTE OR RELATIVE
+      USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR,LNX,LOX
+      USE DATA_MODULE, ONLY: NATOMS,INDMAP,INDSPECIES,INDTYPE,RXPOS
+      IMPLICIT NONE
+      COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
+      INTEGER(4), INTENT(IN) :: IKPT
+      INTEGER(4), INTENT(IN) :: JKPT
+      INTEGER(4), INTENT(IN) :: ISPIN
+      LOGICAL(4), INTENT(IN) :: TINV
+      INTEGER(4), INTENT(IN) :: IN
+      INTEGER(4), INTENT(IN) :: JN
+      REAL(8), INTENT(IN) :: Q(3)
+      REAL(8), INTENT(OUT) :: AMPLITUDE
+      TYPE(STATE_TYPE), POINTER :: STATEI
+      TYPE(STATE_TYPE), POINTER :: STATEJ
+      INTEGER(4) :: IAT
+      INTEGER(4) :: IND
+
+      INTEGER(4) :: NSP
+      INTEGER(4) :: LNXX
+      
+      INTEGER(4) :: LN
+      INTEGER(4) :: L
+      INTEGER(4) :: M
+
+
+
+
+
+
+! WARNING: PLACEHOLDER VARIABLES FOR MATRIX ELEMENTS
+! WARNING: REVISIT THE DERIVATION IN THE PAW METHOD
+      INTEGER(4) :: NPROP=6  ! NUMBER OF P PROJECTORS PER OXYGEN ATOM
+      INTEGER(4) :: IPROP
+      INTEGER(4) :: IOX
+      COMPLEX(8) :: DEPS(6)
+      COMPLEX(8) :: DEPSP(6)
+      COMPLEX(8) :: MAT
+      COMPLEX(8) :: MATP
+      REAL(8), ALLOCATABLE :: ROX(:,:)
+      COMPLEX(8) :: CAMP
+
+! WARNING: REPLACE WITH CORRECT MATRIX ELEMENTS
+      DEPS=(1.D0,0.D0)
+      DEPSP=(1.D0,0.D0)
+
+
+
+      CAMP=(0.D0,0.D0)
+      STATEI=>STATEARR(IKPT,ISPIN)
+      STATEJ=>STATEARR(JKPT,ISPIN)
+      DO IAT=1,NATOMS
+        IPROP=0
+        IND=INDMAP(IAT)
+        MAT=(0.D0,0.D0)
+        MATP=(0.D0,0.D0)
+        DO LN=1,LNX(INDSPECIES)
+          L=LOX(LN,INDSPECIES)
+          IF(L.NE.INDTYPE) THEN
+            IND=IND+2*L+1
+            CYCLE
+          ENDIF
+          DO M=1,2*L+1
+            IND=IND+1
+            IPROP=IPROP+1
+            MAT=MAT+DEPS(IPROP)*CONJG(STATEI%VEC(1,IND,IN))
+            IF(TINV) THEN
+              MATP=MATP+CONJG(DEPSP(IPROP))*CONJG(STATEJ%VEC(1,IND,JN))
+            ELSE
+              MATP=MATP+CONJG(DEPSP(IPROP))*STATEJ%VEC(1,IND,JN)
+            ENDIF
+          ENDDO
+        ENDDO
+        CAMP=CAMP+MAT*MATP*EXP(CI*DOT_PRODUCT(Q,RXPOS(:,IAT)))
+      ENDDO
+      AMPLITUDE=REAL(CAMP*CONJG(CAMP),KIND=8)
+!       ALLOCATE(ROX(3,NOX))
+!       STATEI=>STATEARR(IKPT,ISPIN)
+!       STATEJ=>STATEARR(JKPT,ISPIN)
+!       DEPS=(1.D0,0.D0)
+!       DEPSP=(1.D0,0.D0)
+!       CAMP=(0.D0,0.D0)
+!       DO IOX=1,NOX
+!         MAT=(0.D0,0.D0)
+!         MATP=(0.D0,0.D0)
+!         DO IPROP=1,NPROP
+! ! TODO: CORRECT INDEXING
+! ! WARNING: CHECK CONJUGATION
+!           MAT=MAT+(1.D0,0.D0)
+!           ! MAT=MAT+CONJG(DEPS(IPROP))*CONJG(STATEI%VEC(IPROP,IN,IOX))
+!           ! IF(TINV) THEN
+!           !   MATP=MATP+DEPSP(IPROP)*CONJG(STATEJ%VEC(IPROP,JN,IOX))
+!           ! ELSE
+!           !   MATP=MATP+DEPSP(IPROP)*STATEJ%VEC(IPROP,JN,IOX)
+!           ! ENDIF
+!         ENDDO  ! CHI
+!         CAMP=CAMP+MAT*MATP*EXP(CI*DOT_PRODUCT(Q,ROX(:,IOX)))
+!       ENDDO  ! R      
+!       AMPLITUDE=CAMP*CONJG(CAMP)
+!       DEALLOCATE(ROX)
+      END SUBROUTINE RIXS_MATRIXELEMENT     
 
       SUBROUTINE RIXS$REPORT(NFIL,ID)  !MARK: RIXS$REPORT
 ! TODO: UPDATE OUTPUT TO MATCH NEW FORMAT
@@ -798,66 +916,6 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       SPEC=>SPECTRA(ISPEC)
       END SUBROUTINE RIXS$SETPTR
 
-
-!     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,Q,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
-!     **************************************************************************
-!     ** CALCULATE RIXS MATRIX ELEMENT                                        **
-!     ** DEPENDS ON:                                                          **
-!     **   K, Q, N, N', SPIN, POLARIASTION                                    **
-!     **************************************************************************
-! TODO: ACCESS THE RIGHT DATA AND REWRITE THE INDEXING
-! WARNING: MAKE SURE Q AND R ARE COMPATIBLE, BOTH EITHER ABSOLUTE OR RELATIVE
-      USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
-      IMPLICIT NONE
-      COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
-      INTEGER(4), INTENT(IN) :: IKPT
-      INTEGER(4), INTENT(IN) :: JKPT
-      INTEGER(4), INTENT(IN) :: ISPIN
-      LOGICAL(4), INTENT(IN) :: TINV
-      INTEGER(4), INTENT(IN) :: IN
-      INTEGER(4), INTENT(IN) :: JN
-      REAL(8), INTENT(IN) :: Q(3)
-      REAL(8), INTENT(OUT) :: AMPLITUDE
-      TYPE(STATE_TYPE), POINTER :: STATEI
-      TYPE(STATE_TYPE), POINTER :: STATEJ
-! WARNING: PLACEHOLDER VARIABLES FOR MATRIX ELEMENTS
-! WARNING: REVISIT THE DERIVATION IN THE PAW METHOD
-      INTEGER(4) :: NPROP=6  ! NUMBER OF P PROJECTORS PER OXYGEN ATOM
-      INTEGER(4) :: IPROP
-      INTEGER(4) :: NOX=6    ! NUMBER OF OXYGEN ATOMS
-      INTEGER(4) :: IOX
-      COMPLEX(8) :: DEPS(6)
-      COMPLEX(8) :: DEPSP(6)
-      COMPLEX(8) :: MAT
-      COMPLEX(8) :: MATP
-      REAL(8), ALLOCATABLE :: ROX(:,:)
-      COMPLEX(8) :: CAMP
-      ALLOCATE(ROX(3,NOX))
-      STATEI=>STATEARR(IKPT,ISPIN)
-      STATEJ=>STATEARR(JKPT,ISPIN)
-      DEPS=(1.D0,0.D0)
-      DEPSP=(1.D0,0.D0)
-      CAMP=(0.D0,0.D0)
-      DO IOX=1,NOX
-        MAT=(0.D0,0.D0)
-        MATP=(0.D0,0.D0)
-        DO IPROP=1,NPROP
-! TODO: CORRECT INDEXING
-! WARNING: CHECK CONJUGATION
-          MAT=MAT+(1.D0,0.D0)
-          ! MAT=MAT+CONJG(DEPS(IPROP))*CONJG(STATEI%VEC(IPROP,IN,IOX))
-          ! IF(TINV) THEN
-          !   MATP=MATP+DEPSP(IPROP)*CONJG(STATEJ%VEC(IPROP,JN,IOX))
-          ! ELSE
-          !   MATP=MATP+DEPSP(IPROP)*STATEJ%VEC(IPROP,JN,IOX)
-          ! ENDIF
-        ENDDO  ! CHI
-        CAMP=CAMP+MAT*MATP*EXP(CI*DOT_PRODUCT(Q,ROX(:,IOX)))
-      ENDDO  ! R      
-      AMPLITUDE=CAMP*CONJG(CAMP)
-      DEALLOCATE(ROX)
-      END SUBROUTINE RIXS_MATRIXELEMENT      
       
       SUBROUTINE ENERGYWRITE  !MARK: ENERGYWRITE
       USE PDOS_MODULE   , ONLY : STATEARR,STATE
@@ -913,6 +971,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         REAL(8) :: EV
         REAL(8), ALLOCATABLE :: KPT(:,:)
         REAL(8), ALLOCATABLE :: XK(:,:)
+        REAL(8), ALLOCATABLE :: WKPT(:)
         REAL(8) :: RBAS(3,3)
         REAL(8) :: GBAS(3,3)
         INTEGER(4) :: NKPT
@@ -927,14 +986,18 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         
         ALLOCATE(XK(3,NKPT))
         CALL PDOS$GETR8A('XK',3*NKPT,XK)
+        ALLOCATE(WKPT(NKPT))
+        CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
         ISPIN=1
         WRITE(NFILO,*)
         WRITE(NFILO,FMT='(A5,I6)')'NKPT=',NKPT
         DO IKPT=1,NKPT
-          WRITE(NFILO,FMT='(A5,I5,A4,3F6.3,A5,3F10.5)')'IKPT=',IKPT, &
-&                               ' XK=',XK(:,IKPT),' KPT=',MATMUL(GBAS,XK(:,IKPT))*ANGSTROM
+          WRITE(NFILO,FMT='(A5,I5,A4,3F6.3,A5,3F10.5,A5,F10.5)')'IKPT=',IKPT, &
+&                               ' XK=',XK(:,IKPT),' KPT=',MATMUL(GBAS,XK(:,IKPT))*ANGSTROM, &
+&                               ' WKPT=',WKPT(IKPT)
         END DO
         DEALLOCATE(XK)
+        DEALLOCATE(WKPT)
         END SUBROUTINE KPOINTWRITE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -987,7 +1050,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     **************************************************************************
 !     ** INITIALIZE DATA MODULE                                               **
 !     **************************************************************************
-      USE DATA_MODULE, ONLY: EIG,OCC,RPOS,TINIT,NATOMS,INDSPECIES,INDTYPE,IATMAP,INDMAP
+      USE DATA_MODULE, ONLY: EIG,OCC,RPOS,RXPOS,TINIT,NATOMS,INDSPECIES,INDTYPE,IATMAP,INDMAP
       USE STRINGS_MODULE
       IMPLICIT NONE
       CHARACTER(16) :: SPECIES
@@ -1007,6 +1070,8 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       INTEGER(4), ALLOCATABLE :: LOX(:,:)
       CHARACTER(16) :: ID
       REAL(8), ALLOCATABLE :: R(:,:)
+      REAL(8) :: RBAS(3,3)
+      REAL(8) :: INVRBAS(3,3)
       INTEGER(4) :: I,J
       INTEGER(4) :: IAT,ISP
       INTEGER(4) :: LMN,LN,L,M
@@ -1028,6 +1093,8 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       CALL PDOS$GETI4('LNXX',LNXX)
       ALLOCATE(NBARR(NKPT,NSPIN))
       CALL PDOS$GETI4A('NB',NKPT*NSPIN,NBARR)
+      CALL PDOS$GETR8A('RBAS',3*3,RBAS)
+      CALL LIB$INVERTR8(3,RBAS,INVRBAS)
 
       NB=MAXVAL(NBARR)
       DEALLOCATE(NBARR)
@@ -1068,6 +1135,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     ==  GET POSITIONS AND INDEX  =============================================
 ! TODO: CHECK IF POSITION ROW AND COLUMN ARE CONSISTENT
       ALLOCATE(RPOS(3,NATOMS))
+      ALLOCATE(RXPOS(3,NATOMS))
       ALLOCATE(IATMAP(NATOMS))
       ALLOCATE(INDMAP(NATOMS))
       J=0
@@ -1075,6 +1143,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
         IF(ISPECIES(IAT).EQ.INDSPECIES) THEN
           J=J+1
           RPOS(:,J)=R(:,IAT)
+          RXPOS(:,J)=MATMUL(INVRBAS,RPOS(:,J))
           IATMAP(J)=IAT
         ENDIF
       ENDDO
@@ -1162,6 +1231,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
           DO M=1,2*L+1
             IND=IND+1
             ! DO SOMETHING
+            WRITE(*,*)'ATOM=',I,'LN=',LN,' L=',L,' M=',M,' IND=',IND,'LNX=',LNX(INDSPECIES)
           ENDDO
         ENDDO
       ENDDO
@@ -1193,7 +1263,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 !     **************************************************************************
 !     ** REPORT DATA MODULE                                                   **
 !     **************************************************************************
-      USE DATA_MODULE, ONLY: NATOMS,INDSPECIES,IATMAP,RPOS,TINIT
+      USE DATA_MODULE, ONLY: NATOMS,INDSPECIES,IATMAP,RPOS,TINIT,OCC
       IMPLICIT NONE
       INTEGER(4) :: NFIL
       INTEGER(4) :: I
