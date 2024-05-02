@@ -380,7 +380,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 
         CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
 ! TODO: WRITE DETAILED HEADER WITH ALL PARAMETERS
-        WRITE(NFILO,*)'# RIXS SPECTRUM ',IVAR
+
         CALL RIXS$CALCULATE(IVAR,EF)
         
         CALL RIXS$FILE(IVAR,'C')
@@ -499,10 +499,10 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       REAL(8) :: DELTAE
       REAL(8) :: AMPL
       REAL(8) :: SVAR
-      REAL(8), ALLOCATABLE :: SPECTRUM(:)
-      REAL(8), ALLOCATABLE :: RAW(:)
-                          CALL TRACE$PUSH('RIXS$CALCULATE')
+      REAL(8), ALLOCATABLE :: SPECTRUM(:,:)
+      REAL(8), ALLOCATABLE :: RAW(:,:)
                           WRITE(*,FMT='(A8,I4)')'SPECTRUM',ISPEC
+                          CALL TRACE$PUSH('RIXS$CALCULATE')
       CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
 
       CALL RIXS$SETPTR(ISPEC)
@@ -511,44 +511,42 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       CALL RIXS$GETR8('EMAX',EMAX)
       CALL RIXS$GETR8('DE',DE)
       CALL RIXS$GETI4('NE',NE)
-      ALLOCATE(RAW(NE))
-      ALLOCATE(SPECTRUM(NE))
 
       CALL PDOS$GETI4('NSPIN',NSPIN)
+      ALLOCATE(RAW(NE,NSPIN))
+      ALLOCATE(SPECTRUM(NE,NSPIN))
       CALL PDOS$GETI4('NKPT',NKPT)
       ALLOCATE(XK(3,NKPT))
       CALL PDOS$GETR8A('XK',3*NKPT,XK)
       ALLOCATE(WKPT(NKPT))
       CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
 
-      RAW(:)=0.D0
-      SPECTRUM(:)=0.D0
-!     ==  SUM OVER SPIN  =======================================================
-! TODO: SWAP SUM OVER SPIN TO MOST EFFICIENT ORDER
-      DO ISPIN=1,NSPIN
-!       ==  SUM OVER K-POINTS  =================================================
-        DO IKPT=1,NKPT
-!         ======================================================================
-!         ==  CALCULATE SHIFTED K-POINT AND ITS INDEX JKPT                    ==
-!         ======================================================================
+      RAW=0.D0
+      SPECTRUM=0.D0
+!     ==  SUM OVER K-POINTS  =================================================
+      DO IKPT=1,NKPT
+!       ======================================================================
+!       ==  CALCULATE SHIFTED K-POINT AND ITS INDEX JKPT                    ==
+!       ======================================================================
 ! TODO: CHECK SIGN OF Q FOR CONSISTENCY
-          XKSHIFT(:)=XK(:,IKPT)-SPEC%XQAPPROX(:)
-          CALL BRILLOUIN$IKP(XKSHIFT,JKPT)
-!         ======================================================================
-!         ==  DETERMINE IF SHIFTED K-POINT COMES FROM INVERSION SYMMETRY AND  ==
-!         ==  NEEDS TO BE TAKEN COMPLEX CONJUGATE                             ==
-!         ==  TINV=.TRUE. FOR -K (INVERSION SYMMETRY)                         ==
-!         ==  TINV=.FALSE. FOR K                                              ==
-!         ======================================================================
-          IF(NORM2(MODULO(XKSHIFT(:),1.D0)-XK(:,JKPT)).GT.1.D-7) THEN
-            TINV=.TRUE.
-            ! WRITE(NFIL,FMT='("|",3F10.5,"|",3F10.5,"|",3F10.5,"|")')XK(:,IKPT),XKSHIFT(:),XK(:,JKPT)
-          ELSE
-            TINV=.FALSE.
-          ENDIF
+        XKSHIFT(:)=XK(:,IKPT)-SPEC%XQAPPROX(:)
+        CALL BRILLOUIN$IKP(XKSHIFT,JKPT)
+!       ======================================================================
+!       ==  DETERMINE IF SHIFTED K-POINT COMES FROM INVERSION SYMMETRY AND  ==
+!       ==  NEEDS TO BE TAKEN COMPLEX CONJUGATE                             ==
+!       ==  TINV=.TRUE. FOR -K (INVERSION SYMMETRY)                         ==
+!       ==  TINV=.FALSE. FOR K                                              ==
+!       ======================================================================
+        IF(NORM2(MODULO(XKSHIFT(:),1.D0)-XK(:,JKPT)).GT.1.D-7) THEN
+          TINV=.TRUE.
+          ! WRITE(NFIL,FMT='("|",3F10.5,"|",3F10.5,"|",3F10.5,"|")')XK(:,IKPT),XKSHIFT(:),XK(:,JKPT)
+        ELSE
+          TINV=.FALSE.
+        ENDIF
 ! TODO: GET WEIGHT OF THIS K-POINT
 ! TODO: CHECK IF IKPT AND -IKPT GIVE SAME RESULT
-
+!       ==  SUM OVER SPIN  =====================================================
+        DO ISPIN=1,NSPIN
           STATEI=>STATEARR(IKPT,ISPIN)
           STATEJ=>STATEARR(JKPT,ISPIN)
 !         ==  SUM OVER N  ======================================================
@@ -571,13 +569,16 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
               ! CALCULATE ENERGY DIFFERENCE
               DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
               ! ADD TO SPECTRUM
-              CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW)
+              CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
             ENDDO  ! N'
           ENDDO  ! N
-        ENDDO  ! KPT
-      ENDDO  ! SPIN
-      CALL RIXS_SMEARGRID(NE,RAW,SPECTRUM)
-      CALL RIXS_WRITEGRID(NFIL,NE,SPECTRUM,EMIN,EMAX,DE)
+        ENDDO  ! SPIN
+      ENDDO  ! KPT
+      DO ISPIN=1,NSPIN
+        CALL RIXS_SMEARGRID(NE,RAW(:,ISPIN),SPECTRUM(:,ISPIN))
+      ENDDO
+      CALL RIXS_HEADER(NFIL,ISPEC)
+      CALL RIXS_WRITEGRID(NFIL,NE,NSPIN,SPECTRUM,EMIN,EMAX,DE)
       DEALLOCATE(XK)
       DEALLOCATE(WKPT)
                           CALL TRACE$POP
@@ -792,7 +793,7 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       INTEGER(4) :: I,J
       INTEGER(4) :: IND1,IND2
       REAL(8) :: WGHT
-
+                          CALL TRACE$PUSH('RIXS_SMEARGRID')
       CALL RIXS$GETR8('EBROAD',EBROAD)
 !     ==  CATCH CASE OF ZERO BROADENING  =======================================
       IF(EBROAD.LT.1.D-8) THEN
@@ -817,29 +818,69 @@ MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
       DO I=1,NE
         IF(ABS(SMOOTH(I)).LE.1.D-99) SMOOTH(I)=0.D0
       ENDDO
+      DEALLOCATE(SMEAR)
+                          CALL TRACE$POP
       END SUBROUTINE RIXS_SMEARGRID
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE RIXS_WRITEGRID(NFIL,NE,GRID,EMIN,EMAX,DE)  !MARK: RIXS_WRITEGRID
+      SUBROUTINE RIXS_WRITEGRID(NFIL,NE,NSPIN,GRID,EMIN,EMAX,DE)  !MARK: RIXS_WRITEGRID
 !     **************************************************************************
 !     ** WRITE GRID TO FILE                                                   **
 !     **************************************************************************
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4), INTENT(IN) :: NE
-      REAL(8), INTENT(IN) :: GRID(NE)
+      INTEGER(4), INTENT(IN) :: NSPIN
+      REAL(8), INTENT(IN) :: GRID(NE,NSPIN)
       REAL(8), INTENT(IN) :: EMIN
       REAL(8), INTENT(IN) :: EMAX
       REAL(8), INTENT(IN) :: DE
       INTEGER(4) :: I
       REAL(8) :: E
       REAL(8) :: EV
+                          CALL TRACE$PUSH('RIXS_WRITEGRID')
       CALL CONSTANTS('EV',EV)
       DO I=1,NE
         E=EMIN+DE*REAL(I-1,KIND=8)
-        WRITE(NFIL,FMT='(F14.8,F20.8)')E/EV,GRID(I)
+        WRITE(NFIL,FMT='(F14.8,2F20.8)')E/EV,GRID(I,:)
       ENDDO
+                          CALL TRACE$POP
       END SUBROUTINE RIXS_WRITEGRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_HEADER(NFIL,ISPEC)  !MARK: RIXS_HEADER
+!     **************************************************************************
+!     ** WRITE HEADER TO FILE                                                 **
+!     **************************************************************************
+      USE RIXS_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4), INTENT(IN) :: ISPEC
+      REAL(8) :: EV
+      REAL(8) :: ANGSTROM
+                          CALL TRACE$PUSH('RIXS_HEADER')
+      CALL CONSTANTS('EV',EV)
+      CALL CONSTANTS('ANGSTROM',ANGSTROM)
+      WRITE(NFIL,FMT='(A6,F12.6)',ADVANCE='NO') &
+     &      '# E_I=',(EFEXP+SPECTRA(ISPEC)%EIREL)/EV
+      WRITE(NFIL,FMT='(A7,F12.6)',ADVANCE='NO') &
+     &      ' E_REL=',SPECTRA(ISPEC)%EIREL/EV
+      WRITE(NFIL,FMT='(A5,3F12.6)',ADVANCE='NO') & 
+     &      ' K_I=',SPECTRA(ISPEC)%KI(:)*ANGSTROM
+      WRITE(NFIL,FMT='(A5,2(F8.5,SP,F8.5,"I ",S))',ADVANCE='NO') &
+     &      ' P_I=',SPECTRA(ISPEC)%PI(:)
+      WRITE(NFIL,FMT='(A5,3F12.6)',ADVANCE='NO') &
+     &      ' K_F=',SPECTRA(ISPEC)%KF(:)*ANGSTROM
+      WRITE(NFIL,FMT='(A5,2(F8.5,SP,F8.5,"I ",S))',ADVANCE='NO') &
+     &      ' P_F=',SPECTRA(ISPEC)%PF(:)
+      WRITE(NFIL,FMT='(A3,3F12.6)',ADVANCE='NO') &
+     &      ' Q=',SPECTRA(ISPEC)%Q(:)*ANGSTROM
+      WRITE(NFIL,FMT='(A4,3F12.6)',ADVANCE='NO') &
+     &      ' XQ=',SPECTRA(ISPEC)%XQ(:)
+      WRITE(NFIL,FMT='(A11,3F12.6)') &
+     &      ' XQ_APPROX=',SPECTRA(ISPEC)%XQAPPROX(:)
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS_HEADER
 !
 !     ..........................................................................
       SUBROUTINE RIXS$GETI4(ID,VAL)  !MARK: RIXS$GETI4
