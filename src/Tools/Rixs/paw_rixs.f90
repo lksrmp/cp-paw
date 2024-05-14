@@ -104,6 +104,15 @@ REAL(8), ALLOCATABLE :: OCC(:,:)  ! OCCUPATION OF STATES
 INTEGER(4), ALLOCATABLE :: IATMAP(:)  ! MAPS TO ATOMS OF SELECTED SPECIES
 INTEGER(4), ALLOCATABLE :: INDMAP(:)  ! MAPS TO FIRST PROJECTOR INDEX OF SELECTED SPECIES
 LOGICAL(4) :: TINIT=.FALSE.
+INTEGER(4) :: CLEN  ! LENGTH OF COORDINATE GRID FOR CORE STATE
+INTEGER(4) :: VLEN  ! LENGTH OF COORDINATE GRID FOR VALENCE STATES
+INTEGER(4) :: VNPRO  ! NUMBER OF VALENCE PROJECTORS RADIAL FUNCTIONS
+! REAL(8), ALLOCATABLE :: CGRID(:)  ! COORDINATE GRID FOR CORE STATE
+INTEGER(4) :: GIDCORE  ! GRID ID FOR CORE STATE
+REAL(8), ALLOCATABLE :: CVAL(:)  ! VALUES OF CORE STATE
+! REAL(8), ALLOCATABLE :: VGRID(:)  ! COORDINATE GRID FOR VALENCE STATES
+INTEGER(4) :: GIDVAL  ! GRID ID FOR VALENCE STATES
+REAL(8), ALLOCATABLE :: VVAL(:,:)  ! VVAL(VLEN,VNPRO) VALUES OF VALENCE STATES 
 
 CONTAINS
   SUBROUTINE DATA_DEALLOC
@@ -169,6 +178,12 @@ REAL(8) :: EFEXP
 REAL(8) :: GAMMA
 CHARACTER(16) :: SPECIES
 CHARACTER(1) :: ORBTYPE
+CHARACTER(255) :: STPFILE
+
+INTEGER(4) :: NCORE
+INTEGER(4) :: LCORE
+INTEGER(4) :: NVAL
+INTEGER(4) :: LVAL
 
 LOGICAL(4) :: TRIXS=.FALSE.
 LOGICAL(4) :: TREADRIXS=.FALSE.
@@ -321,8 +336,9 @@ END MODULE RIXS_MODULE
 !     ==  AFTER THAT THE VARIABLE OV EQUALS THE UNIT MATRIX.                  ==
 !     ==  CHANGES STATE%VEC AND OV IN PDOS_MODULE.
 !     ==========================================================================
-      CALL ORTHONORMALIZESTATES()
-                            CALL TRACE$PASS('AFTER ORTHONORMALIZESTATES')
+! WARNING: UNDERSTAND ORTHONORMALIZESTATES ROUTINE
+      ! CALL ORTHONORMALIZESTATES()
+      !                       CALL TRACE$PASS('AFTER ORTHONORMALIZESTATES')
 !
 !     ==========================================================================
 !     ==  CALCULATE ANGULAR MOMENTUM WEIGHTS AND SPINS                        ==
@@ -359,6 +375,11 @@ END MODULE RIXS_MODULE
                             CALL TRACE$PASS('AFTER RIXS$POLARISATION')
       CALL RIXS$QTRANSFER
                             CALL TRACE$PASS('AFTER RIXS$QTRANSFER')
+
+
+      CALL STPA$RUN
+
+
 !
 !     ==========================================================================
 !     ==  WRITE ALL K POINTS TO FILE                                          ==
@@ -560,6 +581,8 @@ END MODULE RIXS_MODULE
 !       ==  TINV=.TRUE. FOR -K (INVERSION SYMMETRY)                         ==
 !       ==  TINV=.FALSE. FOR K                                              ==
 !       ======================================================================
+! WARNING: NOT SUITABLE FOR NON-COLLINIAR SPIN
+! TODO: CATCH CASE OF NON-COLLINIAR SPIN OVER NDIM
         IF(NORM2(MODULO(XKSHIFT(:),1.D0)-XK(:,JKPT)).GT.1.D-7) THEN
           TINV=.TRUE.
           ! WRITE(NFIL,FMT='("|",3F10.5,"|",3F10.5,"|",3F10.5,"|")')XK(:,IKPT),XKSHIFT(:),XK(:,JKPT)
@@ -574,13 +597,14 @@ END MODULE RIXS_MODULE
           STATEJ=>STATEARR(JKPT,ISPIN)
 !         ==  SUM OVER N  ======================================================
           DO IN=1,STATEI%NB
-! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1
+! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
+!          HERE WE CONSIDER <0.2 EMPTY AND >0.8 FULL
 !           ==  CYCLE IF OCCUPATION NOT ZERO  ==================================
-            IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.1.D-5) CYCLE
+            IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.0.2D0) CYCLE
             ! SUM OVER N'
             DO JN=1,STATEJ%NB
 !           ==  CYCLE IF OCCUPATION IS NOT ONE  ================================
-              IF((1.D0-STATEJ%OCC(JN)/WKPT(JKPT)).GT.1.D-5) CYCLE
+              IF((1.D0-STATEJ%OCC(JN)/WKPT(JKPT)).GT.0.2D0) CYCLE
               ! CALCULATE APLITUDE SQUARED
               CALL RIXS_MATRIXELEMENT(IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
               ! CALCULATE DENOMINATOR (LORENTZIAN)
@@ -744,6 +768,12 @@ END MODULE RIXS_MODULE
       ENDIF
                           CALL TRACE$POP
       END SUBROUTINE RIXS$REPORT
+
+! COMPARE PHIOFR WITH AEPHI
+! IS AEPHI NORMALIZED?
+
+! WARNING: ARE STATES SCALED IN PDOS MODULE?
+
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS_MAPGRID(E,AMPL,NE,GRID)  !MARK: RIXS_MAPGRID
@@ -896,6 +926,14 @@ END MODULE RIXS_MODULE
         VAL=NSPECTRA
       ELSE IF(ID.EQ.'NE') THEN
         VAL=NE
+      ELSE IF(ID.EQ.'NCORE') THEN
+        VAL=NCORE
+      ELSE IF(ID.EQ.'NVAL') THEN
+        VAL=NVAL
+      ELSE IF(ID.EQ.'LCORE') THEN
+        VAL=LCORE
+      ELSE IF(ID.EQ.'LVAL') THEN
+        VAL=LVAL
       ELSE
         CALL ERROR$MSG('INVALID ID')
         CALL ERROR$CHVAL('ID',ID)
@@ -998,6 +1036,8 @@ END MODULE RIXS_MODULE
         VAL=SPECIES
       ELSE IF(ID.EQ.'ORBTYPE') THEN
         VAL=ORBTYPE
+      ELSE IF(ID.EQ.'STPFILE') THEN
+        VAL=STPFILE
       ELSE
         CALL ERROR$MSG('INVALID ID')
         CALL ERROR$CHVAL('ID',ID)
@@ -2040,6 +2080,41 @@ END MODULE RIXS_MODULE
         CALL ERROR$STOP('READCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'ORBTYPE',1,ORBTYPE)
+!     ==  READ SETUP FILE NAME  ================================================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'STPFILE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!RIXS:STPFILE MANDATORY')
+        CALL ERROR$STOP('READCNTL$RIXS')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'STPFILE',1,STPFILE)
+!     ==  READ PRINCIPLE QUANTUM NUMBER OF CORE  ===============================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'NCORE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!RIXS:NCORE MANDATORY')
+        CALL ERROR$STOP('READCNTL$RIXS')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'NCORE',1,NCORE)
+!     ==  READ PRINCIPLE QUANTUM NUMBER OF VALENCE  ============================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'NVAL',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!RIXS:NVAL MANDATORY')
+        CALL ERROR$STOP('READCNTL$RIXS')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'NVAL',1,NVAL)
+!     ==  READ ANGULAR MOMENTUM QUANTUM NUMBER OF CORE  ========================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'LCORE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!RIXS:LCORE MANDATORY')
+        CALL ERROR$STOP('READCNTL$RIXS')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'LCORE',1,LCORE)
+!     ==  READ ANGULAR MOMENTUM QUANTUM NUMBER OF VALENCE  =====================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'LVAL',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!RIXS:LVAL MANDATORY')
+        CALL ERROR$STOP('READCNTL$RIXS')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'LVAL',1,LVAL)
 !
 !     ==========================================================================
 !     == GENERAL FLAGS AS DEFAULT                                             ==
@@ -2186,6 +2261,233 @@ END MODULE RIXS_MODULE
       TREADRIXS=.TRUE.
                           CALL TRACE$POP
       END SUBROUTINE READCNTL$RIXS
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE STPA$RUN  !MARK: STPA$EXECUTE
+!     **************************************************************************
+!     **  EXECUTE STPA EXTRACTION OF AEPHI                                    **
+!     **************************************************************************
+! TODO: IMPLEMENT AQUISITION OF AEPHI WITHOUT USE OF COMMAND LINE EXECUTE
+      USE STRINGS_MODULE
+      USE DATA_MODULE, ONLY: INDSPECIES,CLEN,GIDCORE,CVAL,VLEN,GIDVAL,VVAL,VNPRO !VGRID,CGRID
+      IMPLICIT NONE
+      CHARACTER(8) :: TEMPFILE
+      INTEGER(4) :: NFIL
+      CHARACTER(256) :: STPFILE
+      INTEGER(4) :: EXITSTAT
+      INTEGER(4) :: CMDSTAT
+      CHARACTER(255) :: CMDMSG
+      CHARACTER(1024) :: CMD
+      LOGICAL(4) :: TCHK
+      CHARACTER(32) :: ID
+      INTEGER(4) :: NSP
+      INTEGER(4), ALLOCATABLE :: LNX(:)
+      INTEGER(4) :: PDOSNPRO
+      
+      INTEGER(4) :: NLINES
+      INTEGER(4) :: IOSTAT
+      INTEGER(4) :: I,N,COUNT
+      REAL(8) :: R1,DEX
+      INTEGER(4) :: NR
+      INTEGER(4) :: GID
+
+      INTEGER(4) :: NCORE
+      INTEGER(4) :: NVAL
+      INTEGER(4) :: LCORE
+      INTEGER(4) :: LVAL
+
+      INTEGER(4) :: NPRO
+      INTEGER(4) :: NB
+
+      REAL(8), ALLOCATABLE :: VGRID(:)
+      REAL(8), ALLOCATABLE :: CGRID(:)
+      REAL(8), ALLOCATABLE :: AEPHIGRID(:)  ! RADIAL GRID FOR AUGMENTATION
+      REAL(8), ALLOCATABLE :: AEPHI(:,:)  ! PARTIAL WAVE FUNCTIONS
+      REAL(8), ALLOCATABLE :: AEPSIGRID(:)  ! ATOMIC RADIAL GRID
+      REAL(8), ALLOCATABLE :: AEPSI(:,:)  ! ATOMIC WAVE FUNCTIONS
+      INTEGER(4), ALLOCATABLE :: ATOML(:)
+      INTEGER(4), ALLOCATABLE :: LPRO(:)
+                          CALL TRACE$PUSH('STPA$RUN')
+!     ==========================================================================
+! TODO: CHECK IF EXECUTION FAILED
+!     ==  GET NUMBER OF PROJECTIONS FROM PDOS MODULE  ==========================
+      CALL PDOS$GETI4('NSP',NSP)
+      ALLOCATE(LNX(NSP))
+      CALL PDOS$GETI4A('LNX',NSP,LNX)
+      PDOSNPRO=LNX(INDSPECIES)
+      DEALLOCATE(LNX)
+      CALL RIXS$GETI4('NCORE',NCORE)
+      CALL RIXS$GETI4('NVAL',NVAL)
+      CALL RIXS$GETI4('LCORE',LCORE)
+      CALL RIXS$GETI4('LVAL',LVAL)
+!     ==  OPEN TEMPORARY FILE FOR STPA OUTPUT  =================================
+      ID=+'TEMP'
+      TEMPFILE=-'STPA.TMP'
+      CALL FILEHANDLER$SETFILE(ID,.FALSE.,TEMPFILE)
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
+      CALL FILEHANDLER$UNIT(ID,NFIL)
+
+      CALL RIXS$GETCH('STPFILE',STPFILE)
+      
+!     ==========================================================================
+!     ==  VALENCE STATES                                                      ==
+!     ==========================================================================
+!     ==  EXECUTE STPA.X TO GET PROJECTOR FUNCTIONS  ===========================
+      CALL STPA_EXECUTE(STPFILE,TEMPFILE,'NPRO')
+!     ==  CHECK IF NUMBER OF PROJECTIONS MATCHES PDOS  =========================
+      REWIND(NFIL)
+      READ(NFIL,*)NPRO
+      IF(NPRO.NE.PDOSNPRO) THEN
+        CALL ERROR$MSG('NUMBER OF PROJECTIONS IN STP FILE DOES NOT MATCH PDOS')
+        CALL ERROR$I4VAL('FILENPRO',NPRO)
+        CALL ERROR$I4VAL('PDOSNPRO',PDOSNPRO)
+        CALL ERROR$STOP('STPA$RUN')
+      ENDIF
+      ALLOCATE(LPRO(NPRO))
+!     ==  EXECUTE STPA.X TO EXTRACT LPRO  ======================================
+      CALL STPA_EXECUTE(STPFILE,TEMPFILE,'LPRO')
+      REWIND(NFIL)
+      READ(NFIL,*)LPRO(:)
+!     ==  EXECUTE STPA.X TO EXTRACT AEPHI (VALENCE)  ===========================
+      CALL STPA_EXECUTE(STPFILE,TEMPFILE,'AEPHI')
+      REWIND(NFIL)
+      NLINES=0
+      DO
+        READ(NFIL,*,IOSTAT=IOSTAT)
+        IF(IOSTAT.NE.0) EXIT
+        NLINES=NLINES+1
+      ENDDO
+      VLEN=NLINES
+      ALLOCATE(VGRID(VLEN))
+      ALLOCATE(AEPHI(VLEN,NPRO))
+      REWIND(NFIL)
+      DO I=1,VLEN
+        READ(NFIL,*)VGRID(I),AEPHI(I,:)
+      ENDDO
+!     ==  EXTRACT CORRECT COLUMNS FROM AEPHI FOR VALENCE  ======================
+      N=0
+      DO I=1,NPRO
+        IF(LPRO(I).EQ.LVAL) N=N+1
+      ENDDO
+      VNPRO=N
+      ALLOCATE(VVAL(VLEN,VNPRO))
+      N=0
+      DO I=1,NPRO
+        IF(LPRO(I).EQ.LVAL) THEN 
+          N=N+1
+          VVAL(:,N)=AEPHI(:,I)
+        ENDIF
+      ENDDO
+!     ==  INITIALIZE SHIFTED LOGARITHMIC RADIAL GRID  ==========================
+! WARNING: HARDCODED SHIFT OF LOGARITHMIC GRID (1.D-8)
+!          HAS TO BE THE SAME AS IN MODULE SHLOGRADIAL_MODULE IN paw_radial.f90
+      CALL RADIAL$GRIDPARAMETERS(VGRID(2)-VGRID(1)+1.D-8, &
+     &                                  VGRID(VLEN)-VGRID(VLEN-1), &
+     &                                  VGRID(VLEN),R1,DEX,NR)
+      CALL RADIAL$NEW('SHLOG',GIDVAL)
+      CALL RADIAL$SETI4(GIDVAL,'NR',NR)
+      CALL RADIAL$SETR8(GIDVAL,'R1',R1)
+      CALL RADIAL$SETR8(GIDVAL,'DEX',DEX)
+      DEALLOCATE(VGRID)
+      DEALLOCATE(AEPHI)
+      DEALLOCATE(LPRO)
+!     ==========================================================================
+!     ==  CORE STATE                                                          ==
+!     ==========================================================================
+!     ==  EXECUTE STPA.X TO EXTRACT NUMBER OF WAVE FUNCTIONS  ==================
+      CALL STPA_EXECUTE(STPFILE,TEMPFILE,'NB')
+      REWIND(NFIL)
+      READ(NFIL,*)NB
+      ALLOCATE(ATOML(NB))
+!     ==  EXECUTE STPA.X TO EXTRACT ATOML  =====================================
+      CALL STPA_EXECUTE(STPFILE,TEMPFILE,'ATOM.L')
+      REWIND(NFIL)
+      READ(NFIL,*)ATOML(:)
+!     ==  EXECUTE STPA.X TO EXTRACT AEPSI (CORE)  ==============================
+      CALL STPA_EXECUTE(STPFILE,TEMPFILE,'AEPSI')
+      REWIND(NFIL)
+      NLINES=0
+      DO
+        READ(NFIL,*,IOSTAT=IOSTAT)
+        IF(IOSTAT.NE.0) EXIT
+        NLINES=NLINES+1
+      ENDDO
+      CLEN=NLINES
+      ALLOCATE(AEPSI(CLEN,NB))
+      ALLOCATE(CGRID(CLEN))
+      REWIND(NFIL)
+      DO I=1,CLEN
+        READ(NFIL,*)CGRID(I),AEPSI(I,:)
+      ENDDO
+!     ==  EXTRACT CORRECT COLUMNS FROM AEPSI FOR CORE  =========================
+      ALLOCATE(CVAL(CLEN))
+      N=0
+      DO I=1,NB
+        IF(ATOML(I).EQ.0) N=N+1
+        IF(N.EQ.NCORE.AND.ATOML(I).EQ.LCORE) CVAL=AEPSI(:,I)
+      ENDDO
+!     ==  INITIALIZE SHIFTED LOGARITHMIC RADIAL GRID  ==========================
+! WARNING: HARDCODED SHIFT OF LOGARITHMIC GRID (1.D-8)
+!          HAS TO BE THE SAME AS IN MODULE SHLOGRADIAL_MODULE IN paw_radial.f90
+      CALL RADIAL$GRIDPARAMETERS(CGRID(2)-CGRID(1)+1.D-8, &
+     &                                  CGRID(CLEN)-CGRID(CLEN-1), &
+     &                                  CGRID(CLEN),R1,DEX,NR)
+      CALL RADIAL$NEW('SHLOG',GIDCORE)
+      CALL RADIAL$SETI4(GIDCORE,'NR',NR)
+      CALL RADIAL$SETR8(GIDCORE,'R1',R1)
+      CALL RADIAL$SETR8(GIDCORE,'DEX',DEX)
+      DEALLOCATE(AEPSI)
+      DEALLOCATE(ATOML)
+      DEALLOCATE(CGRID)
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+      WRITE(NFIL,FMT='(A)')'RADIAL GRID REPORT'
+      CALL RADIAL$REPORT(NFIL)
+! TODO: INVENT DATA STRUCTURE TO STORE ALL MATRIX ELEMENTS
+! TODO: CALCULATE MATRIX ELEMENTS
+                          CALL TRACE$POP
+      END SUBROUTINE STPA$RUN
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE STPA_EXECUTE(STPFILE,TEMPFILE,FLAG)  !MARK: STPA_EXECUTE
+!     **************************************************************************
+!     **  EXECUTE STPA.X                                                      **
+!     **************************************************************************
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: STPFILE
+      CHARACTER(*), INTENT(IN) :: TEMPFILE
+      CHARACTER(*), INTENT(IN) :: FLAG
+      INTEGER(4) :: EXITSTAT
+      INTEGER(4) :: CMDSTAT
+      CHARACTER(255) :: CMDMSG
+      CHARACTER(1024) :: CMD
+      LOGICAL(4) :: TCHK
+!     ==========================================================================
+                          CALL TRACE$PUSH('STPA_EXECUTE')
+!     ==  CHECK IF STPFILE EXISTS  =============================================
+      INQUIRE(FILE=STPFILE,EXIST=TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('STPFILE NOT FOUND')
+        CALL ERROR$CHVAL('STPFILE',STPFILE)
+        CALL ERROR$STOP('STPA_EXECUTE')
+      ENDIF
+!     ==  EXECUTE STPA.X  ======================================================
+      CMD='PAW_STPA.X -S '//TRIM(ADJUSTL(FLAG))//' '//TRIM(ADJUSTL(STPFILE)) &
+     &    //' > '//TRIM(ADJUSTL(TEMPFILE))
+      CALL EXECUTE_COMMAND_LINE(-TRIM(ADJUSTL(CMD)),EXITSTAT=EXITSTAT,CMDSTAT=CMDSTAT,CMDMSG=CMDMSG)
+      IF(EXITSTAT.NE.0.OR.CMDSTAT.NE.0) THEN
+        CALL ERROR$MSG('STPA EXECUTION FAILED')
+        CALL ERROR$CHVAL('CMD',-CMD)
+        CALL ERROR$I4VAL('EXITSTAT',EXITSTAT)
+        CALL ERROR$I4VAL('CMDSTAT',CMDSTAT)
+        CALL ERROR$CHVAL('CMDMSG',CMDMSG)
+        CALL ERROR$STOP('STPA_EXECUTE')
+      ENDIF
+                          CALL TRACE$POP
+      END SUBROUTINE STPA_EXECUTE
 !      
 !      ..1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE REPORT(NFILO)  !MARK: REPORT
