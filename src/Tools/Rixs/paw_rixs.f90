@@ -466,6 +466,7 @@ END MODULE RIXS_MODULE
       USE RIXS_MODULE, ONLY: SPEC
       USE DATA_MODULE, ONLY: EIG,OCC,EFERMI
       IMPLICIT NONE
+      REAL(8), PARAMETER :: TOL=1.D-6
       INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
       REAL(8), INTENT(IN) :: EF  ! FERMI ENERGY OF SIMULATION
       TYPE(STATE_TYPE), POINTER :: STATEI
@@ -480,6 +481,7 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: NFIL
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NKPT
+      INTEGER(4) :: NKDIV(3)
       LOGICAL(4) :: TINV
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IKPT, JKPT
@@ -488,6 +490,7 @@ END MODULE RIXS_MODULE
       REAL(8) :: DELTAE
       REAL(8) :: AMPL
       REAL(8) :: SVAR
+      REAL(8) :: OCCFAC
       REAL(8), ALLOCATABLE :: SPECTRUM(:,:)
       REAL(8), ALLOCATABLE :: RAW(:,:)
                           WRITE(*,FMT='(A8,I4)')'SPECTRUM',ISPEC
@@ -505,11 +508,11 @@ END MODULE RIXS_MODULE
       ALLOCATE(RAW(NE,NSPIN))
       ALLOCATE(SPECTRUM(NE,NSPIN))
       CALL PDOS$GETI4('NKPT',NKPT)
+      CALL PDOS$GETI4A('NKDIV',3,NKDIV)
       ALLOCATE(XK(3,NKPT))
       CALL PDOS$GETR8A('XK',3*NKPT,XK)
       ALLOCATE(WKPT(NKPT))
       CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
-
 ! TODO: CHANGE STATE%EIG, STATE%OCC TO EIG, OCC FROM DATA_MODULE FOR CHANGED
 !       NUMBER OF ELECTRONS (CAREFUL WITH INDEXING)
       RAW=0.D0
@@ -534,7 +537,6 @@ END MODULE RIXS_MODULE
         ELSE
           TINV=.FALSE.
         ENDIF
-! TODO: GET WEIGHT OF THIS K-POINT
 ! TODO: CHECK IF IKPT AND -IKPT GIVE SAME RESULT
 !       ==  SUM OVER SPIN  =====================================================
         DO ISPIN=1,NSPIN
@@ -543,24 +545,26 @@ END MODULE RIXS_MODULE
 !         ==  SUM OVER N  ======================================================
           DO IN=1,STATEI%NB
 ! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
-!          HERE WE CONSIDER <0.2 EMPTY AND >0.8 FULL
-!           ==  CYCLE IF OCCUPATION NOT ZERO  ==================================
-            IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.0.2D0) CYCLE
+!           ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
+            IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
             ! SUM OVER N'
             DO JN=1,STATEJ%NB
-!           ==  CYCLE IF OCCUPATION IS NOT ONE  ================================
-              IF((1.D0-STATEJ%OCC(JN)/WKPT(JKPT)).GT.0.2D0) CYCLE
-              ! CALCULATE APLITUDE SQUARED
+!           ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
+              IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
+!             ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
+              OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
+!             ==  CALCULATE APLITUDE SQUARED  ==================================
               CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
-              ! CALCULATE DENOMINATOR (LORENTZIAN)
+!             ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
               SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
               SVAR=SVAR**2
               SVAR=SVAR+0.25D0*GAMMA**2
-              AMPL=AMPL/SVAR
-! WARNING: WEIGHT OF K-POINT MISSING
-              ! CALCULATE ENERGY DIFFERENCE
+              AMPL=OCCFAC*AMPL/SVAR
+!             ==  MULTIPLY BY WEIGHT OF K-POINT  ===============================
+              AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
+!             ==  CALCULATE ENERGY DIFFERENCE  =================================
               DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
-              ! ADD TO SPECTRUM
+!             ==  ADD TO SPECTRUM  =============================================
               CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
             ENDDO  ! N'
           ENDDO  ! N
