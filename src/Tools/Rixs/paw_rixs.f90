@@ -298,6 +298,11 @@ END MODULE RIXS_MODULE
       CALL PDOS$GETI4('NSPIN',NSPIN)
       CALL PDOS$GETI4A('ISHIFT',3,ISHIFT)
       CALL PDOS$GETI4('NDIM',NDIM)
+      IF(NDIM.NE.1)THEN
+        CALL ERROR$MSG('ONLY NDIM=1 IS SUPPORTED')
+        CALL ERROR$MSG('NON-COLLINEAR SPIN NOT IMPLEMENTED')
+        CALL ERROR$STOP('RIXS')
+      ENDIF
       CALL PDOS$GETI4('NPRO',NPRO)
       CALL PDOS$GETR8('RNTOT',RNTOT)
       ALLOCATE(NBARR(NKPT,NSPIN))
@@ -384,14 +389,14 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
 !     ==  WRITE ALL K POINTS TO FILE                                          ==
 !     ==========================================================================
-      CALL KPOINTWRITE
-                            CALL TRACE$PASS('AFTER KPOINTWRITE')
+      ! CALL KPOINTWRITE
+      !                       CALL TRACE$PASS('AFTER KPOINTWRITE')
 !
 !     ==========================================================================
 !     ==  WRITE ALL ENERGIES TO FILE                                          ==
 !     ==========================================================================
-      CALL ENERGYWRITE
-                            CALL TRACE$PASS('AFTER ENERGYWRITE')
+      ! CALL ENERGYWRITE
+      !                       CALL TRACE$PASS('AFTER ENERGYWRITE')
 !
 !     ==========================================================================
 !     ==  WRITE ISOSURFACE CUBE FILE                                          ==
@@ -421,74 +426,11 @@ END MODULE RIXS_MODULE
       CALL DIPOLEMATRIXELEMENTS
       DO IVAR=1,NSPECTRA
         CALL RIXS$FILE(IVAR,'O')
-
         CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
-! TODO: WRITE DETAILED HEADER WITH ALL PARAMETERS
-
         CALL RIXS$CALCULATE(IVAR,EF)
-        
         CALL RIXS$FILE(IVAR,'C')
       ENDDO
       CALL FILEHANDLER$UNIT('PROT',NFILO)
-
-
-
-
-
-
-! !
-! !     ==========================================================================
-! !     ==  READ PREDEFINED ORBITALS  (DATA -> NEWORBITAL_MODULE)               ==
-! !     ==========================================================================
-!       CALL READCNTL$ORBITAL(LENG,NAT,RBAS,RPOS,ATOMID)
-!       CALL NEWORBITAL$REPORT(NFILO)
-!                             CALL TRACE$PASS('AFTER READCNTL$ORBITAL')
-! !
-! !     ==========================================================================
-! !     ==  SELECT MATRIXELEMENTS   (->NEWSET_MODULE)                           ==
-! !     ==========================================================================
-!       CALL READCNTL$SETNUMBER(NSET)
-!       CALL READCNTL$SETS_NEW(NKPT,NSET,NAT,RBAS,ATOMID,RPOS)
-!       CALL NEWSET$REPORT(NFILO)
-!                             CALL TRACE$PASS('AFTER READCNTL$SETS_NEW')
-! !
-! !     ==========================================================================
-! !     ==  DETERMINE SELECTED MATRIX ELEMENTS FOR EACH STATE                   ==
-! !     ==  DATA WILL BE ENCODED BY (EIG,OCC,SET)
-! !     ==========================================================================
-! !     == NBB=#(SPIN-STATES PER K-POINT) 
-!       NBB=NB                         
-!       IF(NDIM.EQ.1)NBB=2*NB          ! COLLINEAR AND NON-SPIN-POLARIZED
-!       ALLOCATE(SET(NBB,NKPT,2,NSET)) ! SET WORKS ALWAYS WITH TWO SPINS
-!       ALLOCATE(EIG(NBB,NKPT))
-!       ALLOCATE(OCC(NBB,NKPT))
-! !     __ FILL IN EIGENVALUES AND OCCUPATIONS____________________________________
-!       CALL SET$ENOCC(NBB,NKPT,EIG,OCC)
-!       CALL NEWSET$PROCESS(NBB,NKPT,NSET,SET)
-!                             CALL TRACE$PASS('AFTER NEWSET$PROCESS')
-! !
-! !     ==========================================================================
-! !     ==  READ GENERAL INFORMATION FROM CONTROL FILE
-! !     ==========================================================================
-!       CALL READCNTL$GENERIC(MODE,PREFIX)
-! !     == DEFAULT VALUES FOR RANGE OF ENERGY GRID ===============================
-!       CALL READCNTL$GRID(EMIN,EMAX,NE,EBROAD)
-!       CALL READCNTL$REPORT1(MODE,PREFIX,EMIN,EMAX,NE,EBROAD)
-! !
-! !     ==========================================================================
-! !     ==  MAKE PLOTS                                                          ==
-! !     ==========================================================================
-! !     ==  CALCULAT WEIGHTS FOR DOS USING THE TETRAHEDRON METHOD               ==
-!       IF(MODE.EQ.'TETRA')THEN
-!         ELSCALE=1.D0
-!         IF(NSPIN.EQ.1.AND.NDIM.EQ.1) ELSCALE=2.D0
-!         CALL GENERATE_TETRA_WGHT(NFILO,NBB,NKPT,EMAX,EMIN,NE,RBAS,EIG,ELSCALE)
-!       ENDIF
-! !     == WRITE FILES ===========================================================
-!       CALL READCNTL$OUTPUT(EMIN,EMAX,NE,EBROAD,PREFIX &
-!      &                    ,NBB,NKPT,EIG,OCC,NSET,SET,MODE)
-!                             CALL TRACE$PASS('AFTER READCNTL$OUTPUT')
-!
 !     ==========================================================================
 !     ==  CLOSING                                                             ==
 !     ==========================================================================
@@ -586,8 +528,6 @@ END MODULE RIXS_MODULE
 !       ==  TINV=.TRUE. FOR -K (INVERSION SYMMETRY)                         ==
 !       ==  TINV=.FALSE. FOR K                                              ==
 !       ======================================================================
-! WARNING: NOT SUITABLE FOR NON-COLLINIAR SPIN
-! TODO: CATCH CASE OF NON-COLLINIAR SPIN OVER NDIM
         IF(NORM2(MODULO(XKSHIFT(:),1.D0)-XK(:,JKPT)).GT.1.D-7) THEN
           TINV=.TRUE.
           ! WRITE(NFIL,FMT='("|",3F10.5,"|",3F10.5,"|",3F10.5,"|")')XK(:,IKPT),XKSHIFT(:),XK(:,JKPT)
@@ -691,13 +631,13 @@ END MODULE RIXS_MODULE
           IPRO=IPRO+1
           DO MCORE=1,2*LCORE+1
             DO MVAL=1,2*L+1
-            IND=IND+1
+              IND=IND+1
               MAT=MAT+DPMATI(MCORE,MVAL,IPRO,ISPEC)*CONJG(STATEI%VEC(1,IND,IN))
-            IF(TINV) THEN
+              IF(TINV) THEN
                 MATP=MATP+CONJG(DPMATF(MCORE,MVAL,IPRO,ISPEC))*CONJG(STATEJ%VEC(1,IND,JN))
-            ELSE
+              ELSE
                 MATP=MATP+CONJG(DPMATF(MCORE,MVAL,IPRO,ISPEC))*STATEJ%VEC(1,IND,JN)
-            ENDIF
+              ENDIF
             ENDDO
           ENDDO
         ENDDO
@@ -2445,8 +2385,6 @@ END MODULE RIXS_MODULE
      &            '               RADIAL GRID REPORT                 '
       WRITE(NFIL,FMT='(80("="))')
       CALL RADIAL$REPORT(NFIL)
-! TODO: INVENT DATA STRUCTURE TO STORE ALL MATRIX ELEMENTS
-! TODO: CALCULATE MATRIX ELEMENTS
                           CALL TRACE$POP
       END SUBROUTINE STPA$RUN
 !
