@@ -135,7 +135,7 @@ END MODULE DATA_MODULE
 !........1.........2.........3.........4.........5.........6.........7.........8
 MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
 IMPLICIT NONE
-TYPE SPECTRUM
+TYPE SPECTRUM_TYPE
   CHARACTER(255) :: FILENAME  ! OUTPUT FILE NAME
   REAL(8) :: EIREL  ! EXCITATION ENERGY RELATIVE TO SIMULATION FERMI LEVEL
   REAL(8) :: KDIRI(3)  ! DIRECTION OF INCIDENT LIGHT
@@ -159,7 +159,7 @@ TYPE SPECTRUM
   ! INTEGER(4) :: BI
   ! LOGICAL(4) :: TBF=.FALSE.
   ! INTEGER(4) :: BF
-END TYPE SPECTRUM
+END TYPE SPECTRUM_TYPE
 ! TRACKS WHAT GENERAL VALUES HAVE BEEN SET
 TYPE RIXS_SET
   LOGICAL(4) :: TEIREL=.FALSE.
@@ -169,8 +169,8 @@ TYPE RIXS_SET
   LOGICAL(4) :: TPF=.FALSE.
 END TYPE RIXS_SET
 INTEGER(4) :: NSPECTRA
-TYPE(SPECTRUM), ALLOCATABLE, TARGET :: SPECTRA(:)
-TYPE(SPECTRUM), POINTER :: SPEC
+TYPE(SPECTRUM_TYPE), ALLOCATABLE, TARGET :: SPECTRA(:)
+TYPE(SPECTRUM_TYPE), POINTER :: SPEC
 TYPE(RIXS_SET) :: RIXS_GENERAL
 REAL(8) :: EMIN
 REAL(8) :: EMAX
@@ -183,6 +183,7 @@ REAL(8) :: GAMMA
 CHARACTER(16) :: SPECIES
 CHARACTER(1) :: ORBTYPE
 CHARACTER(255) :: STPFILE
+REAL(8) :: ADDEL
 
 INTEGER(4) :: NCORE
 INTEGER(4) :: LCORE
@@ -491,6 +492,8 @@ END MODULE RIXS_MODULE
       REAL(8) :: AMPL
       REAL(8) :: SVAR
       REAL(8) :: OCCFAC
+      REAL(8) :: OCCI
+      REAL(8) :: OCCJ
       REAL(8), ALLOCATABLE :: SPECTRUM(:,:)
       REAL(8), ALLOCATABLE :: RAW(:,:)
                           WRITE(*,FMT='(A8,I4)')'SPECTRUM',ISPEC
@@ -545,18 +548,30 @@ END MODULE RIXS_MODULE
 !         ==  SUM OVER N  ======================================================
           DO IN=1,STATEI%NB
 ! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
+
 !           ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
-            IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
+            ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
+            OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
+            IF(OCCI.GT.(1.D0-TOL)) CYCLE
+
             ! SUM OVER N'
             DO JN=1,STATEJ%NB
-!           ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
-              IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
+
+!             ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
+              ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
+              OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
+              IF(OCCJ.LT.TOL) CYCLE
+
 !             ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
-              OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
+              ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
+              OCCFAC=(1.D0-OCCI)*OCCJ
+
 !             ==  CALCULATE APLITUDE SQUARED  ==================================
               CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
+
 !             ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
-              SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
+              ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
+              SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
               SVAR=SVAR**2
               SVAR=SVAR+0.25D0*GAMMA**2
               AMPL=OCCFAC*AMPL/SVAR
@@ -920,6 +935,8 @@ END MODULE RIXS_MODULE
         VAL=EFEXP
       ELSE IF(ID.EQ.'GAMMA') THEN
         VAL=GAMMA
+      ELSE IF(ID.EQ.'ADDEL') THEN
+        VAL=ADDEL
       ELSE
         CALL ERROR$MSG('INVALID ID')
         CALL ERROR$CHVAL('ID',ID)
@@ -1187,6 +1204,7 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: NDIM
       INTEGER(4) :: NSP
       REAL(8) :: RNTOT
+      REAL(8) :: ADDEL
       INTEGER(4) :: NAT
       INTEGER(4) :: LNXX
       INTEGER(4) :: NB
@@ -1205,6 +1223,7 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: LMN,LN,L,M
       INTEGER(4) :: IND
       LOGICAL(4) :: TCHK
+      real(8) :: svar
                           CALL TRACE$PUSH('DATA$INIT')
       IF(TINIT) THEN
         CALL ERROR$MSG('DATA MODULE ALREADY INITIALIZED')
@@ -1218,8 +1237,7 @@ END MODULE RIXS_MODULE
       CALL PDOS$GETI4('NSPIN',NSPIN)
       CALL PDOS$GETI4('NDIM',NDIM)
       CALL PDOS$GETR8('RNTOT',RNTOT)
-! TODO: ATTACH HERE TO ARTIFICIALLY CHANGE NUMBER OF ELECTRONS AND THEREFORE
-!       OCCUPATIONS AND FERMI ENERGY
+      CALL RIXS$GETR8('ADDEL',ADDEL)
       CALL PDOS$GETI4('NAT',NAT)
       CALL PDOS$GETI4('LNXX',LNXX)
       ALLOCATE(NBARR(NKPT,NSPIN))
@@ -1234,7 +1252,52 @@ END MODULE RIXS_MODULE
       ALLOCATE(EIG(NBB,NKPT))
       ALLOCATE(OCC(NBB,NKPT))
       CALL SET$ENOCC(NBB,NKPT,EIG,OCC)
-      CALL BRILLOUIN$DOS(NBB,NKPT,EIG,OCC,RNTOT,EFERMI)
+
+      ! open(33,file='enocc.dat')
+      ! DO I=1,10
+      !   DO ISP=1,NSPIN
+      !     WRITE(33,*)'KPT:',I,' SPIN:',ISP
+      !     do j=1+nb*(ISP-1),nb*ISP
+      !       WRITE(33,fmt='(F8.5)',advance='no')occ(j,i)*15*15*15
+      !     enddo
+      !     write(33,*)
+      !     !WRITE(*,*)OCC(1+NB*(ISP-1):NB*ISP,i)*15.d0*15.d0*15.d0
+      !   ENDDO
+      ! ENDDO
+      ! close(33)
+      ! svar=0.d0
+      ! do i=1,NKPT
+      !   do j=1,Nbb
+      !     svar=svar+occ(j,i)
+      !   enddo
+      ! enddo
+      ! write(*,*)'ENOCC #EL',svar
+
+!     ==  POTENTIALLY CHANGE TOTAL NUMBER OF ELECTRONS =========================
+!     ==  RECALCULATE OCCUPATIONS AND FERMI ENERGY =============================
+      CALL BRILLOUIN$DOS(NBB,NKPT,EIG,OCC,RNTOT+ADDEL,EFERMI)
+
+      ! open(33,file='brillouin.dat')
+      ! DO I=1,10
+      !   DO ISP=1,NSPIN
+      !     WRITE(33,*)'KPT:',I,' SPIN:',ISP
+      !     do j=1+nb*(ISP-1),nb*ISP
+      !       WRITE(33,fmt='(F8.5)',advance='no')occ(j,i)*15*15*15
+      !     enddo
+      !     write(33,*)
+      !     !WRITE(*,*)OCC(1+NB*(ISP-1):NB*ISP,i)*15.d0*15.d0*15.d0
+      !   ENDDO
+      ! ENDDO
+      ! close(33)
+
+      ! svar=0.d0
+      ! do i=1,NKPT
+      !   do j=1,Nbb
+      !     svar=svar+occ(j,i)
+      !   enddo
+      ! enddo
+      ! write(*,*)'BRILLOUIN #EL',svar
+
       ALLOCATE(ATOMID(NAT))
       ALLOCATE(ISPECIES(NAT))
       ALLOCATE(R(3,NAT))
@@ -2104,6 +2167,13 @@ END MODULE RIXS_MODULE
         ENDDO
         RIXS_GENERAL%TPF=.TRUE.
       ENDIF
+!     ==  READ ARTIFICIALLY ADDED ELECTRONS  ===================================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'ADDEL',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'ADDEL',1,ADDEL)
+      ELSE
+        ADDEL=0.D0
+      ENDIF
 !
 !     ==========================================================================
 !     == INDIVIDUAL SPECTRA FLAGS                                             ==
@@ -2626,13 +2696,13 @@ END MODULE RIXS_MODULE
       REAL(8) :: G
       ! SUM_I (POL_I * GAUNT_{P_I,L1,L2})
       CALL SPHERICAL$GAUNT(2,L1,L2,G) ! GAUNT_{PX,L1,L2}
-      WRITE(*,*)'GAUNT_{PX,LLCORE,LLVAL}',G
+      ! WRITE(*,*)'GAUNT_{PX,LLCORE,LLVAL}',G
       SUM=POL(1)*G
       CALL SPHERICAL$GAUNT(4,L1,L2,G) ! GAUNT_{PY,L1,L2}
-      WRITE(*,*)'GAUNT_{PY,LLCORE,LLVAL}',G
+      ! WRITE(*,*)'GAUNT_{PY,LLCORE,LLVAL}',G
       SUM=SUM+POL(2)*G
       CALL SPHERICAL$GAUNT(3,L1,L2,G) ! GAUNT_{PZ,L1,L2}
-      WRITE(*,*)'GAUNT_{PZ,LLCORE,LLVAL}',G
+      ! WRITE(*,*)'GAUNT_{PZ,LLCORE,LLVAL}',G
       SUM=SUM+POL(3)*G
       END SUBROUTINE GAUNTPOLSUM
 
