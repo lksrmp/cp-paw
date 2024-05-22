@@ -469,6 +469,13 @@ clean_dosplot:
 ${BINDIR}/paw_rixs.x: ${OBJRIXS} ${PAWLIB}
 	${LINK} -o ${BINDIR}/paw_rixs.x ${OBJRIXS} -L${OBJDIR}  -lpaw ${LIBS}
 #
+${BINDIR}/ppaw_rixs.x: ${OBJRIXS} ${PPAWLIBFULL}
+	${LINK} -o ${BINDIR}/ppaw_rixs.x ${OBJRIXS} -L${OBJDIR}  -lppawfull ${LIBS}
+#
+clean_rixs:
+	rm -f ${OBJRIXS}; rm -f ${BINDIR}/paw_rixs.x
+	rm -f ${OBJRIXS}; rm -f ${BINDIR}/ppaw_rixs.x
+#
 ${BINDIR}/paw_bands.x: ${OBJBANDS} ${PAWLIBFULL}
 	${LINK} -o ${BINDIR}/paw_bands.x ${OBJBANDS} -L${OBJDIR}  -lpawfull ${LIBS}
 #

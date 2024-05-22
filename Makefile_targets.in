@@ -226,6 +226,12 @@ ${TOOLS}: lib_new
 bands_parallel: lib_new_parallel
 	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${BINDIR}/ppaw_bands.x 
 #
+#---------------------------------------------------------------------------
+#--          separate target for rixs_parallel, 
+#---------------------------------------------------------------------------
+rixs_parallel: lib_new_parallel
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${BINDIR}/ppaw_rixs.x 
+#
 $(addprefix clean_,${TOOLS}):
 	cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile $@
 #
