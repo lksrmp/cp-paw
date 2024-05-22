@@ -257,6 +257,7 @@ END MODULE RIXS_MODULE
       integer(4) :: ivar
 !     **************************************************************************
       CALL MPE$INIT
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL TRACE$PUSH('MAIN')
 ! TODO: TEST PARALLEL EXECUTION OUTPUT (PROTOCOL FILE ETC)
 !
@@ -276,6 +277,7 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
 !     ==  WRITE HEADER                                                        ==
 !     ==========================================================================
+      CALL MPE$SYNC('~')
       IF(THISTASK.EQ.1) THEN
         WRITE(NFILO,FMT='(80("*"))')
         WRITE(NFILO,FMT='(80("*"),T15,A50)') &
@@ -474,7 +476,6 @@ END MODULE RIXS_MODULE
       CALL TRACE$POP
       CALL ERROR$NORMALSTOP
       CALL MPE$EXIT
-      STOP
       END PROGRAM RIXS
 
 !
@@ -709,27 +710,27 @@ END MODULE RIXS_MODULE
               IF(OCCI.GT.(1.D0-TOL)) CYCLE
               ! SUM OVER N'
               DO JN=1,STATEJ%NB
-!               ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
+!               ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ======================
                 ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
                 OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
                 IF(OCCJ.LT.TOL) CYCLE
-!               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
+!               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ============
                 ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
                 OCCFAC=(1.D0-OCCI)*OCCJ
-!               ==  CALCULATE APLITUDE SQUARED  ==================================
+!               ==  CALCULATE APLITUDE SQUARED  ================================
                 CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
-!               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
+!               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ========================
                 ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
                 SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
                 SVAR=SVAR**2
                 SVAR=SVAR+0.25D0*GAMMA**2
                 AMPL=OCCFAC*AMPL/SVAR
-! TODO: MULTIPLY BY WEIGHT OF SECONDS K-POINT
-!               ==  MULTIPLY BY WEIGHT OF K-POINT  ===============================
+!               ==  MULTIPLY BY WEIGHT OF K-POINT  =============================
                 AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
-!               ==  CALCULATE ENERGY DIFFERENCE  =================================
+                AMPL=AMPL*WKPT(JKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
+!               ==  CALCULATE ENERGY DIFFERENCE  ===============================
                 DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
-!               ==  ADD TO SPECTRUM  =============================================
+!               ==  ADD TO SPECTRUM  ===========================================
                 CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
               ENDDO  ! N'
             ENDDO  ! N
@@ -1836,7 +1837,7 @@ END MODULE RIXS_MODULE
       CALL LIB$INVERTR8(3,GBAS,INVGBAS)
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
 
-      CALL MPE$QUERY('~',THISTASK,NTASKS)
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
       IF(THISTASK.EQ.0) THEN
         WRITE(NFIL,FMT='(A)')
         WRITE(NFIL,FMT='(80("="))')
@@ -2728,7 +2729,7 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETI4('NVAL',NVAL)
       CALL RIXS$GETI4('LCORE',LCORE)
       CALL RIXS$GETI4('LVAL',LVAL)
-      CALL MPE$QUERY('~',THISTASK,NTASKS)
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
       IF(THISTASK.EQ.1) THEN
         WRITE(NFIL,FMT='(A)')
         WRITE(NFIL,FMT='(80("="))')
