@@ -154,7 +154,7 @@ TYPE SPECTRUM_TYPE
   COMPLEX(8) :: PF(2)  ! POLARISATION OF EMITTED LIGHT IN (SIGMA,PI) BASIS
   COMPLEX(8) :: PIXYZ(3)  ! POLARISATION OF INCIDENT LIGHT IN XYZ COORDINATES
   COMPLEX(8) :: PFXYZ(3)  ! POLARISATION OF EMITTED LIGHT IN XYZ COORDINATES
-  ! LOGICAL(4) :: TINCOHERENT=.FALSE. 
+  LOGICAL(4) :: TINCOHERENT
   ! LOGICAL(4) :: TBI=.FALSE.
   ! INTEGER(4) :: BI
   ! LOGICAL(4) :: TBF=.FALSE.
@@ -214,7 +214,7 @@ END MODULE RIXS_MODULE
       USE LINKEDLIST_MODULE,ONLY : LINKEDLIST$REPORT_UNUSED &
      &                            ,LINKEDLIST$SELECT
       USE READCNTL_MODULE  ,ONLY : LL_CNTL
-      USE RIXS_MODULE, ONLY: RIXS_DEALLOC
+      USE RIXS_MODULE, ONLY: RIXS_DEALLOC,SPECTRA
       USE DATA_MODULE, ONLY : DATA_DEALLOC
       USE SPINDIR_MODULE   ,ONLY : SPINDIR !(IS ONLY ALLOCATED)
       IMPLICIT NONE
@@ -252,10 +252,13 @@ END MODULE RIXS_MODULE
       CHARACTER(256)            :: PREFIX !OPTIONAL PREFIX FOR DOS AND NOS FILES
       CHARACTER(128)            :: FORMAT
       REAL(8)                   :: EF
+      INTEGER(4)                :: THISTASK,NTASKS
       real(8) :: svar(3)
       integer(4) :: ivar
 !     **************************************************************************
+      CALL MPE$INIT
       CALL TRACE$PUSH('MAIN')
+! TODO: TEST PARALLEL EXECUTION OUTPUT (PROTOCOL FILE ETC)
 !
 !     ==========================================================================
 !     ==  RESOLVE ARGUMENTLIST AND INITIALIZE FILE HANDLER                    ==
@@ -273,15 +276,17 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
 !     ==  WRITE HEADER                                                        ==
 !     ==========================================================================
-      WRITE(NFILO,FMT='(80("*"))')
-      WRITE(NFILO,FMT='(80("*"),T15,A50)') &
-     &            '              RIXS CALCULATION TOOL                '
-      WRITE(NFILO,FMT='(80("*"))')
-      WRITE(NFILO,FMT='(T10 &
-     &           ,"LUKAS RUMP, P.E. BLÖCHL")')
-      WRITE(NFILO,FMT='(T10 &
-     &            ,"DISTRIBUTED UNDER THE GNU PUBLIC LICENSE V3")')
-      WRITE(NFILO,*)      
+      IF(THISTASK.EQ.1) THEN
+        WRITE(NFILO,FMT='(80("*"))')
+        WRITE(NFILO,FMT='(80("*"),T15,A50)') &
+      &            '              RIXS CALCULATION TOOL                '
+        WRITE(NFILO,FMT='(80("*"))')
+        WRITE(NFILO,FMT='(T10 &
+      &           ,"LUKAS RUMP, P.E. BLÖCHL")')
+        WRITE(NFILO,FMT='(T10 &
+      &            ,"DISTRIBUTED UNDER THE GNU PUBLIC LICENSE V3")')
+        WRITE(NFILO,*)   
+      ENDIF   
 !
 !     ==========================================================================
 !     ==  READ PDOSFILE                                                       ==
@@ -356,14 +361,18 @@ END MODULE RIXS_MODULE
 !     ==  THE VARIABLE SPIN DIR GIVES THE LOCAL SPIN AXIS AND IS KEPT FOR LATER=
 !     ==========================================================================
       ALLOCATE(SPINDIR(3,NAT))
-      CALL REPORT(NFILO)
+      IF(THISTASK.EQ.1) THEN
+        CALL REPORT(NFILO)
+      ENDIF
                             CALL TRACE$PASS('AFTER REPORT')
 !
 !     ==========================================================================
 !     ==  INITIALIZE DATA_MODULE                                              ==
 !     ==========================================================================
       CALL DATA$INIT
-      CALL DATA$REPORT
+      IF(THISTASK.EQ.1) THEN
+        CALL DATA$REPORT
+      ENDIF
 !
 !     ==========================================================================
 !     ==  CALCULATE FERMI LEVEL OF SIMULATION                                 ==
@@ -413,13 +422,15 @@ END MODULE RIXS_MODULE
 !     ==  WRITE REPORT FOR EVERY RIXS SPECTRUM                                ==
 !     ==========================================================================
       CALL RIXS$GETI4('NSPECTRA',NSPECTRA)
+      IF(THISTASK.EQ.1) THEN
+        WRITE(NFILO,FMT='(80("="))')
+        WRITE(NFILO,FMT='(80("="),T15,A50)') &
+      &            '              RIXS PARAMETER REPORT               '
       WRITE(NFILO,FMT='(80("="))')
-      WRITE(NFILO,FMT='(80("="),T15,A50)') &
-     &            '              RIXS PARAMETER REPORT               '
-     WRITE(NFILO,FMT='(80("="))')
-      DO IVAR=0,NSPECTRA
-        CALL RIXS$REPORT(NFILO,IVAR)
-      ENDDO
+        DO IVAR=0,NSPECTRA
+          CALL RIXS$REPORT(NFILO,IVAR)
+        ENDDO
+      ENDIF
 !
 !     ==========================================================================
 !     ==  RIXS CALCULATION                                                    ==
@@ -428,7 +439,13 @@ END MODULE RIXS_MODULE
       DO IVAR=1,NSPECTRA
         CALL RIXS$FILE(IVAR,'O')
         CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
-        CALL RIXS$CALCULATE(IVAR,EF)
+        IF(SPECTRA(IVAR)%TINCOHERENT) THEN
+          CALL RIXS$INCOHERENT(IVAR,EF)
+        ELSE
+          CALL RIXS$CALCULATE(IVAR,EF)
+        ENDIF
+        !CALL RIXS$CALCULATE(IVAR,EF)
+        !CALL RIXS$INCOHERENT(IVAR,EF)
         CALL RIXS$FILE(IVAR,'C')
       ENDDO
       CALL FILEHANDLER$UNIT('PROT',NFILO)
@@ -437,12 +454,14 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
-      CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO)
+      IF(THISTASK.EQ.1) THEN
+        CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO)
 !
-      CALL FILEHANDLER$REPORT(NFILO,'USED')
-      WRITE(NFILO,FMT='(80("="))')
-      WRITE(NFILO,FMT='(80("="),T20,"  PAW_DOS TOOL FINISHED  ")')
-      WRITE(NFILO,FMT='(80("="))')
+        CALL FILEHANDLER$REPORT(NFILO,'USED')
+        WRITE(NFILO,FMT='(80("="))')
+        WRITE(NFILO,FMT='(80("="),T20,"  PAW_RIXS TOOL FINISHED  ")')
+        WRITE(NFILO,FMT='(80("="))')
+      ENDIF
                             CALL TRACE$PASS('AFTER CLOSING')
       CALL RIXS_DEALLOC
       CALL DATA_DEALLOC
@@ -454,6 +473,7 @@ END MODULE RIXS_MODULE
                             CALL TRACE$PASS('AFTER FILEHANDLER$CLOSEALL')
       CALL TRACE$POP
       CALL ERROR$NORMALSTOP
+      CALL MPE$EXIT
       STOP
       END PROGRAM RIXS
 
@@ -522,6 +542,7 @@ END MODULE RIXS_MODULE
       SPECTRUM=0.D0
 !     ==  SUM OVER K-POINTS  =================================================
       DO IKPT=1,NKPT
+        WRITE(*,*)'IKPT=',IKPT
 !       ======================================================================
 !       ==  CALCULATE SHIFTED K-POINT AND ITS INDEX JKPT                    ==
 !       ======================================================================
@@ -567,6 +588,7 @@ END MODULE RIXS_MODULE
               OCCFAC=(1.D0-OCCI)*OCCJ
 
 !             ==  CALCULATE APLITUDE SQUARED  ==================================
+! WARNING: CHECK IF RATHER XQAPPROX SHOULD BE USED
               CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
 
 !             ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
@@ -594,7 +616,139 @@ END MODULE RIXS_MODULE
       DEALLOCATE(WKPT)
                           CALL TRACE$POP
       END SUBROUTINE RIXS$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$INCOHERENT(ISPEC,EF)  !MARK: RIXS$INCOHERENT
+!     **************************************************************************
+!     ** CALCULATE INCOHERENT RIXS SPECTRUM ISPEC                             **
+!     **************************************************************************
+      USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
+      USE RIXS_MODULE, ONLY: SPEC
+      USE DATA_MODULE, ONLY: EIG,OCC,EFERMI
+      USE MPE_MODULE
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: TOL=1.D-6
+      INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
+      REAL(8), INTENT(IN) :: EF  ! FERMI ENERGY OF SIMULATION
+      TYPE(STATE_TYPE), POINTER :: STATEI
+      TYPE(STATE_TYPE), POINTER :: STATEJ
+      REAL(8), ALLOCATABLE :: XK(:,:)
+      REAL(8), ALLOCATABLE :: WKPT(:)
+      INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: ICOUNT
+      REAL(8) :: GAMMA
+      REAL(8) :: EMIN
+      REAL(8) :: EMAX
+      REAL(8) :: DE
+      INTEGER(4) :: NE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: NKDIV(3)
+      LOGICAL(4) :: TINV
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: IKPT, JKPT
+      INTEGER(4) :: IN, JN,I
+      REAL(8) :: XKSHIFT(3)
+      REAL(8) :: DELTAE
+      REAL(8) :: AMPL
+      REAL(8) :: SVAR
+      REAL(8) :: OCCFAC
+      REAL(8) :: OCCI
+      REAL(8) :: OCCJ
+      REAL(8), ALLOCATABLE :: SPECTRUM(:,:)
+      REAL(8), ALLOCATABLE :: RAW(:,:)
+                          WRITE(*,FMT='(A8,I4)')'SPECTRUM',ISPEC
+                          CALL TRACE$PUSH('RIXS$INCOHERENT')
+      CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
 
+      CALL RIXS$SETPTR(ISPEC)
+      CALL RIXS$GETR8('GAMMA',GAMMA)
+      CALL RIXS$GETR8('EMIN',EMIN)
+      CALL RIXS$GETR8('EMAX',EMAX)
+      CALL RIXS$GETR8('DE',DE)
+      CALL RIXS$GETI4('NE',NE)
+
+      CALL PDOS$GETI4('NSPIN',NSPIN)
+      ALLOCATE(RAW(NE,NSPIN))
+      ALLOCATE(SPECTRUM(NE,NSPIN))
+      CALL PDOS$GETI4('NKPT',NKPT)
+      CALL PDOS$GETI4A('NKDIV',3,NKDIV)
+      ALLOCATE(XK(3,NKPT))
+      CALL PDOS$GETR8A('XK',3*NKPT,XK)
+      ALLOCATE(WKPT(NKPT))
+      CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
+! TODO: CHANGE STATE%EIG, STATE%OCC TO EIG, OCC FROM DATA_MODULE FOR CHANGED
+!       NUMBER OF ELECTRONS (CAREFUL WITH INDEXING)
+
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL MPE$SYNC('~')
+
+      ICOUNT=0
+
+      RAW=0.D0
+      SPECTRUM=0.D0
+!     ==  FIRST SUM OVER K-POINTS  =============================================
+      DO IKPT=1,NKPT
+        ICOUNT=ICOUNT+1
+        IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
+        WRITE(*,*)'IKPT=',IKPT,'THISTASK=',THISTASK
+!       ==  SECOND SUM OVER K-POINTS  ========================================
+        DO JKPT=1,NKPT
+! TODO: CHECK IF IKPT AND -IKPT GIVE SAME RESULT
+!         ==  SUM OVER SPIN  =====================================================
+          DO ISPIN=1,NSPIN
+            STATEI=>STATEARR(IKPT,ISPIN)
+            STATEJ=>STATEARR(JKPT,ISPIN)
+!           ==  SUM OVER N  ======================================================
+            DO IN=1,STATEI%NB
+! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
+!             ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
+              ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
+              OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
+              IF(OCCI.GT.(1.D0-TOL)) CYCLE
+              ! SUM OVER N'
+              DO JN=1,STATEJ%NB
+!               ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
+                ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
+                OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
+                IF(OCCJ.LT.TOL) CYCLE
+!               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
+                ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
+                OCCFAC=(1.D0-OCCI)*OCCJ
+!               ==  CALCULATE APLITUDE SQUARED  ==================================
+                CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
+!               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
+                ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
+                SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
+                SVAR=SVAR**2
+                SVAR=SVAR+0.25D0*GAMMA**2
+                AMPL=OCCFAC*AMPL/SVAR
+! TODO: MULTIPLY BY WEIGHT OF SECONDS K-POINT
+!               ==  MULTIPLY BY WEIGHT OF K-POINT  ===============================
+                AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
+!               ==  CALCULATE ENERGY DIFFERENCE  =================================
+                DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
+!               ==  ADD TO SPECTRUM  =============================================
+                CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
+              ENDDO  ! N'
+            ENDDO  ! N
+          ENDDO  ! SPIN
+        ENDDO  ! JKPT
+      ENDDO  ! IKPT
+      CALL MPE$SYNC('~')
+      CALL MPE$COMBINE('~','+',RAW)
+      IF(THISTASK.EQ.1) THEN
+        DO ISPIN=1,NSPIN
+          CALL RIXS_SMEARGRID(NE,RAW(:,ISPIN),SPECTRUM(:,ISPIN))
+        ENDDO
+        CALL RIXS_HEADER(NFIL,ISPEC)
+        CALL RIXS_WRITEGRID(NFIL,NE,NSPIN,SPECTRUM,EMIN,EMAX,DE)
+      ENDIF
+      DEALLOCATE(XK)
+      DEALLOCATE(WKPT)
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS$INCOHERENT
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,Q,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
 !     **************************************************************************
@@ -691,7 +845,7 @@ END MODULE RIXS_MODULE
       ELSE IF(ID.GE.1.AND.ID.LE.NSPECTRA) THEN
         WRITE(NFIL,FMT='("# SPECTRUM ",I2)')ID
         WRITE(NFIL,FMT='(A10,A)')'FILENAME:',TRIM(ADJUSTL(SPECTRA(ID)%FILENAME))
-        ! IF(SPECTRA(ID)%TINCOHERENT) WRITE(NFIL,FMT='(A10)')'INCOHERENT'
+        WRITE(NFIL,FMT='(A10)')'INCOHERENT'
         WRITE(NFIL,FMT='(A10,F12.6)')'EI REL:',SPECTRA(ID)%EIREL/EV
         WRITE(NFIL,FMT='(A10,3F12.6)')'KDIR I:',SPECTRA(ID)%KDIRI(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'KDIR F:',SPECTRA(ID)%KDIRF(:)
@@ -1670,6 +1824,7 @@ END MODULE RIXS_MODULE
       REAL(8) :: ANGSTROM
       REAL(8) :: HBAR
       REAL(8) :: C
+      INTEGER(4) :: THISTASK,NTASKS
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       CALL CONSTANTS('EV',EV)
       CALL CONSTANTS('ANGSTROM',ANGSTROM)
@@ -1680,11 +1835,15 @@ END MODULE RIXS_MODULE
       CALL GBASS(RBAS,GBAS,VOL)
       CALL LIB$INVERTR8(3,GBAS,INVGBAS)
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
-      WRITE(NFIL,FMT='(A)')
-      WRITE(NFIL,FMT='(80("="))')
-      WRITE(NFIL,FMT='(80("="),T15,A50)') &
-     &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
-      WRITE(NFIL,FMT='(80("="))')
+
+      CALL MPE$QUERY('~',THISTASK,NTASKS)
+      IF(THISTASK.EQ.0) THEN
+        WRITE(NFIL,FMT='(A)')
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(80("="),T15,A50)') &
+      &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
+        WRITE(NFIL,FMT='(80("="))')
+      ENDIF
       DO ISPEC=1,NSPECTRA
 !
 !       ========================================================================
@@ -1717,12 +1876,14 @@ END MODULE RIXS_MODULE
         VVAR(:)=SPECTRA(ISPEC)%XQ(:)-QTRANS(:)
         IP(:)=NINT(VVAR(:))
         QTRANS(:)=QTRANS(:)+REAL(IP(:),KIND=8)
-        WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
-        WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
-        WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
-        WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
-        WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
-        WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
+        IF(THISTASK.EQ.1) THEN
+          WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
+          WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
+          WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
+          WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
+          WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
+          WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
+        ENDIF
 
         SPECTRA(ISPEC)%XQAPPROX=QTRANS
       ENDDO
@@ -2250,10 +2411,12 @@ END MODULE RIXS_MODULE
         ENDIF
         CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,SPECTRA(I)%FILENAME)
 !       ==  READ FLAG FOR INCOHERENT CALCULATION  ==============================
-        ! CALL LINKEDLIST$EXISTD(LL_CNTL,'INCOHERENT',1,TCHK)
-        ! IF(TCHK) THEN
-        !   CALL LINKEDLIST$GET(LL_CNTL,'INCOHERENT',1,SPECTRA(I)%TINCOHERENT)
-        ! ENDIF
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'INCOHERENT',1,TCHK)
+        IF(TCHK) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'INCOHERENT',1,SPECTRA(I)%TINCOHERENT)
+        ELSE
+          SPECTRA(I)%TINCOHERENT=.FALSE.
+        ENDIF
 !       ==  READ INCOMING BAND INDEX  ==========================================
         ! CALL LINKEDLIST$EXISTD(LL_CNTL,'BI',1,TCHK)
         ! IF(TCHK) THEN
@@ -2273,7 +2436,7 @@ END MODULE RIXS_MODULE
       END SUBROUTINE READCNTL$RIXS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE STPA$RUN  !MARK: STPA$EXECUTE
+      SUBROUTINE STPA$RUN  !MARK: STPA$RUN
 !     **************************************************************************
 !     **  EXECUTE STPA EXTRACTION OF AEPHI                                    **
 !     **************************************************************************
@@ -2342,6 +2505,7 @@ END MODULE RIXS_MODULE
 
       CALL RIXS$GETCH('STPFILE',STPFILE)
       
+      CALL MPE$SYNC('~')
 !     ==========================================================================
 !     ==  VALENCE STATES                                                      ==
 !     ==========================================================================
@@ -2357,10 +2521,14 @@ END MODULE RIXS_MODULE
         CALL ERROR$STOP('STPA$RUN')
       ENDIF
       ALLOCATE(LPRO(NPRO))
+
+      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT LPRO  ======================================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'LPRO')
       REWIND(NFIL)
       READ(NFIL,*)LPRO(:)
+
+      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT AEPHI (VALENCE)  ===========================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'AEPHI')
       REWIND(NFIL)
@@ -2404,6 +2572,8 @@ END MODULE RIXS_MODULE
       DEALLOCATE(VGRID)
       DEALLOCATE(AEPHI)
       DEALLOCATE(LPRO)
+
+      CALL MPE$SYNC('~')
 !     ==========================================================================
 !     ==  CORE STATE                                                          ==
 !     ==========================================================================
@@ -2412,10 +2582,14 @@ END MODULE RIXS_MODULE
       REWIND(NFIL)
       READ(NFIL,*)NB
       ALLOCATE(ATOML(NB))
+
+      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT ATOML  =====================================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'ATOM.L')
       REWIND(NFIL)
       READ(NFIL,*)ATOML(:)
+
+      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT AEPSI (CORE)  ==============================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'AEPSI')
       REWIND(NFIL)
@@ -2453,12 +2627,14 @@ END MODULE RIXS_MODULE
       DEALLOCATE(ATOML)
       DEALLOCATE(CGRID)
       CALL FILEHANDLER$UNIT('PROT',NFIL)
-      WRITE(NFIL,FMT='(A)')
-      WRITE(NFIL,FMT='(80("="))')
-      WRITE(NFIL,FMT='(80("="),T15,A50)') &
-     &            '               RADIAL GRID REPORT                 '
-      WRITE(NFIL,FMT='(80("="))')
-      CALL RADIAL$REPORT(NFIL)
+      IF(THISTASK.EQ.1) THEN
+        WRITE(NFIL,FMT='(A)')
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(80("="),T15,A50)') &
+      &            '               RADIAL GRID REPORT                 '
+        WRITE(NFIL,FMT='(80("="))')
+        CALL RADIAL$REPORT(NFIL)
+      ENDIF
                           CALL TRACE$POP
       END SUBROUTINE STPA$RUN
 !
@@ -2543,6 +2719,7 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: I
       INTEGER(4) :: LLCORE
       INTEGER(4) :: LLVAL
+      INTEGER(4) :: THISTASK,NTASKS
                           CALL TRACE$PUSH('DIPOLEMATRIXELEMENTS')
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       CALL RIXS$GETI4('NSPECTRA',NSPECTRA)
@@ -2550,13 +2727,16 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETI4('NVAL',NVAL)
       CALL RIXS$GETI4('LCORE',LCORE)
       CALL RIXS$GETI4('LVAL',LVAL)
-      WRITE(NFIL,FMT='(A)')
-      WRITE(NFIL,FMT='(80("="))')
-      WRITE(NFIL,FMT='(80("="),T15,A50)') &
+      CALL MPE$QUERY('~',THISTASK,NTASKS)
+      IF(THISTASK.EQ.1) THEN
+        WRITE(NFIL,FMT='(A)')
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(80("="),T15,A50)') &
      &            '          DIPOLE MATRIX ELEMENTS REPORT           '
-     WRITE(NFIL,FMT='(80("="))')
-      WRITE(NFIL,FMT='(A7,I1,A12,I1,A12,I1,A12,I1)')'N_CORE=',NCORE,'L_CORE=',LCORE, &
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(A7,I1,A12,I1,A12,I1,A12,I1)')'N_CORE=',NCORE,'L_CORE=',LCORE, &
      &                                      'N_VALENCE=',NVAL,'L_VALENCE=',LVAL
+      ENDIF
       IF(.NOT.ALLOCATED(DPMATI)) &
      &      ALLOCATE(DPMATI(2*LCORE+1,2*LVAL+1,VNPRO,NSPECTRA))
       IF(.NOT.ALLOCATED(DPMATF)) &
@@ -2613,13 +2793,17 @@ END MODULE RIXS_MODULE
         ! WRITE(*,*)'IPRO',IPRO,'SUMVAR',SUMVAR
         DPMATI(:,:,IPRO,:)=SUMVAR
         DPMATF(:,:,IPRO,:)=SUMVAR
-        WRITE(NFIL,FMT='(A,I1,F12.6)')'RADIAL INTEGRAL IPRO=',IPRO,SUMVAR
+        IF(THISTASK.EQ.1) THEN
+          WRITE(NFIL,FMT='(A,I1,F12.6)')'RADIAL INTEGRAL IPRO=',IPRO,SUMVAR
+        ENDIF
       ENDDO
 !     ==  SUM OVER POLARISATION AND GAUNT COEFFICIENTS  ========================
 !     ==  DEPENDS ON SPECTRUM (POLARISATION) AND                              ==
 !     ==  BOTH MAGNETIC QUANTUM NUMBERS                                       ==
-      WRITE(NFIL,FMT='(A)')'SUM OVER POLARISATION AND GAUNT COEFFICIENTS'
-      WRITE(NFIL,FMT='(5A10)')'ISPEC','LL_CORE','LL_VAL','POL','SUM'
+      IF(THISTASK.EQ.1) THEN
+        WRITE(NFIL,FMT='(A)')'SUM OVER POLARISATION AND GAUNT COEFFICIENTS'
+        WRITE(NFIL,FMT='(5A10)')'ISPEC','LL_CORE','LL_VAL','POL','SUM'
+      ENDIF
       DO ISPEC=1,NSPECTRA
 !       ==  GET POLARISATION VECTORS  ==========================================
         CALL RIXS$SETPTR(ISPEC)
@@ -2649,30 +2833,36 @@ END MODULE RIXS_MODULE
             LLVAL=LVAL*LVAL+MVAL
             CALL GAUNTPOLSUM(LLCORE,LLVAL,PIXYZ,CVAR)
             DPMATI(MCORE,MVAL,:,ISPEC)=FAC*CVAR*DPMATI(MCORE,MVAL,:,ISPEC)
-            WRITE(NFIL,FMT='(3I10,A10,(F9.5,SP,F9.5,"I ",S))') &
-           &                                     ISPEC,LLCORE,LLVAL,'PIXYZ',CVAR
+            IF(THISTASK.EQ.1) THEN
+              WRITE(NFIL,FMT='(3I10,A10,(F9.5,SP,F9.5,"I ",S))') &
+             &                                   ISPEC,LLCORE,LLVAL,'PIXYZ',CVAR
+            ENDIF
             CALL GAUNTPOLSUM(LLCORE,LLVAL,PFXYZ,CVAR)
             DPMATF(MCORE,MVAL,:,ISPEC)=FAC*CVAR*DPMATF(MCORE,MVAL,:,ISPEC)
-            WRITE(NFIL,FMT='(3I10,A10,(F9.5,SP,F9.5,"I ",S))') &
-           &                                     ISPEC,LLCORE,LLVAL,'PFXYZ',CVAR
+            IF(THISTASK.EQ.1) THEN
+              WRITE(NFIL,FMT='(3I10,A10,(F9.5,SP,F9.5,"I ",S))') &
+             &                                   ISPEC,LLCORE,LLVAL,'PFXYZ',CVAR
+            ENDIF
           ENDDO
         ENDDO
       ENDDO
 !     ==  WRITE DIPOLE MATRIX ELEMENTS TO FILE  ================================
-      DO ISPEC=1,NSPECTRA
-        WRITE(NFIL,FMT='(A,I3)')'SPECTRUM=',ISPEC
-        WRITE(NFIL,FMT='(5A10)')'IPRO','LL_CORE','LL_VAL','POL','DPMAT'
-        DO IPRO=1,VNPRO
-          DO MCORE=1,2*LCORE+1
-            DO MVAL=1,2*LVAL+1
-              LLCORE=LCORE*LCORE+MCORE
-              LLVAL=LVAL*LVAL+MVAL
-              WRITE(NFIL,FMT='(3I10,A10,(F10.5,SP,F10.5,"I ",S))')IPRO,LLCORE,LLVAL,'PIXYZ',DPMATI(MCORE,MVAL,IPRO,ISPEC)
-              WRITE(NFIL,FMT='(3I10,A10,(F10.5,SP,F10.5,"I ",S))')IPRO,LLCORE,LLVAL,'PFXYZ',DPMATF(MCORE,MVAL,IPRO,ISPEC)
+      IF(THISTASK.EQ.1) THEN
+        DO ISPEC=1,NSPECTRA
+          WRITE(NFIL,FMT='(A,I3)')'SPECTRUM=',ISPEC
+          WRITE(NFIL,FMT='(5A10)')'IPRO','LL_CORE','LL_VAL','POL','DPMAT'
+          DO IPRO=1,VNPRO
+            DO MCORE=1,2*LCORE+1
+              DO MVAL=1,2*LVAL+1
+                LLCORE=LCORE*LCORE+MCORE
+                LLVAL=LVAL*LVAL+MVAL
+                WRITE(NFIL,FMT='(3I10,A10,(F10.5,SP,F10.5,"I ",S))')IPRO,LLCORE,LLVAL,'PIXYZ',DPMATI(MCORE,MVAL,IPRO,ISPEC)
+                WRITE(NFIL,FMT='(3I10,A10,(F10.5,SP,F10.5,"I ",S))')IPRO,LLCORE,LLVAL,'PFXYZ',DPMATF(MCORE,MVAL,IPRO,ISPEC)
+              ENDDO
             ENDDO
           ENDDO
         ENDDO
-      ENDDO
+      ENDIF
       DEALLOCATE(RARR)
       DEALLOCATE(VALARR)
       DEALLOCATE(COREARR)
