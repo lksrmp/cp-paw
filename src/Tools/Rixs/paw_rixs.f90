@@ -2499,7 +2499,7 @@ END MODULE RIXS_MODULE
       USE STRINGS_MODULE
       USE DATA_MODULE, ONLY: INDSPECIES,CLEN,GIDCORE,CVAL,VLEN,GIDVAL,VVAL,VNPRO !VGRID,CGRID
       IMPLICIT NONE
-      CHARACTER(8) :: TEMPFILE
+      CHARACTER(255) :: TEMPFILE
       INTEGER(4) :: NFIL
       CHARACTER(256) :: STPFILE
       INTEGER(4) :: EXITSTAT
@@ -2507,6 +2507,7 @@ END MODULE RIXS_MODULE
       CHARACTER(255) :: CMDMSG
       CHARACTER(1024) :: CMD
       INTEGER(4) :: THISTASK,NTASKS
+      CHARACTER(20) :: DATE,TIME
       LOGICAL(4) :: TCHK
       CHARACTER(32) :: ID
       INTEGER(4) :: NSP
@@ -2551,7 +2552,13 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETI4('LVAL',LVAL)
 !     ==  OPEN TEMPORARY FILE FOR STPA OUTPUT  =================================
       ID=+'TEMP'
-      TEMPFILE=-'STPA.TMP'
+!     ==  CREATE UNIQUE TEMPORARY FILE NAME BASED ON TASK NUMBER, DATE, TIME  ==
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL DATE_AND_TIME(DATE,TIME)
+      DATE=TRIM(ADJUSTL(DATE))
+      TIME=TRIM(ADJUSTL(TIME))
+      WRITE(TEMPFILE,FMT='(A5,I0,"_",A,"_",A,A4)') &
+     &        -'TEMP_',THISTASK,TRIM(DATE),TRIM(TIME),-'.TMP'
       CALL FILEHANDLER$SETFILE(ID,.FALSE.,TEMPFILE)
       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
@@ -2560,8 +2567,6 @@ END MODULE RIXS_MODULE
       CALL FILEHANDLER$UNIT(ID,NFIL)
 
       CALL RIXS$GETCH('STPFILE',STPFILE)
-      
-      CALL MPE$SYNC('~')
 !     ==========================================================================
 !     ==  VALENCE STATES                                                      ==
 !     ==========================================================================
@@ -2578,13 +2583,11 @@ END MODULE RIXS_MODULE
       ENDIF
       ALLOCATE(LPRO(NPRO))
 
-      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT LPRO  ======================================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'LPRO')
       REWIND(NFIL)
       READ(NFIL,*)LPRO(:)
 
-      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT AEPHI (VALENCE)  ===========================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'AEPHI')
       REWIND(NFIL)
@@ -2629,7 +2632,6 @@ END MODULE RIXS_MODULE
       DEALLOCATE(AEPHI)
       DEALLOCATE(LPRO)
 
-      CALL MPE$SYNC('~')
 !     ==========================================================================
 !     ==  CORE STATE                                                          ==
 !     ==========================================================================
@@ -2639,13 +2641,11 @@ END MODULE RIXS_MODULE
       READ(NFIL,*)NB
       ALLOCATE(ATOML(NB))
 
-      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT ATOML  =====================================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'ATOM.L')
       REWIND(NFIL)
       READ(NFIL,*)ATOML(:)
 
-      CALL MPE$SYNC('~')
 !     ==  EXECUTE STPA.X TO EXTRACT AEPSI (CORE)  ==============================
       CALL STPA_EXECUTE(STPFILE,TEMPFILE,'AEPSI')
       REWIND(NFIL)
@@ -2691,6 +2691,8 @@ END MODULE RIXS_MODULE
         WRITE(NFIL,FMT='(80("="))')
         CALL RADIAL$REPORT(NFIL)
       ENDIF
+!     ==  DELETE TEMPORARY FILE  ===============================================
+      CALL FILEHANDLER$DELETE(ID)
                           CALL TRACE$POP
       END SUBROUTINE STPA$RUN
 !
