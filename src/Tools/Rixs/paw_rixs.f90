@@ -265,11 +265,14 @@ END MODULE RIXS_MODULE
 !     ==  RESOLVE ARGUMENTLIST AND INITIALIZE FILE HANDLER                    ==
 !     ==========================================================================
       CALL INITIALIZEFILEHANDLER
+      CALL FILEHANDLER$UNIT('RCNTL',IVAR)
+      CALL FILEHANDLER$PRINTFILEOFUNIT(IVAR)
 !
 !     ==========================================================================
 !     ==  ANALYZE CONTROL FILE                                                ==
 !     ==========================================================================
       CALL READCNTL
+      CALL READCNTL$FILES
       CALL READCNTL$GRID
       CALL READCNTL$RIXS
       CALL FILEHANDLER$UNIT('PROT',NFILO)
@@ -2031,6 +2034,7 @@ END MODULE RIXS_MODULE
       INTEGER(4)           :: NFIL
       CHARACTER(32)        :: ID 
       CHARACTER(256)       :: FILENAME
+      CHARACTER(256)       :: ROOTNAME
       INTEGER(4)           :: ITH
       INTEGER(4)           :: NUM
       INTEGER(4)           :: NFILO
@@ -2050,19 +2054,70 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$MARK(LL_CNTL,1)
 
-      IF(TPR) THEN
-        CALL FILEHANDLER$UNIT('PROT',NFILO) 
-        CALL LINKEDLIST$REPORT(LL_CNTL,NFILO)
-      END IF
+      ! IF(TPR) THEN
+      !   CALL FILEHANDLER$UNIT('PROT',NFILO) 
+      !   CALL LINKEDLIST$REPORT(LL_CNTL,NFILO)
+      ! END IF
 !
 !     ==========================================================================
 !     ==  !PDOSIN!FILES!FILE                                                  ==
 !     ==========================================================================
+!       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+!       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
+!       CALL LINKEDLIST$EXISTL(LL_CNTL,'FILES',1,TCHK)
+!       IF(.NOT.TCHK) RETURN
+!       CALL LINKEDLIST$SELECT(LL_CNTL,'FILES')
+!       CALL LINKEDLIST$EXISTD(LL_CNTL,'ROOT',1,TCHK)
+!       IF(TCHK) THEN
+!         CALL LINKEDLIST$GET(LL_CNTL,'ROOT',1,ROOTNAME)
+!         CALL FILEHANDLER$SETROOT(ROOTNAME)
+
+!       END IF
+!       CALL LINKEDLIST$NLISTS(LL_CNTL,'FILE',NUM)
+!       DO ITH=1,NUM
+!         CALL LINKEDLIST$SELECT(LL_CNTL,'FILE',ITH)
+!         CALL LINKEDLIST$EXISTD(LL_CNTL,'EXT',1,TCHK)
+!         IF(.NOT.TCHK)CALL LINKEDLIST$SET(LL_CNTL,'EXT',0,.FALSE.)
+! !       ==  READ ACTUAL VALUES  ======================================
+!         CALL LINKEDLIST$GET(LL_CNTL,'ID',1,ID)
+!         CALL LINKEDLIST$GET(LL_CNTL,'NAME',1,FILENAME)
+!         CALL LINKEDLIST$GET(LL_CNTL,'EXT',1,TCHK)
+!         CALL FILEHANDLER$SETFILE(ID,TCHK,FILENAME)
+!         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
+!       ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE READCNTL
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE READCNTL$FILES  !MARK: READCNTL$FILES
+!     **************************************************************************
+!     ** READ !DCNTL!FILES FROM CONTROL FILE                                  **
+!     **************************************************************************
+      USE LINKEDLIST_MODULE
+      USE READCNTL_MODULE, ONLY: LL_CNTL
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      INTEGER(4) :: ITH
+      INTEGER(4) :: NUM
+      CHARACTER(32) :: ID
+      CHARACTER(256) :: FILENAME
+      CHARACTER(256) :: ROOTNAME
+!     **************************************************************************
+                          CALL TRACE$PUSH('READCNTL$FILES')
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
       CALL LINKEDLIST$EXISTL(LL_CNTL,'FILES',1,TCHK)
       IF(.NOT.TCHK) RETURN
       CALL LINKEDLIST$SELECT(LL_CNTL,'FILES')
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'ROOT',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'ROOT',1,ROOTNAME)
+        CALL FILEHANDLER$SETROOT(ROOTNAME)
+        CALL STANDARDFILES
+      ELSE
+        CALL STANDARDFILES
+      ENDIF
       CALL LINKEDLIST$NLISTS(LL_CNTL,'FILE',NUM)
       DO ITH=1,NUM
         CALL LINKEDLIST$SELECT(LL_CNTL,'FILE',ITH)
@@ -2076,8 +2131,7 @@ END MODULE RIXS_MODULE
         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
       ENDDO
                           CALL TRACE$POP
-      RETURN
-      END SUBROUTINE READCNTL
+      END SUBROUTINE READCNTL$FILES
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE READCNTL$GRID  !MARK: READCNTL$GRID
@@ -3128,27 +3182,35 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
       USE STRINGS_MODULE
       CHARACTER(256) :: ROOTNAME
-      CHARACTER(256) :: PDOSINNAME
+      CHARACTER(256) :: CNTLFILE
       INTEGER(4)     :: ISVAR
       INTEGER(4)     :: NARGS
+      CHARACTER(32)  :: ID
 !     **************************************************************************
+                                    CALL TRACE$PUSH('INITIALIZEFILEHANDLER')
       NARGS=COMMAND_ARGUMENT_COUNT()
       IF(NARGS.LT.1) THEN
         CALL ERROR$MSG('ARGUMENT LIST OF EXECUTABLE IS EMPTY')
         CALL ERROR$MSG('THE CONTROL FILE OF THE RIXS TOOL IS MANDATORY')
         CALL ERROR$STOP('INITIALIZEFILEANDLER')
       END IF
-      CALL GET_COMMAND_ARGUMENT(1,PDOSINNAME)
-      ISVAR=INDEX(PDOSINNAME,-'.RCNTL',BACK=.TRUE.)
+      CALL GET_COMMAND_ARGUMENT(1,CNTLFILE)
+      ISVAR=INDEX(CNTLFILE,-'.RCNTL',BACK=.TRUE.)
       IF(ISVAR.NE.0) THEN
-        ROOTNAME=PDOSINNAME(1:ISVAR-1)
+        ROOTNAME=CNTLFILE(1:ISVAR-1)
       ELSE
         ROOTNAME=' '
       END IF
       CALL FILEHANDLER$SETROOT(ROOTNAME)
-      CALL STANDARDFILES
-      CALL FILEHANDLER$SETFILE('RCNTL',.FALSE.,PDOSINNAME)
+      ! CALL STANDARDFILES
+      ID=+'RCNTL'
+      CALL FILEHANDLER$SETFILE(ID,.FALSE.,CNTLFILE)
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','OLD')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
       RETURN
+                                    CALL TRACE$POP
       END SUBROUTINE INITIALIZEFILEHANDLER
 !
 !      ..1.........2.........3.........4.........5.........6.........7.........8
@@ -3185,12 +3247,12 @@ END MODULE RIXS_MODULE
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
 !
 !     ==  CONTROL FILE  == =====================================================
-      ID=+'RCNTL'
-      CALL FILEHANDLER$SETFILE(ID,T,-'.RCNTL')
-      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','OLD')
-      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
-      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
-      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
+      ! ID=+'RCNTL'
+      ! CALL FILEHANDLER$SETFILE(ID,T,-'.RCNTL')
+      ! CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','OLD')
+      ! CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      ! CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
+      ! CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
 !
 !     ==  STRUCTURE FILE   =====================================================
       ID=+'PDOS'
