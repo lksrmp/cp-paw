@@ -730,7 +730,9 @@ END MODULE RIXS_MODULE
                 AMPL=OCCFAC*AMPL/SVAR
 !               ==  MULTIPLY BY WEIGHT OF K-POINT  =============================
                 AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
-                AMPL=AMPL*WKPT(JKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
+! WARNING: SIGNAL GOT SO LARGE THAT OUTPUT WAS NOT FORMATTED PROPERLY
+!          TOOK AWAY THE FACTOR
+                AMPL=AMPL*WKPT(JKPT) ! *NKDIV(1)*NKDIV(2)*NKDIV(3)
 !               ==  CALCULATE ENERGY DIFFERENCE  ===============================
                 DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
 !               ==  ADD TO SPECTRUM  ===========================================
