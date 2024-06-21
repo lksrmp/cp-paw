@@ -228,6 +228,7 @@ END MODULE RIXS_MODULE
       INTEGER(4)                :: ISHIFT(3)
       INTEGER(4)                :: NSPIN
       INTEGER(4)                :: NDIM !=2 FOR SPINOR WF; OTHERWISE =1
+      LOGICAL(4)                :: TINV
       REAL(8)                   :: RNTOT
       INTEGER(4)                :: LENG
       INTEGER(4)                :: NSET
@@ -309,6 +310,7 @@ END MODULE RIXS_MODULE
       CALL PDOS$GETI4('NKPT',NKPT)
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
       CALL PDOS$GETI4('NSPIN',NSPIN)
+      CALL PDOS$GETL4('TINV',TINV)
       CALL PDOS$GETI4A('ISHIFT',3,ISHIFT)
       CALL PDOS$GETI4('NDIM',NDIM)
       IF(NDIM.NE.1)THEN
@@ -350,7 +352,7 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
 !     ==  POPULATE BRILLOUIN MODULE                                           ==
 !     ==========================================================================
-      CALL BRILLOUIN$MSHNOSYM(.TRUE.,RBAS,NKDIV,ISHIFT)
+      CALL BRILLOUIN$MSHNOSYM(TINV,RBAS,NKDIV,ISHIFT)
                             CALL TRACE$PASS('AFTER BRILLOUIN$MSHNOSYM')
 !
 !     ==========================================================================
