@@ -112,6 +112,7 @@ REAL(8), ALLOCATABLE :: CVAL(:)  ! VALUES OF CORE STATE
 ! REAL(8), ALLOCATABLE :: VGRID(:)  ! COORDINATE GRID FOR VALENCE STATES
 INTEGER(4) :: GIDVAL  ! GRID ID FOR VALENCE STATES
 REAL(8), ALLOCATABLE :: VVAL(:,:)  ! VVAL(VLEN,VNPRO) VALUES OF VALENCE STATES 
+LOGICAL(4), ALLOCATABLE :: TKINV(:)  ! IF K-POINTS HAS INVERSION K-POINT
 
 
 ! TODO: CHECK IF DEFINITION OF DIPOLE MATRIX ELEMENTS IS CORRECT AND CONSISTENT
@@ -492,7 +493,7 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
       USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
       USE RIXS_MODULE, ONLY: SPEC
-      USE DATA_MODULE, ONLY: EIG,OCC,EFERMI
+      USE DATA_MODULE, ONLY: EIG,OCC,EFERMI,TKINV
       IMPLICIT NONE
       REAL(8), PARAMETER :: TOL=1.D-6
       INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
@@ -510,7 +511,10 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NKPT
       INTEGER(4) :: NKDIV(3)
-      LOGICAL(4) :: TINV
+      LOGICAL(4) :: TINVSIM  ! INVERSION SYMMETRY USED IN CP-PAW CALCULATION
+      LOGICAL(4) :: TINVI  ! IKPT IS INVERTED
+      LOGICAL(4) :: TINVJ  ! JKPT IS INVERTED
+      INTEGER(4) :: IPOW  ! POWER OF INVERSION
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IKPT, JKPT
       INTEGER(4) :: IN, JN,I
@@ -533,7 +537,7 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETR8('EMAX',EMAX)
       CALL RIXS$GETR8('DE',DE)
       CALL RIXS$GETI4('NE',NE)
-
+      CALL PDOS$GETL4('TINV',TINVSIM)
       CALL PDOS$GETI4('NSPIN',NSPIN)
       ALLOCATE(RAW(NE,NSPIN))
       ALLOCATE(SPECTRUM(NE,NSPIN))
@@ -550,72 +554,82 @@ END MODULE RIXS_MODULE
 !     ==  SUM OVER K-POINTS  =================================================
       DO IKPT=1,NKPT
         WRITE(*,*)'IKPT=',IKPT
-!       ======================================================================
-!       ==  CALCULATE SHIFTED K-POINT AND ITS INDEX JKPT                    ==
-!       ======================================================================
+!       IPOW SERVES AS A SWITCH FOR INVERSION SYMMETRY
+!       XK(:,IKPT) IS THE CALCULATED K-POINT AND -XK(:,IKPT) IS THE INVERTED
+!       (-1)^IPOW*XK(:,IKPT) IS USED TO SWITCH BETWEEN THE TWO
+        DO IPOW=1,2
+!         IF SIMULATION DOES NOT USE INVERSION SYMMETRY, SKIP INVERTED K-POINT
+          IF(IPOW.EQ.1.AND.(.NOT.TINVSIM)) CYCLE
+!         IF K-POINT HAS NO INVERSION SYMMETRY (E.G. GAMMA), SKIP INVERTED K-POINT
+          IF(IPOW.EQ.1.AND.(.NOT.TKINV(IKPT))) CYCLE
+!         SET INVERSION FLAG FOR K-POINT IKPT
+          IF(IPOW.EQ.1) TINVI=.TRUE.
+          IF(IPOW.EQ.2) TINVI=.FALSE.
+!         ======================================================================
+!         ==  CALCULATE SHIFTED K-POINT AND ITS INDEX JKPT                    ==
+!         ======================================================================
 ! TODO: CHECK SIGN OF Q FOR CONSISTENCY
-        XKSHIFT(:)=XK(:,IKPT)-SPEC%XQAPPROX(:)
-        CALL BRILLOUIN$IKP(XKSHIFT,JKPT)
-!       ======================================================================
-!       ==  DETERMINE IF SHIFTED K-POINT COMES FROM INVERSION SYMMETRY AND  ==
-!       ==  NEEDS TO BE TAKEN COMPLEX CONJUGATE                             ==
-!       ==  TINV=.TRUE. FOR -K (INVERSION SYMMETRY)                         ==
-!       ==  TINV=.FALSE. FOR K                                              ==
-!       ======================================================================
-        IF(NORM2(MODULO(XKSHIFT(:),1.D0)-XK(:,JKPT)).GT.1.D-7) THEN
-          TINV=.TRUE.
-          ! WRITE(NFIL,FMT='("|",3F10.5,"|",3F10.5,"|",3F10.5,"|")')XK(:,IKPT),XKSHIFT(:),XK(:,JKPT)
-        ELSE
-          TINV=.FALSE.
-        ENDIF
+          XKSHIFT(:)=(-1.D0)**IPOW*XK(:,IKPT)-SPEC%XQAPPROX(:)
+          CALL BRILLOUIN$IKP(XKSHIFT,JKPT)
+!         ======================================================================
+!         ==  DETERMINE IF SHIFTED K-POINT COMES FROM INVERSION SYMMETRY AND  ==
+!         ==  NEEDS TO BE TAKEN COMPLEX CONJUGATE                             ==
+!         ==  TINV=.TRUE. FOR -K (INVERSION SYMMETRY)                         ==
+!         ==  TINV=.FALSE. FOR K                                              ==
+!         ======================================================================
+          IF(NORM2(MODULO(XKSHIFT(:),1.D0)-XK(:,JKPT)).GT.1.D-8) THEN
+            TINVJ=.TRUE.
+          ELSE
+            TINVJ=.FALSE.
+          ENDIF
 ! TODO: MIGHT NEED TO CHECK WHAT TRANSLATION HAPPENED FOR POTENTIAL PHASE ON WF
-! TODO: CHECK IF IKPT AND -IKPT GIVE SAME RESULT
 !       ==  SUM OVER SPIN  =====================================================
-        DO ISPIN=1,NSPIN
-          STATEI=>STATEARR(IKPT,ISPIN)
-          STATEJ=>STATEARR(JKPT,ISPIN)
-!         ==  SUM OVER N  ======================================================
-          DO IN=1,STATEI%NB
+          DO ISPIN=1,NSPIN
+            STATEI=>STATEARR(IKPT,ISPIN)
+            STATEJ=>STATEARR(JKPT,ISPIN)
+!           ==  SUM OVER N  ======================================================
+            DO IN=1,STATEI%NB
 ! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
-!          FIND A GOOD STRATEGY HOW TO HANDEL PARTIAL OCCUPATIONS
-
-!           ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
-            ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
-            OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
-            IF(OCCI.GT.(1.D0-TOL)) CYCLE
-
-            ! SUM OVER N'
-            DO JN=1,STATEJ%NB
-
-!             ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
-              ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
-              OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
-              IF(OCCJ.LT.TOL) CYCLE
-
-!             ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
-              ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
-              OCCFAC=(1.D0-OCCI)*OCCJ
-
-!             ==  CALCULATE APLITUDE SQUARED  ==================================
+!           FIND A GOOD STRATEGY HOW TO HANDEL PARTIAL OCCUPATIONS
+  
+!             ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
+              ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
+              OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
+              IF(OCCI.GT.(1.D0-TOL)) CYCLE
+  
+              ! SUM OVER N'
+              DO JN=1,STATEJ%NB
+  
+!               ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
+                ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
+                OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
+                IF(OCCJ.LT.TOL) CYCLE
+  
+!               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
+                ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
+                OCCFAC=(1.D0-OCCI)*OCCJ
+  
+!               ==  CALCULATE APLITUDE SQUARED  ==================================
 ! WARNING: CHECK IF RATHER XQAPPROX SHOULD BE USED
-!              CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
-              CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQAPPROX,AMPL)
-
-!             ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
-              ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
-              SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
-              SVAR=SVAR**2
-              SVAR=SVAR+0.25D0*GAMMA**2
-              AMPL=OCCFAC*AMPL/SVAR
-!             ==  MULTIPLY BY WEIGHT OF K-POINT  ===============================
-              AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
-!             ==  CALCULATE ENERGY DIFFERENCE  =================================
-              DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
-!             ==  ADD TO SPECTRUM  =============================================
-              CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
-            ENDDO  ! N'
-          ENDDO  ! N
-        ENDDO  ! SPIN
+!                CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
+                CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,TINVI,JKPT,TINVJ,ISPIN,IN,JN,SPEC%XQAPPROX,AMPL)
+  
+!               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
+                ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
+                SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
+                SVAR=SVAR**2
+                SVAR=SVAR+0.25D0*GAMMA**2
+                AMPL=OCCFAC*AMPL/SVAR
+!               ==  MULTIPLY BY WEIGHT OF K-POINT  ===============================
+!                AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
+!               ==  CALCULATE ENERGY DIFFERENCE  =================================
+                DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
+!               ==  ADD TO SPECTRUM  =============================================
+                CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
+              ENDDO  ! N'
+            ENDDO  ! N
+          ENDDO  ! SPIN
+        ENDDO  ! IPOW
       ENDDO  ! KPT
       DO ISPIN=1,NSPIN
         CALL RIXS_SMEARGRID(NE,RAW(:,ISPIN),SPECTRUM(:,ISPIN))
@@ -634,7 +648,7 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
       USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
       USE RIXS_MODULE, ONLY: SPEC
-      USE DATA_MODULE, ONLY: EIG,OCC,EFERMI
+      USE DATA_MODULE, ONLY: EIG,OCC,EFERMI,TKINV
       USE MPE_MODULE
       IMPLICIT NONE
       REAL(8), PARAMETER :: TOL=1.D-6
@@ -655,7 +669,11 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NKPT
       INTEGER(4) :: NKDIV(3)
-      LOGICAL(4) :: TINV
+      LOGICAL(4) :: TINVSIM  ! INVERSION SYMMETRY USED IN CP-PAW CALCULATION
+      LOGICAL(4) :: TINVI  ! IKPT IS INVERTED
+      LOGICAL(4) :: TINVJ  ! JKPT IS INVERTED
+      INTEGER(4) :: IPOW  ! POWER OF INVERSION OF IKPT
+      INTEGER(4) :: JPOW  ! POWER OF INVERSION OF JKPT
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IKPT, JKPT
       INTEGER(4) :: IN, JN,I
@@ -678,7 +696,7 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETR8('EMAX',EMAX)
       CALL RIXS$GETR8('DE',DE)
       CALL RIXS$GETI4('NE',NE)
-
+      CALL PDOS$GETL4('TINV',TINVSIM)
       CALL PDOS$GETI4('NSPIN',NSPIN)
       ALLOCATE(RAW(NE,NSPIN))
       ALLOCATE(SPECTRUM(NE,NSPIN))
@@ -703,50 +721,70 @@ END MODULE RIXS_MODULE
         ICOUNT=ICOUNT+1
         IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
         WRITE(*,*)'IKPT=',IKPT,'THISTASK=',THISTASK
-!       ==  SECOND SUM OVER K-POINTS  ========================================
-        DO JKPT=1,NKPT
-! TODO: CHECK IF IKPT AND -IKPT GIVE SAME RESULT
-!         ==  SUM OVER SPIN  =====================================================
-          DO ISPIN=1,NSPIN
-            STATEI=>STATEARR(IKPT,ISPIN)
-            STATEJ=>STATEARR(JKPT,ISPIN)
-!           ==  SUM OVER N  ======================================================
-            DO IN=1,STATEI%NB
+!       IPOW SERVES AS A SWITCH FOR INVERSION SYMMETRY
+!       XK(:,IKPT) IS THE CALCULATED K-POINT AND -XK(:,IKPT) IS THE INVERTED
+!       (-1)^IPOW*XK(:,IKPT) IS USED TO SWITCH BETWEEN THE TWO
+        DO IPOW=1,2
+!         IF SIMULATION DOES NOT USE INVERSION SYMMETRY, SKIP INVERTED K-POINT
+          IF(IPOW.EQ.1.AND.(.NOT.TINVSIM)) CYCLE
+!         IF K-POINT HAS NO INVERSION SYMMETRY (E.G. GAMMA), SKIP INVERTED K-POINT
+          IF(IPOW.EQ.1.AND.(.NOT.TKINV(IKPT))) CYCLE
+!         SET INVERSION FLAG FOR K-POINT IKPT
+          IF(IPOW.EQ.1) TINVI=.TRUE.
+          IF(IPOW.EQ.2) TINVI=.FALSE.
+!         ==  SECOND SUM OVER K-POINTS  ========================================
+          DO JKPT=1,NKPT
+            DO JPOW=1,2
+!             IF SIMULATION DOES NOT USE INVERSION SYMMETRY, SKIP INVERTED K-POINT
+              IF(JPOW.EQ.1.AND.(.NOT.TINVSIM)) CYCLE
+!             IF K-POINT HAS NO INVERSION SYMMETRY (E.G. GAMMA), SKIP INVERTED K-POINT
+              IF(JPOW.EQ.1.AND.(.NOT.TKINV(JKPT))) CYCLE
+!             SET INVERSION FLAG FOR K-POINT JKPT
+              IF(JPOW.EQ.1) TINVJ=.TRUE.
+              IF(JPOW.EQ.2) TINVJ=.FALSE.
+!             ==  SUM OVER SPIN  =====================================================
+              DO ISPIN=1,NSPIN
+                STATEI=>STATEARR(IKPT,ISPIN)
+                STATEJ=>STATEARR(JKPT,ISPIN)
+!               ==  SUM OVER N  ======================================================
+                DO IN=1,STATEI%NB
 ! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
-!             ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
-              ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
-              OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
-              IF(OCCI.GT.(1.D0-TOL)) CYCLE
-              ! SUM OVER N'
-              DO JN=1,STATEJ%NB
-!               ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ======================
-                ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
-                OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
-                IF(OCCJ.LT.TOL) CYCLE
-!               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ============
-                ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
-                OCCFAC=(1.D0-OCCI)*OCCJ
-!               ==  CALCULATE APLITUDE SQUARED  ================================
-                CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
-!               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ========================
-                ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
-                SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
-                SVAR=SVAR**2
-                SVAR=SVAR+0.25D0*GAMMA**2
-                AMPL=OCCFAC*AMPL/SVAR
-!               ==  MULTIPLY BY WEIGHT OF K-POINT  =============================
-                AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
+!                 ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
+                  ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
+                  OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
+                  IF(OCCI.GT.(1.D0-TOL)) CYCLE
+                  ! SUM OVER N'
+                  DO JN=1,STATEJ%NB
+!                   ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ======================
+                    ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
+                    OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
+                    IF(OCCJ.LT.TOL) CYCLE
+!                   ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ============
+                    ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
+                    OCCFAC=(1.D0-OCCI)*OCCJ
+!                   ==  CALCULATE APLITUDE SQUARED  ================================
+                    CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,TINVI,JKPT,TINVJ,ISPIN,IN,JN,SPEC%XQ,AMPL)
+!                  ==  CALCULATE DENOMINATOR (LORENTZIAN)  ========================
+                    ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
+                    SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
+                    SVAR=SVAR**2
+                    SVAR=SVAR+0.25D0*GAMMA**2
+                    AMPL=OCCFAC*AMPL/SVAR
+!                   ==  MULTIPLY BY WEIGHT OF K-POINT  =============================
+                    AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
 ! WARNING: SIGNAL GOT SO LARGE THAT OUTPUT WAS NOT FORMATTED PROPERLY
 !          TOOK AWAY THE FACTOR
-                AMPL=AMPL*WKPT(JKPT) ! *NKDIV(1)*NKDIV(2)*NKDIV(3)
-!               ==  CALCULATE ENERGY DIFFERENCE  ===============================
-                DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
-!               ==  ADD TO SPECTRUM  ===========================================
-                CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
-              ENDDO  ! N'
-            ENDDO  ! N
-          ENDDO  ! SPIN
-        ENDDO  ! JKPT
+                   AMPL=AMPL*WKPT(JKPT) ! *NKDIV(1)*NKDIV(2)*NKDIV(3)
+!                 ==  CALCULATE ENERGY DIFFERENCE  ===============================
+                    DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
+!                 ==  ADD TO SPECTRUM  ===========================================
+                    CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
+                  ENDDO  ! N'
+                ENDDO  ! N
+              ENDDO  ! SPIN
+            ENDDO  ! JPOW
+          ENDDO  ! JKPT
+        ENDDO  ! IPOW
       ENDDO  ! IKPT
       CALL MPE$SYNC('~')
       CALL MPE$COMBINE('~','+',RAW)
@@ -761,8 +799,9 @@ END MODULE RIXS_MODULE
       DEALLOCATE(WKPT)
                           CALL TRACE$POP
       END SUBROUTINE RIXS$INCOHERENT
+
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,XQ,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
+      SUBROUTINE RIXS_MATRIXELEMENT(ISPEC,IKPT,TINVI,JKPT,TINVJ,ISPIN,IN,JN,XQ,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
 !     **************************************************************************
 !     ** CALCULATE RIXS MATRIX ELEMENT                                        **
 !     ** DEPENDS ON:                                                          **
@@ -775,9 +814,10 @@ END MODULE RIXS_MODULE
       COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
       INTEGER(4), INTENT(IN) :: ISPEC
       INTEGER(4), INTENT(IN) :: IKPT
+      LOGICAL(4), INTENT(IN) :: TINVI
       INTEGER(4), INTENT(IN) :: JKPT
+      LOGICAL(4), INTENT(IN) :: TINVJ
       INTEGER(4), INTENT(IN) :: ISPIN
-      LOGICAL(4), INTENT(IN) :: TINV
       INTEGER(4), INTENT(IN) :: IN
       INTEGER(4), INTENT(IN) :: JN
       REAL(8), INTENT(IN) :: XQ(3)
@@ -817,8 +857,14 @@ END MODULE RIXS_MODULE
           DO MCORE=1,2*LCORE+1
             DO MVAL=1,2*L+1
               IND=IND+1
-              MAT=MAT+DPMATI(MCORE,MVAL,IPRO,ISPEC)*CONJG(STATEI%VEC(1,IND,IN))
-              IF(TINV) THEN
+!             ==  NORMALLY STATEI IS CONJUGATE AND INVERSION THEN LEADS TO    ==
+!             ==  CONJG(CONJG(STATEI))=STATEI                                 ==
+              IF(TINVI) THEN
+                MAT=MAT+DPMATI(MCORE,MVAL,IPRO,ISPEC)*STATEI%VEC(1,IND,IN)
+              ELSE
+                MAT=MAT+DPMATI(MCORE,MVAL,IPRO,ISPEC)*CONJG(STATEI%VEC(1,IND,IN))
+              ENDIF
+              IF(TINVJ) THEN
                 MATP=MATP+CONJG(DPMATF(MCORE,MVAL,IPRO,ISPEC))*CONJG(STATEJ%VEC(1,IND,JN))
               ELSE
                 MATP=MATP+CONJG(DPMATF(MCORE,MVAL,IPRO,ISPEC))*STATEJ%VEC(1,IND,JN)
@@ -1364,9 +1410,10 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
 !     ** INITIALIZE DATA MODULE                                               **
 !     **************************************************************************
-      USE DATA_MODULE, ONLY: EIG,OCC,RPOS,RXPOS,TINIT,NATOMS,INDSPECIES,INDTYPE,IATMAP,INDMAP,EFERMI
+      USE DATA_MODULE, ONLY: EIG,OCC,RPOS,RXPOS,TINIT,NATOMS,INDSPECIES,INDTYPE,IATMAP,INDMAP,EFERMI,TKINV
       USE STRINGS_MODULE
       IMPLICIT NONE
+      REAL(8), PARAMETER :: TOL=1.D-8
       CHARACTER(16) :: SPECIES
       CHARACTER(1) :: ORBTYPE
       INTEGER(4) :: NKPT
@@ -1384,11 +1431,12 @@ END MODULE RIXS_MODULE
       INTEGER(4), ALLOCATABLE :: ISPECIES(:)
       INTEGER(4), ALLOCATABLE :: LNX(:)
       INTEGER(4), ALLOCATABLE :: LOX(:,:)
+      REAL(8), ALLOCATABLE :: XK(:,:)
       CHARACTER(16) :: ID
       REAL(8), ALLOCATABLE :: R(:,:)
       REAL(8) :: RBAS(3,3)
       REAL(8) :: INVRBAS(3,3)
-      INTEGER(4) :: I,J
+      INTEGER(4) :: I,J,IKPT
       INTEGER(4) :: IAT,ISP
       INTEGER(4) :: LMN,LN,L,M
       INTEGER(4) :: IND
@@ -1404,6 +1452,16 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETCH('ORBTYPE',ORBTYPE)
 
       CALL PDOS$GETI4('NKPT',NKPT)
+      ALLOCATE(XK(3,NKPT))
+      CALL PDOS$GETR8A('XK',3*NKPT,XK)
+      ALLOCATE(TKINV(NKPT))
+      DO IKPT=1,NKPT
+        IF(NORM2(XK(:,IKPT) - MODULO(-XK(:,IKPT),1.D0))<TOL) THEN
+          TKINV(IKPT)=.FALSE.
+        ELSE
+          TKINV(IKPT)=.TRUE.
+        ENDIF
+      ENDDO
       CALL PDOS$GETI4('NSPIN',NSPIN)
       CALL PDOS$GETI4('NDIM',NDIM)
       CALL PDOS$GETR8('RNTOT',RNTOT)
@@ -1605,6 +1663,7 @@ END MODULE RIXS_MODULE
       DEALLOCATE(R)
       DEALLOCATE(LNX)
       DEALLOCATE(LOX)
+      DEALLOCATE(XK)
 !     ==  RUN PAW_STPA TO GET RADIAL WAVE FUNCTIONS  ===========================
       CALL STPA$RUN
       TINIT=.TRUE.
