@@ -220,6 +220,7 @@ END MODULE RIXS_MODULE
       USE RIXS_MODULE, ONLY: RIXS_DEALLOC,SPECTRA
       USE DATA_MODULE, ONLY : DATA_DEALLOC
       USE SPINDIR_MODULE   ,ONLY : SPINDIR !(IS ONLY ALLOCATED)
+      USE MPE_MODULE
       IMPLICIT NONE
       INTEGER(4)                :: NFILO
       INTEGER(4)                :: NAT
@@ -457,6 +458,7 @@ END MODULE RIXS_MODULE
         !CALL RIXS$INCOHERENT(IVAR,EF)
         CALL RIXS$FILE(IVAR,'C')
       ENDDO
+      CALL MPE$SYNC('~')
       CALL FILEHANDLER$UNIT('PROT',NFILO)
 !     ==========================================================================
 !     ==  CLOSING                                                             ==
