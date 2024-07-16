@@ -162,6 +162,8 @@ TYPE SPECTRUM_TYPE
   ! INTEGER(4) :: BI
   ! LOGICAL(4) :: TBF=.FALSE.
   ! INTEGER(4) :: BF
+  REAL(8), ALLOCATABLE :: RAWSIG(:,:)  ! RAW SPECTRUM SIGNAL RAWSIG(NE,NSPIN)
+  REAL(8), ALLOCATABLE :: SIG(:,:)  ! SPECTRUM SIGNAL SIG(NE,NSPIN)
 END TYPE SPECTRUM_TYPE
 ! TRACKS WHAT GENERAL VALUES HAVE BEEN SET
 TYPE RIXS_SET
@@ -221,8 +223,11 @@ END MODULE RIXS_MODULE
       USE DATA_MODULE, ONLY : DATA_DEALLOC
       USE SPINDIR_MODULE   ,ONLY : SPINDIR !(IS ONLY ALLOCATED)
       USE MPE_MODULE
+      USE CLOCK_MODULE
       IMPLICIT NONE
+      LOGICAL(4)                :: TTIMING  ! ACTIVATE DETAILED TIMING OF THE CODE
       INTEGER(4)                :: NFILO
+      CHARACTER(32)             :: DATIME
       INTEGER(4)                :: NAT
       INTEGER(4)                :: NB
       INTEGER(4)                :: NKPT
@@ -258,13 +263,16 @@ END MODULE RIXS_MODULE
       CHARACTER(128)            :: FORMAT
       REAL(8)                   :: EF
       INTEGER(4)                :: THISTASK,NTASKS
+      INTEGER(4)                :: ICOUNT
       real(8) :: svar(3)
       integer(4) :: ivar
 !     **************************************************************************
       CALL MPE$INIT
       CALL MPE$QUERY('~',NTASKS,THISTASK)
-      CALL TRACE$PUSH('MAIN')
-! TODO: TEST PARALLEL EXECUTION OUTPUT (PROTOCOL FILE ETC)
+      CALL PAW_VERSION
+      CALL TIMING$START
+                            CALL TRACE$PUSH('MAIN')
+                            IF(TTIMING) CALL TIMING$CLOCKON('READING')
 !
 !     ==========================================================================
 !     ==  RESOLVE ARGUMENTLIST AND INITIALIZE FILE HANDLER                    ==
@@ -295,13 +303,16 @@ END MODULE RIXS_MODULE
       &           ,"LUKAS RUMP, P.E. BLÖCHL")')
         WRITE(NFILO,FMT='(T10 &
       &            ,"DISTRIBUTED UNDER THE GNU PUBLIC LICENSE V3")')
-        WRITE(NFILO,*)   
+        CALL CPPAW_WRITEVERSION(NFILO)
+        WRITE(NFILO,*) 
+        CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO) 
       ENDIF   
 !
 !     ==========================================================================
 !     ==  READ PDOSFILE                                                       ==
 !     == ( DONE BEFORE READING FROM DCNTL TO SUGGEST RANGE FOR ENERGY GRID)   ==
 !     ==========================================================================
+! TODO: FIND BETTER WAY THAN TO READ PDOS FILE WITH EVERY PROCESS
       CALL FILEHANDLER$UNIT('PDOS',NFILIN)
       REWIND(NFILIN)
       CALL PDOS$READ(NFILIN)
@@ -337,19 +348,15 @@ END MODULE RIXS_MODULE
 !     == CHECK IF PDOS FILE CONTAINS DATA FOR THE TETRAHEDRON METHOD ===========
 !     ==========================================================================
       CALL PDOS$GETCH('FLAG',FLAG)
-      CALL REPORT$CHVAL(NFILO,"FLAG OF PDOS FILE=",FLAG)
+!      CALL REPORT$CHVAL(NFILO,"FLAG OF PDOS FILE=",FLAG)
       IF(MODE.EQ.'TETRA'.AND.FLAG.NE.'181213')THEN 
         CALL ERROR$MSG('THE PDOS-FILE IS TOO OLD FOR MODE=TETRA')
         CALL ERROR$CHVAL('FLAG ',FLAG)
         CALL ERROR$STOP('PDOS MAIN')
       ENDIF
                             CALL TRACE$PASS('AFTER READPDOS')
-
-
-
-
-
-
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('READING')
+                            IF(TTIMING) CALL TIMING$CLOCKON('INITIALIZATION')
 !
 !     ==========================================================================
 !     ==  POPULATE BRILLOUIN MODULE                                           ==
@@ -381,17 +388,14 @@ END MODULE RIXS_MODULE
 !     ==  INITIALIZE DATA_MODULE                                              ==
 !     ==========================================================================
       CALL DATA$INIT
-      IF(THISTASK.EQ.1) THEN
-        CALL DATA$REPORT
-      ENDIF
+      IF(THISTASK.EQ.1) CALL DATA$REPORT
 !
 !     ==========================================================================
 !     ==  CALCULATE FERMI LEVEL OF SIMULATION                                 ==
 !     ==========================================================================
 ! TODO: CHECK IF THIS IS NECESSARY
-      CALL FERMILEVEL(EF)
-                            CALL TRACE$PASS('AFTER FERMILEVEL')
-
+!      CALL FERMILEVEL(EF)
+!                            CALL TRACE$PASS('AFTER FERMILEVEL')
 !
 !     ==========================================================================
 !     ==  INITIALIZE K VECTORS, MOMENTUM TRANSFER, POLARISATION               ==
@@ -404,6 +408,7 @@ END MODULE RIXS_MODULE
                             CALL TRACE$PASS('AFTER RIXS$POLARISATION')
       CALL RIXS$QTRANSFER
                             CALL TRACE$PASS('AFTER RIXS$QTRANSFER')
+      CALL RIXS$SIGNALINIT
 
 !
 !     ==========================================================================
@@ -429,6 +434,11 @@ END MODULE RIXS_MODULE
       ! close(15)
 !
 !     ==========================================================================
+!     ==  RIXS CALCULATION                                                    ==
+!     ==========================================================================
+      CALL DIPOLEMATRIXELEMENTS
+!
+!     ==========================================================================
 !     ==  WRITE REPORT FOR EVERY RIXS SPECTRUM                                ==
 !     ==========================================================================
       CALL RIXS$GETI4('NSPECTRA',NSPECTRA)
@@ -436,29 +446,30 @@ END MODULE RIXS_MODULE
         WRITE(NFILO,FMT='(80("="))')
         WRITE(NFILO,FMT='(80("="),T15,A50)') &
       &            '              RIXS PARAMETER REPORT               '
-      WRITE(NFILO,FMT='(80("="))')
-        DO IVAR=0,NSPECTRA
-          CALL RIXS$REPORT(NFILO,IVAR)
-        ENDDO
+        WRITE(NFILO,FMT='(80("="))')
+        CALL RIXS$REPORT(NFILO,0)
       ENDIF
 !
-!     ==========================================================================
-!     ==  RIXS CALCULATION                                                    ==
-!     ==========================================================================
-      CALL DIPOLEMATRIXELEMENTS
-      DO IVAR=1,NSPECTRA
-        CALL RIXS$FILE(IVAR,'O')
-        CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
-        IF(SPECTRA(IVAR)%TINCOHERENT) THEN
-          CALL RIXS$INCOHERENT(IVAR,EF)
-        ELSE
-          CALL RIXS$CALCULATE(IVAR,EF)
-        ENDIF
-        !CALL RIXS$CALCULATE(IVAR,EF)
-        !CALL RIXS$INCOHERENT(IVAR,EF)
-        CALL RIXS$FILE(IVAR,'C')
-      ENDDO
       CALL MPE$SYNC('~')
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('INITIALIZATION')
+                            IF(TTIMING) CALL TIMING$CLOCKON('RIXS CALCULATION')
+      ICOUNT=0
+      DO IVAR=1,NSPECTRA
+        IF(SPECTRA(IVAR)%TINCOHERENT) THEN
+          CALL ERROR$MSG('INCOHERENT CALCULATION NOT IMPLEMENTED YET')
+          CALL ERROR$STOP('RIXS')
+          !CALL RIXS$INCOHERENT(IVAR,EF)
+        ELSE
+          IF(THISTASK.EQ.1) CALL RIXS$REPORT(NFILO,IVAR)
+          CALL RIXS$CALCULATE(IVAR,EF,ICOUNT)
+        ENDIF
+      ENDDO
+      CALL RIXS$COMBINE
+      CALL RIXS$SMEAR
+      CALL MPE$SYNC('~')
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('RIXS CALCULATION')
+                            IF(TTIMING) CALL TIMING$CLOCKON('CLOSING')
+      IF(THISTASK.EQ.1) CALL RIXS$WRITE
       CALL FILEHANDLER$UNIT('PROT',NFILO)
 !     ==========================================================================
 !     ==  CLOSING                                                             ==
@@ -466,40 +477,40 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
       IF(THISTASK.EQ.1) THEN
-        CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO)
-!
         CALL FILEHANDLER$REPORT(NFILO,'USED')
-        WRITE(NFILO,FMT='(80("="))')
-        WRITE(NFILO,FMT='(80("="),T20,"  PAW_RIXS TOOL FINISHED  ")')
-        WRITE(NFILO,FMT='(80("="))')
       ENDIF
                             CALL TRACE$PASS('AFTER CLOSING')
       CALL RIXS_DEALLOC
       CALL DATA_DEALLOC
-!
-!     ==========================================================================
-!     ==  CLOSE FILES                                                         ==
-!     ==========================================================================
-      CALL FILEHANDLER$CLOSEALL
-                            CALL TRACE$PASS('AFTER FILEHANDLER$CLOSEALL')
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('CLOSING')
+      CALL TIMING$PRINT('~',NFILO)
+      CALL MPE$CLOCKREPORT(NFILO)
+      IF(THISTASK.EQ.1) THEN
+        CALL CLOCK$NOW(DATIME)        
+        WRITE(NFILO,FMT='(80("="))')
+        WRITE(NFILO,FMT='(80("="),T15,"  PROGRAM FINISHED ",A32,"  ")')DATIME
+        WRITE(NFILO,FMT='(80("="))')
+      END IF
+      CALL MPE$SYNC('~')
       CALL TRACE$POP
       CALL ERROR$NORMALSTOP
-      CALL MPE$EXIT
       END PROGRAM RIXS
 
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE RIXS$CALCULATE(ISPEC,EF)  !MARK: RIXS$CALCULATE
+      SUBROUTINE RIXS$CALCULATE(ISPEC,EF,ICOUNT)  !MARK: RIXS$CALCULATE
 !     **************************************************************************
 !     ** CALCULATE RIXS SPECTRUM ISPEC                                        **
 !     **************************************************************************
       USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
       USE RIXS_MODULE, ONLY: SPEC
       USE DATA_MODULE, ONLY: EIG,OCC,EFERMI,TKINV
+      USE MPE_MODULE
       IMPLICIT NONE
       REAL(8), PARAMETER :: TOL=1.D-6
       INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
       REAL(8), INTENT(IN) :: EF  ! FERMI ENERGY OF SIMULATION
+      INTEGER(4), INTENT(INOUT) :: ICOUNT  ! COUNTER FOR PARALLELIZATION
       TYPE(STATE_TYPE), POINTER :: STATEI
       TYPE(STATE_TYPE), POINTER :: STATEJ
       REAL(8), ALLOCATABLE :: XK(:,:)
@@ -527,12 +538,13 @@ END MODULE RIXS_MODULE
       REAL(8) :: OCCFAC
       REAL(8) :: OCCI
       REAL(8) :: OCCJ
+      INTEGER(4) :: NTASKS,THISTASK
       REAL(8), ALLOCATABLE :: SPECTRUM(:,:)
       REAL(8), ALLOCATABLE :: RAW(:,:)
                           WRITE(*,FMT='(A8,I4)')'SPECTRUM',ISPEC
                           CALL TRACE$PUSH('RIXS$CALCULATE')
-      CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
-
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      !CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
       CALL RIXS$SETPTR(ISPEC)
       CALL RIXS$GETR8('GAMMA',GAMMA)
       CALL RIXS$GETR8('EMIN',EMIN)
@@ -541,8 +553,8 @@ END MODULE RIXS_MODULE
       CALL RIXS$GETI4('NE',NE)
       CALL PDOS$GETL4('TINV',TINVSIM)
       CALL PDOS$GETI4('NSPIN',NSPIN)
-      ALLOCATE(RAW(NE,NSPIN))
-      ALLOCATE(SPECTRUM(NE,NSPIN))
+      !ALLOCATE(RAW(NE,NSPIN))
+      !ALLOCATE(SPECTRUM(NE,NSPIN))
       CALL PDOS$GETI4('NKPT',NKPT)
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
       ALLOCATE(XK(3,NKPT))
@@ -551,11 +563,13 @@ END MODULE RIXS_MODULE
       CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
 ! TODO: CHANGE STATE%EIG, STATE%OCC TO EIG, OCC FROM DATA_MODULE FOR CHANGED
 !       NUMBER OF ELECTRONS (CAREFUL WITH INDEXING)
-      RAW=0.D0
-      SPECTRUM=0.D0
+      !RAW=0.D0
+      !SPECTRUM=0.D0
 !     ==  SUM OVER K-POINTS  =================================================
       DO IKPT=1,NKPT
-        WRITE(*,*)'IKPT=',IKPT
+        ICOUNT=ICOUNT+1
+        IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
+        !WRITE(*,*)'task= ',thistask,' IKPT= ',IKPT
 !       IPOW SERVES AS A SWITCH FOR INVERSION SYMMETRY
 !       XK(:,IKPT) IS THE CALCULATED K-POINT AND -XK(:,IKPT) IS THE INVERTED
 !       (-1)^IPOW*XK(:,IKPT) IS USED TO SWITCH BETWEEN THE TWO
@@ -593,7 +607,6 @@ END MODULE RIXS_MODULE
             DO IN=1,STATEI%NB
 ! WARNING: OCCUPATION IS NOT NECESSARILY 0 OR 1 
 !           FIND A GOOD STRATEGY HOW TO HANDEL PARTIAL OCCUPATIONS
-  
 !             ==  CYCLE IF OCCUPATION IS MORE THAN 1-TOL  ========================
               ! IF((STATEI%OCC(IN)/WKPT(IKPT)).GT.(1.D0-TOL)) CYCLE
               OCCI=OCC(IN+STATEI%NB*(ISPIN-1),IKPT)/WKPT(IKPT)
@@ -601,7 +614,7 @@ END MODULE RIXS_MODULE
   
               ! SUM OVER N'
               DO JN=1,STATEJ%NB
-  
+
 !               ==  CYCLE IF OCCUPATION IS LESS THAN TOL  ==========================
                 ! IF((STATEJ%OCC(JN)/WKPT(JKPT)).LT.TOL) CYCLE
                 OCCJ=OCC(JN+STATEJ%NB*(ISPIN-1),JKPT)/WKPT(JKPT)
@@ -610,12 +623,14 @@ END MODULE RIXS_MODULE
 !               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
                 ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
                 OCCFAC=(1.D0-OCCI)*OCCJ
-  
+!                 if(THISTASK.eq.1) then
+!                   write(*,*)THISTASK,ispec,ikpt,jkpt,ispin,in,jn,icount
+! !                  write(*,*)'# nkpt=',nkpt,' nspin=',nspin,' nbi=',statei%nb,' nbj=',statej%nb
+!                 endif
 !               ==  CALCULATE APLITUDE SQUARED  ==================================
 ! WARNING: CHECK IF RATHER XQAPPROX SHOULD BE USED
 !                CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
                 CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,TINVI,JKPT,TINVJ,ISPIN,IN,JN,SPEC%XQAPPROX,AMPL)
-  
 !               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
                 ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
                 SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
@@ -627,17 +642,17 @@ END MODULE RIXS_MODULE
 !               ==  CALCULATE ENERGY DIFFERENCE  =================================
                 DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
 !               ==  ADD TO SPECTRUM  =============================================
-                CALL RIXS_MAPGRID(DELTAE,AMPL,NE,RAW(:,ISPIN))
+                CALL RIXS_MAPGRID(DELTAE,AMPL,NE,SPEC%RAWSIG(:,ISPIN))
               ENDDO  ! N'
             ENDDO  ! N
           ENDDO  ! SPIN
         ENDDO  ! IPOW
       ENDDO  ! KPT
-      DO ISPIN=1,NSPIN
-        CALL RIXS_SMEARGRID(NE,RAW(:,ISPIN),SPECTRUM(:,ISPIN))
-      ENDDO
-      CALL RIXS_HEADER(NFIL,ISPEC)
-      CALL RIXS_WRITEGRID(NFIL,NE,NSPIN,SPECTRUM,EMIN,EMAX,DE)
+      !DO ISPIN=1,NSPIN
+      !  CALL RIXS_SMEARGRID(NE,RAW(:,ISPIN),SPECTRUM(:,ISPIN))
+      !ENDDO
+      !CALL RIXS_HEADER(NFIL,ISPEC)
+      !CALL RIXS_WRITEGRID(NFIL,NE,NSPIN,SPECTRUM,EMIN,EMAX,DE)
       DEALLOCATE(XK)
       DEALLOCATE(WKPT)
                           CALL TRACE$POP
@@ -722,7 +737,7 @@ END MODULE RIXS_MODULE
       DO IKPT=1,NKPT
         ICOUNT=ICOUNT+1
         IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
-        WRITE(*,*)'IKPT=',IKPT,'THISTASK=',THISTASK
+        !WRITE(*,*)'IKPT=',IKPT,'THISTASK=',THISTASK
 !       IPOW SERVES AS A SWITCH FOR INVERSION SYMMETRY
 !       XK(:,IKPT) IS THE CALCULATED K-POINT AND -XK(:,IKPT) IS THE INVERTED
 !       (-1)^IPOW*XK(:,IKPT) IS USED TO SWITCH BETWEEN THE TWO
@@ -801,6 +816,58 @@ END MODULE RIXS_MODULE
       DEALLOCATE(WKPT)
                           CALL TRACE$POP
       END SUBROUTINE RIXS$INCOHERENT
+
+      SUBROUTINE RIXS$COMBINE  !MARK: RIXS$COMBINE
+      USE RIXS_MODULE, ONLY: SPEC,NSPECTRA
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+                          CALL TRACE$PUSH('RIXS$COMBINE')
+      DO ISPEC=1,NSPECTRA
+        CALL RIXS$SETPTR(ISPEC)
+        CALL MPE$COMBINE('~','+',SPEC%RAWSIG)
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS$COMBINE
+
+      SUBROUTINE RIXS$SMEAR
+      USE RIXS_MODULE, ONLY: SPEC,NSPECTRA,NE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: NSPIN
+                          CALL TRACE$PUSH('RIXS$SMEAR')
+      CALL PDOS$GETI4('NSPIN',NSPIN)
+      DO ISPEC=1,NSPECTRA
+        CALL RIXS$SETPTR(ISPEC)
+        DO ISPIN=1,NSPIN
+          CALL RIXS_SMEARGRID(NE,SPEC%RAWSIG(:,ISPIN),SPEC%SIG(:,ISPIN))
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS$SMEAR
+
+      SUBROUTINE RIXS$WRITE  !MARK: RIXS$WRITE
+      USE RIXS_MODULE, ONLY: SPEC,NSPECTRA,NE,EMIN,EMAX,DE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: NSPIN
+                          CALL TRACE$PUSH('RIXS$WRITE')
+      CALL PDOS$GETI4('NSPIN',NSPIN)
+      DO ISPEC=1,NSPECTRA
+        CALL RIXS$FILE(ISPEC,'O')
+        CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
+        CALL RIXS_HEADER(NFIL,ISPEC)
+        CALL RIXS$SETPTR(ISPEC)
+        CALL RIXS_WRITEGRID(NFIL,NE,NSPIN,SPEC%SIG,EMIN,EMAX,DE)
+        !WRITE(*,*)'### WRITING SPECTRUM ',ISPEC
+        CALL RIXS$FILE(ISPEC,'C')
+
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS$WRITE
+
 
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS_MATRIXELEMENT(ISPEC,IKPT,TINVI,JKPT,TINVJ,ISPIN,IN,JN,XQ,AMPLITUDE)  !MARK: RIXS_MATRIXELEMENT
@@ -919,6 +986,8 @@ END MODULE RIXS_MODULE
         WRITE(NFIL,FMT='(A10,3F12.6)')'XKI:',SPECTRA(ID)%XKI(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'XKF:',SPECTRA(ID)%XKF(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'XQ:',SPECTRA(ID)%XQ(:)
+        WRITE(NFIL,FMT='(A10,3F12.6)')'APPR. XQ:',SPECTRA(ID)%XQAPPROX(:)
+        WRITE(NFIL,FMT='(A10,F12.6)')'ERROR:', NORM2(SPECTRA(ID)%XQ-SPECTRA(ID)%XQAPPROX)
         WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL I:',SPECTRA(ID)%PI(:)
         WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POL I XYZ:',SPECTRA(ID)%PIXYZ(:)
         WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL F:',SPECTRA(ID)%PF(:)
@@ -926,7 +995,6 @@ END MODULE RIXS_MODULE
         ! IF(SPECTRA(ID)%TBI) WRITE(NFIL,FMT='(A10,I6)')'BAND I:',SPECTRA(ID)%BI
         ! IF(SPECTRA(ID)%TBF) WRITE(NFIL,FMT='(A10,I6)')'BAND F:',SPECTRA(ID)%BF
         FLUSH(NFIL)
-        RETURN
       ELSE
         CALL ERROR$MSG('INVALID ID')
         CALL ERROR$I4VAL('ID',ID)
@@ -1037,6 +1105,7 @@ END MODULE RIXS_MODULE
       CALL CONSTANTS('EV',EV)
       DO I=1,NE
         E=EMIN+DE*REAL(I-1,KIND=8)
+! TODO: IS FORMAT COMPATIBLE WITH NSPIN=1
         WRITE(NFIL,FMT='(F14.8,2F20.8)')E/EV,GRID(I,:)
       ENDDO
                           CALL TRACE$POP
@@ -1685,7 +1754,6 @@ END MODULE RIXS_MODULE
       REAL(8) :: ANGSTROM
                           CALL TRACE$PUSH('DATA$REPORT')
       CALL CONSTANTS('ANGSTROM',ANGSTROM)
-      CALL FILEHANDLER$UNIT('PROT',NFIL)
       IF(.NOT.TINIT) THEN
         CALL ERROR$MSG('DATA MODULE NOT INITIALIZED')
         CALL ERROR$STOP('DATA$REPORT')
@@ -1697,8 +1765,8 @@ END MODULE RIXS_MODULE
      WRITE(NFIL,FMT='(80("="))')
       WRITE(NFIL,FMT='(A10,I6)')'NATOMS:',NATOMS
       WRITE(NFIL,FMT='(A10,I6)')'I SPECIES:',INDSPECIES
-      WRITE(NFIL,FMT='(A10)')'RPOS:'
-      WRITE(NFIL,FMT='(3F12.6)')(RPOS(:,I)/ANGSTROM,I=1,NATOMS)
+        WRITE(NFIL,FMT='(A10)')'RPOS [ANG]:'
+        WRITE(NFIL,FMT='(3F12.6)')(RPOS(:,I)/ANGSTROM,I=1,NATOMS)
       WRITE(NFIL,FMT='(A10)')'IATMAP:'
       DO I=1,NATOMS
         WRITE(NFIL,FMT='(I3,"->",I3)')I,IATMAP(I)
@@ -1916,13 +1984,13 @@ END MODULE RIXS_MODULE
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
 
       CALL MPE$QUERY('~',NTASKS,THISTASK)
-      IF(THISTASK.EQ.0) THEN
-        WRITE(NFIL,FMT='(A)')
-        WRITE(NFIL,FMT='(80("="))')
-        WRITE(NFIL,FMT='(80("="),T15,A50)') &
-      &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
-        WRITE(NFIL,FMT='(80("="))')
-      ENDIF
+      ! IF(THISTASK.EQ.1) THEN
+      !   WRITE(NFIL,FMT='(A)')
+      !   WRITE(NFIL,FMT='(80("="))')
+      !   WRITE(NFIL,FMT='(80("="),T15,A50)') &
+      ! &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
+      !   WRITE(NFIL,FMT='(80("="))')
+      ! ENDIF
       DO ISPEC=1,NSPECTRA
 !
 !       ========================================================================
@@ -1955,18 +2023,35 @@ END MODULE RIXS_MODULE
         VVAR(:)=SPECTRA(ISPEC)%XQ(:)-QTRANS(:)
         IP(:)=NINT(VVAR(:))
         QTRANS(:)=QTRANS(:)+REAL(IP(:),KIND=8)
-        IF(THISTASK.EQ.1) THEN
-          WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
-          WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
-          WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
-          WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
-          WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
-          WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
-        ENDIF
+        ! IF(THISTASK.EQ.1) THEN
+        !   WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
+        !   WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
+        !   WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
+        !   WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
+        !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
+        !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
+        ! ENDIF
 
         SPECTRA(ISPEC)%XQAPPROX=QTRANS
       ENDDO
       END SUBROUTINE RIXS$QTRANSFER
+
+      SUBROUTINE RIXS$SIGNALINIT  !MARK: RIXS$SIGNALINIT
+      USE RIXS_MODULE, ONLY: NSPECTRA,SPEC,NE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: NSPIN
+                          CALL TRACE$PUSH('RIXS$SIGNALINIT')
+      CALL PDOS$GETI4('NSPIN',NSPIN)
+      DO ISPEC=1,NSPECTRA
+        CALL RIXS$SETPTR(ISPEC)
+        ALLOCATE(SPEC%RAWSIG(NE,NSPIN))
+        SPEC%RAWSIG=0.D0
+        ALLOCATE(SPEC%SIG(NE,NSPIN))
+        SPEC%SIG=0.D0
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS$SIGNALINIT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS$FILE(ISPEC,FLAG)  !MARK: RIXS$FILE
