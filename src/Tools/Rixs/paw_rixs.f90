@@ -304,7 +304,8 @@ END MODULE RIXS_MODULE
         WRITE(NFILO,FMT='(T10 &
       &            ,"DISTRIBUTED UNDER THE GNU PUBLIC LICENSE V3")')
         CALL CPPAW_WRITEVERSION(NFILO)
-        WRITE(NFILO,*)   
+        WRITE(NFILO,*) 
+        CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO) 
       ENDIF   
 !
 !     ==========================================================================
@@ -433,6 +434,11 @@ END MODULE RIXS_MODULE
       ! close(15)
 !
 !     ==========================================================================
+!     ==  RIXS CALCULATION                                                    ==
+!     ==========================================================================
+      CALL DIPOLEMATRIXELEMENTS
+!
+!     ==========================================================================
 !     ==  WRITE REPORT FOR EVERY RIXS SPECTRUM                                ==
 !     ==========================================================================
       CALL RIXS$GETI4('NSPECTRA',NSPECTRA)
@@ -441,32 +447,22 @@ END MODULE RIXS_MODULE
         WRITE(NFILO,FMT='(80("="),T15,A50)') &
       &            '              RIXS PARAMETER REPORT               '
         WRITE(NFILO,FMT='(80("="))')
-        DO IVAR=0,NSPECTRA
-          CALL RIXS$REPORT(NFILO,IVAR)
-        ENDDO
+        CALL RIXS$REPORT(NFILO,0)
       ENDIF
 !
-!     ==========================================================================
-!     ==  RIXS CALCULATION                                                    ==
-!     ==========================================================================
-      CALL DIPOLEMATRIXELEMENTS
       CALL MPE$SYNC('~')
                             IF(TTIMING) CALL TIMING$CLOCKOFF('INITIALIZATION')
                             IF(TTIMING) CALL TIMING$CLOCKON('RIXS CALCULATION')
       ICOUNT=0
       DO IVAR=1,NSPECTRA
-        !CALL RIXS$FILE(IVAR,'O')
-        !CALL FILEHANDLER$UNIT('RIXSOUT',NFILO)
         IF(SPECTRA(IVAR)%TINCOHERENT) THEN
           CALL ERROR$MSG('INCOHERENT CALCULATION NOT IMPLEMENTED YET')
           CALL ERROR$STOP('RIXS')
           !CALL RIXS$INCOHERENT(IVAR,EF)
         ELSE
+          IF(THISTASK.EQ.1) CALL RIXS$REPORT(NFILO,IVAR)
           CALL RIXS$CALCULATE(IVAR,EF,ICOUNT)
         ENDIF
-        !CALL RIXS$CALCULATE(IVAR,EF)
-        !CALL RIXS$INCOHERENT(IVAR,EF)
-        !CALL RIXS$FILE(IVAR,'C')
       ENDDO
       CALL RIXS$COMBINE
       CALL RIXS$SMEAR
@@ -481,7 +477,6 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
       IF(THISTASK.EQ.1) THEN
-        CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO)
         CALL FILEHANDLER$REPORT(NFILO,'USED')
       ENDIF
                             CALL TRACE$PASS('AFTER CLOSING')
@@ -991,6 +986,8 @@ END MODULE RIXS_MODULE
         WRITE(NFIL,FMT='(A10,3F12.6)')'XKI:',SPECTRA(ID)%XKI(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'XKF:',SPECTRA(ID)%XKF(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'XQ:',SPECTRA(ID)%XQ(:)
+        WRITE(NFIL,FMT='(A10,3F12.6)')'APPR. XQ:',SPECTRA(ID)%XQAPPROX(:)
+        WRITE(NFIL,FMT='(A10,F12.6)')'ERROR:', NORM2(SPECTRA(ID)%XQ-SPECTRA(ID)%XQAPPROX)
         WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL I:',SPECTRA(ID)%PI(:)
         WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POL I XYZ:',SPECTRA(ID)%PIXYZ(:)
         WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL F:',SPECTRA(ID)%PF(:)
@@ -1757,7 +1754,6 @@ END MODULE RIXS_MODULE
       REAL(8) :: ANGSTROM
                           CALL TRACE$PUSH('DATA$REPORT')
       CALL CONSTANTS('ANGSTROM',ANGSTROM)
-      CALL FILEHANDLER$UNIT('PROT',NFIL)
       IF(.NOT.TINIT) THEN
         CALL ERROR$MSG('DATA MODULE NOT INITIALIZED')
         CALL ERROR$STOP('DATA$REPORT')
@@ -1769,8 +1765,8 @@ END MODULE RIXS_MODULE
      WRITE(NFIL,FMT='(80("="))')
       WRITE(NFIL,FMT='(A10,I6)')'NATOMS:',NATOMS
       WRITE(NFIL,FMT='(A10,I6)')'I SPECIES:',INDSPECIES
-      WRITE(NFIL,FMT='(A10)')'RPOS:'
-      WRITE(NFIL,FMT='(3F12.6)')(RPOS(:,I)/ANGSTROM,I=1,NATOMS)
+        WRITE(NFIL,FMT='(A10)')'RPOS [ANG]:'
+        WRITE(NFIL,FMT='(3F12.6)')(RPOS(:,I)/ANGSTROM,I=1,NATOMS)
       WRITE(NFIL,FMT='(A10)')'IATMAP:'
       DO I=1,NATOMS
         WRITE(NFIL,FMT='(I3,"->",I3)')I,IATMAP(I)
@@ -1988,13 +1984,13 @@ END MODULE RIXS_MODULE
       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
 
       CALL MPE$QUERY('~',NTASKS,THISTASK)
-      IF(THISTASK.EQ.0) THEN
-        WRITE(NFIL,FMT='(A)')
-        WRITE(NFIL,FMT='(80("="))')
-        WRITE(NFIL,FMT='(80("="),T15,A50)') &
-      &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
-        WRITE(NFIL,FMT='(80("="))')
-      ENDIF
+      ! IF(THISTASK.EQ.1) THEN
+      !   WRITE(NFIL,FMT='(A)')
+      !   WRITE(NFIL,FMT='(80("="))')
+      !   WRITE(NFIL,FMT='(80("="),T15,A50)') &
+      ! &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
+      !   WRITE(NFIL,FMT='(80("="))')
+      ! ENDIF
       DO ISPEC=1,NSPECTRA
 !
 !       ========================================================================
@@ -2027,14 +2023,14 @@ END MODULE RIXS_MODULE
         VVAR(:)=SPECTRA(ISPEC)%XQ(:)-QTRANS(:)
         IP(:)=NINT(VVAR(:))
         QTRANS(:)=QTRANS(:)+REAL(IP(:),KIND=8)
-        IF(THISTASK.EQ.1) THEN
-          WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
-          WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
-          WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
-          WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
-          WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
-          WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
-        ENDIF
+        ! IF(THISTASK.EQ.1) THEN
+        !   WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
+        !   WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
+        !   WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
+        !   WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
+        !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
+        !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
+        ! ENDIF
 
         SPECTRA(ISPEC)%XQAPPROX=QTRANS
       ENDDO
