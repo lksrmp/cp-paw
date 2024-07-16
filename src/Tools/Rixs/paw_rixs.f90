@@ -223,8 +223,11 @@ END MODULE RIXS_MODULE
       USE DATA_MODULE, ONLY : DATA_DEALLOC
       USE SPINDIR_MODULE   ,ONLY : SPINDIR !(IS ONLY ALLOCATED)
       USE MPE_MODULE
+      USE CLOCK_MODULE
       IMPLICIT NONE
+      LOGICAL(4)                :: TTIMING  ! ACTIVATE DETAILED TIMING OF THE CODE
       INTEGER(4)                :: NFILO
+      CHARACTER(32)             :: DATIME
       INTEGER(4)                :: NAT
       INTEGER(4)                :: NB
       INTEGER(4)                :: NKPT
@@ -267,8 +270,9 @@ END MODULE RIXS_MODULE
       CALL MPE$INIT
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL PAW_VERSION
-      CALL TRACE$PUSH('MAIN')
-! TODO: TEST PARALLEL EXECUTION OUTPUT (PROTOCOL FILE ETC)
+      CALL TIMING$START
+                            CALL TRACE$PUSH('MAIN')
+                            IF(TTIMING) CALL TIMING$CLOCKON('READING')
 !
 !     ==========================================================================
 !     ==  RESOLVE ARGUMENTLIST AND INITIALIZE FILE HANDLER                    ==
@@ -299,6 +303,7 @@ END MODULE RIXS_MODULE
       &           ,"LUKAS RUMP, P.E. BLÖCHL")')
         WRITE(NFILO,FMT='(T10 &
       &            ,"DISTRIBUTED UNDER THE GNU PUBLIC LICENSE V3")')
+        CALL CPPAW_WRITEVERSION(NFILO)
         WRITE(NFILO,*)   
       ENDIF   
 !
@@ -306,6 +311,7 @@ END MODULE RIXS_MODULE
 !     ==  READ PDOSFILE                                                       ==
 !     == ( DONE BEFORE READING FROM DCNTL TO SUGGEST RANGE FOR ENERGY GRID)   ==
 !     ==========================================================================
+! TODO: FIND BETTER WAY THAN TO READ PDOS FILE WITH EVERY PROCESS
       CALL FILEHANDLER$UNIT('PDOS',NFILIN)
       REWIND(NFILIN)
       CALL PDOS$READ(NFILIN)
@@ -341,19 +347,15 @@ END MODULE RIXS_MODULE
 !     == CHECK IF PDOS FILE CONTAINS DATA FOR THE TETRAHEDRON METHOD ===========
 !     ==========================================================================
       CALL PDOS$GETCH('FLAG',FLAG)
-      CALL REPORT$CHVAL(NFILO,"FLAG OF PDOS FILE=",FLAG)
+!      CALL REPORT$CHVAL(NFILO,"FLAG OF PDOS FILE=",FLAG)
       IF(MODE.EQ.'TETRA'.AND.FLAG.NE.'181213')THEN 
         CALL ERROR$MSG('THE PDOS-FILE IS TOO OLD FOR MODE=TETRA')
         CALL ERROR$CHVAL('FLAG ',FLAG)
         CALL ERROR$STOP('PDOS MAIN')
       ENDIF
                             CALL TRACE$PASS('AFTER READPDOS')
-
-
-
-
-
-
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('READING')
+                            IF(TTIMING) CALL TIMING$CLOCKON('INITIALIZATION')
 !
 !     ==========================================================================
 !     ==  POPULATE BRILLOUIN MODULE                                           ==
@@ -385,17 +387,14 @@ END MODULE RIXS_MODULE
 !     ==  INITIALIZE DATA_MODULE                                              ==
 !     ==========================================================================
       CALL DATA$INIT
-      IF(THISTASK.EQ.1) THEN
-        CALL DATA$REPORT
-      ENDIF
+      IF(THISTASK.EQ.1) CALL DATA$REPORT
 !
 !     ==========================================================================
 !     ==  CALCULATE FERMI LEVEL OF SIMULATION                                 ==
 !     ==========================================================================
 ! TODO: CHECK IF THIS IS NECESSARY
-      CALL FERMILEVEL(EF)
-                            CALL TRACE$PASS('AFTER FERMILEVEL')
-
+!      CALL FERMILEVEL(EF)
+!                            CALL TRACE$PASS('AFTER FERMILEVEL')
 !
 !     ==========================================================================
 !     ==  INITIALIZE K VECTORS, MOMENTUM TRANSFER, POLARISATION               ==
@@ -441,7 +440,7 @@ END MODULE RIXS_MODULE
         WRITE(NFILO,FMT='(80("="))')
         WRITE(NFILO,FMT='(80("="),T15,A50)') &
       &            '              RIXS PARAMETER REPORT               '
-      WRITE(NFILO,FMT='(80("="))')
+        WRITE(NFILO,FMT='(80("="))')
         DO IVAR=0,NSPECTRA
           CALL RIXS$REPORT(NFILO,IVAR)
         ENDDO
@@ -452,6 +451,8 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
       CALL DIPOLEMATRIXELEMENTS
       CALL MPE$SYNC('~')
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('INITIALIZATION')
+                            IF(TTIMING) CALL TIMING$CLOCKON('RIXS CALCULATION')
       ICOUNT=0
       DO IVAR=1,NSPECTRA
         !CALL RIXS$FILE(IVAR,'O')
@@ -470,9 +471,9 @@ END MODULE RIXS_MODULE
       CALL RIXS$COMBINE
       CALL RIXS$SMEAR
       CALL MPE$SYNC('~')
-      IF(THISTASK.EQ.1) THEN
-        CALL RIXS$WRITE
-      ENDIF
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('RIXS CALCULATION')
+                            IF(TTIMING) CALL TIMING$CLOCKON('CLOSING')
+      IF(THISTASK.EQ.1) CALL RIXS$WRITE
       CALL FILEHANDLER$UNIT('PROT',NFILO)
 !     ==========================================================================
 !     ==  CLOSING                                                             ==
@@ -481,25 +482,23 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
       IF(THISTASK.EQ.1) THEN
         CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFILO)
-!
         CALL FILEHANDLER$REPORT(NFILO,'USED')
-        WRITE(NFILO,FMT='(80("="))')
-        WRITE(NFILO,FMT='(80("="),T20,"  PAW_RIXS TOOL FINISHED  ")')
-        WRITE(NFILO,FMT='(80("="))')
       ENDIF
                             CALL TRACE$PASS('AFTER CLOSING')
       CALL RIXS_DEALLOC
       CALL DATA_DEALLOC
-!
-!     ==========================================================================
-!     ==  CLOSE FILES                                                         ==
-!     ==========================================================================
-      CALL FILEHANDLER$CLOSEALL
-                            CALL TRACE$PASS('AFTER FILEHANDLER$CLOSEALL')
+                            IF(TTIMING) CALL TIMING$CLOCKOFF('CLOSING')
+      CALL TIMING$PRINT('~',NFILO)
+      CALL MPE$CLOCKREPORT(NFILO)
+      IF(THISTASK.EQ.1) THEN
+        CALL CLOCK$NOW(DATIME)        
+        WRITE(NFILO,FMT='(80("="))')
+        WRITE(NFILO,FMT='(80("="),T15,"  PROGRAM FINISHED ",A32,"  ")')DATIME
+        WRITE(NFILO,FMT='(80("="))')
+      END IF
       CALL MPE$SYNC('~')
       CALL TRACE$POP
       CALL ERROR$NORMALSTOP
-      CALL MPE$EXIT
       END PROGRAM RIXS
 
 !
