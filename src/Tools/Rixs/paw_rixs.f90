@@ -96,7 +96,7 @@ MODULE DATA_MODULE
 INTEGER(4) :: NATOMS  ! NUMBER OF ATOMS IN RIXS CALCULATION
 INTEGER(4) :: INDSPECIES  ! INTERNAL INDEX OF SPECIES
 INTEGER(4) :: INDTYPE  ! INTERNAL INDEX OF TYPE (S=0,P=1,D=2,F=3)
-REAL(8) :: EFERMI  ! FERMI ENERGY OF SIMULATION
+REAL(8) :: EFERMI  ! FERMI ENERGY OF SIMULATION (CALCULATED)
 REAL(8), ALLOCATABLE :: RPOS(:,:)  ! POSITION OF ATOMS IN RIXS CALCULATION
 REAL(8), ALLOCATABLE :: RXPOS(:,:)  ! RELATIVE POSITION OF ATOMS IN RIXS CALCULATION
 REAL(8), ALLOCATABLE :: EIG(:,:)  ! EIGENVALUES OF STATES
@@ -184,6 +184,7 @@ INTEGER(4) :: NE
 REAL(8) :: NORMAL(3)
 REAL(8) :: EBROAD
 REAL(8) :: EFEXP
+REAL(8) :: EZERO  ! ZERO ENERGY OF RIXS CALCULATION
 REAL(8) :: GAMMA
 CHARACTER(16) :: SPECIES
 CHARACTER(1) :: ORBTYPE
@@ -388,7 +389,7 @@ END MODULE RIXS_MODULE
 !     ==  INITIALIZE DATA_MODULE                                              ==
 !     ==========================================================================
       CALL DATA$INIT
-      IF(THISTASK.EQ.1) CALL DATA$REPORT
+      IF(THISTASK.EQ.1) CALL DATA$REPORT(NFILO)
 !
 !     ==========================================================================
 !     ==  CALCULATE FERMI LEVEL OF SIMULATION                                 ==
@@ -414,13 +415,13 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
 !     ==  WRITE ALL K POINTS TO FILE                                          ==
 !     ==========================================================================
-      ! CALL KPOINTWRITE
+      ! IF(THISTASK.EQ.1) CALL KPOINTWRITE
       !                       CALL TRACE$PASS('AFTER KPOINTWRITE')
 !
 !     ==========================================================================
 !     ==  WRITE ALL ENERGIES TO FILE                                          ==
 !     ==========================================================================
-      ! CALL ENERGYWRITE
+      ! IF(THISTASK.EQ.1) CALL ENERGYWRITE
       !                       CALL TRACE$PASS('AFTER ENERGYWRITE')
 !
 !     ==========================================================================
@@ -503,10 +504,11 @@ END MODULE RIXS_MODULE
 !     ** CALCULATE RIXS SPECTRUM ISPEC                                        **
 !     **************************************************************************
       USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR
-      USE RIXS_MODULE, ONLY: SPEC
-      USE DATA_MODULE, ONLY: EIG,OCC,EFERMI,TKINV
+      USE RIXS_MODULE, ONLY: SPEC,EZERO
+      USE DATA_MODULE, ONLY: EIG,OCC,TKINV
       USE MPE_MODULE
       IMPLICIT NONE
+      LOGICAL(4), PARAMETER :: TDBG=.FALSE.
       REAL(8), PARAMETER :: TOL=1.D-6
       INTEGER(4), INTENT(IN) :: ISPEC  ! NUMBER OF SPECTRUM
       REAL(8), INTENT(IN) :: EF  ! FERMI ENERGY OF SIMULATION
@@ -623,17 +625,18 @@ END MODULE RIXS_MODULE
 !               ==  CALCULATE FACTOR FOR OCCUPATION (1-F(N))*F(N')  ==============
                 ! OCCFAC=(1.D0-STATEI%OCC(IN)/WKPT(IKPT))*STATEJ%OCC(JN)/WKPT(JKPT)
                 OCCFAC=(1.D0-OCCI)*OCCJ
-!                 if(THISTASK.eq.1) then
-!                   write(*,*)THISTASK,ispec,ikpt,jkpt,ispin,in,jn,icount
-! !                  write(*,*)'# nkpt=',nkpt,' nspin=',nspin,' nbi=',statei%nb,' nbj=',statej%nb
-!                 endif
 !               ==  CALCULATE APLITUDE SQUARED  ==================================
 ! WARNING: CHECK IF RATHER XQAPPROX SHOULD BE USED
 !                CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,JKPT,ISPIN,TINV,IN,JN,SPEC%XQ,AMPL)
+                IF(TDBG) THEN
+                  WRITE(*,*)''
+                  WRITE(*,FMT='("IK=",I2," IN=",I2," JK=",I2," JN=",I2," IE=",F12.6," JE=",F12.6)')IKPT,IN,JKPT,JN,STATEI%EIG(IN),STATEJ%EIG(JN)
+                  WRITE(*,FMT='(A)')'##########################################'
+                ENDIF
                 CALL RIXS_MATRIXELEMENT(ISPEC,IKPT,TINVI,JKPT,TINVJ,ISPIN,IN,JN,SPEC%XQAPPROX,AMPL)
 !               ==  CALCULATE DENOMINATOR (LORENTZIAN)  ==========================
                 ! SVAR=STATEI%EIG(IN)-EF-SPEC%EIREL
-                SVAR=STATEI%EIG(IN)-EFERMI-SPEC%EIREL
+                SVAR=STATEI%EIG(IN)-EZERO-SPEC%EIREL
                 SVAR=SVAR**2
                 SVAR=SVAR+0.25D0*GAMMA**2
                 AMPL=OCCFAC*AMPL/SVAR
@@ -641,6 +644,10 @@ END MODULE RIXS_MODULE
 !                AMPL=AMPL*WKPT(IKPT)*NKDIV(1)*NKDIV(2)*NKDIV(3)
 !               ==  CALCULATE ENERGY DIFFERENCE  =================================
                 DELTAE=STATEI%EIG(IN)-STATEJ%EIG(JN)
+                IF(TDBG) THEN
+                  WRITE(*,fmt='(A,F14.8)')'DENOMINATOR=',SVAR
+                  WRITE(*,FMT='(A,F12.5,A,F12.6)')'SIGNAL=',AMPL,' DELTAE=',DELTAE
+                ENDIF
 !               ==  ADD TO SPECTRUM  =============================================
                 CALL RIXS_MAPGRID(DELTAE,AMPL,NE,SPEC%RAWSIG(:,ISPIN))
               ENDDO  ! N'
@@ -880,7 +887,9 @@ END MODULE RIXS_MODULE
       USE PDOS_MODULE, ONLY: STATE_TYPE,STATEARR,LNX,LOX
       USE DATA_MODULE, ONLY: NATOMS,INDMAP,INDSPECIES,INDTYPE,RXPOS,DPMATI,DPMATF
       IMPLICIT NONE
+      LOGICAL(4), PARAMETER :: TDBG=.FALSE.
       COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
       INTEGER(4), INTENT(IN) :: ISPEC
       INTEGER(4), INTENT(IN) :: IKPT
       LOGICAL(4), INTENT(IN) :: TINVI
@@ -895,6 +904,7 @@ END MODULE RIXS_MODULE
       TYPE(STATE_TYPE), POINTER :: STATEJ
       INTEGER(4) :: IAT
       INTEGER(4) :: IND
+      INTEGER(4) :: NKPT
       INTEGER(4) :: LCORE
       INTEGER(4) :: LVAL
       INTEGER(4) :: LN
@@ -905,6 +915,11 @@ END MODULE RIXS_MODULE
       COMPLEX(8) :: MAT
       COMPLEX(8) :: MATP
       COMPLEX(8) :: CAMP
+      REAL(8), ALLOCATABLE :: XK(:,:)
+
+      CALL PDOS$GETI4('NKPT',NKPT)
+      ALLOCATE(XK(3,NKPT))
+      CALL PDOS$GETR8A('XK',3*NKPT,XK)
       CALL RIXS$GETI4('LCORE',LCORE)
       CALL RIXS$GETI4('LVAL',LVAL)
 
@@ -926,6 +941,14 @@ END MODULE RIXS_MODULE
           DO MCORE=1,2*LCORE+1
             DO MVAL=1,2*L+1
               IND=IND+1
+              IF(TDBG) THEN
+                WRITE(*,FMT='(2(A7,L2),5(A7,I2))') 'IINV=',TINVI,' JINV=',TINVJ,' IAT=',IAT,' MCORE=',MCORE,' LVAL=',LVAL,' MVAL=',MVAL,' IPRO=',IPRO
+                WRITE(*,FMT='(2(A7,3F8.5))')'IXK=',XK(:,IKPT),' JXK=',XK(:,JKPT)
+                WRITE(*,FMT='(A7,2F8.5)')'DMATI=',DPMATI(MCORE,MVAL,IPRO,ISPEC)
+                WRITE(*,FMT='(A7,2F8.5)')'DMATF=',DPMATF(MCORE,MVAL,IPRO,ISPEC)
+                WRITE(*,FMT='(A7,2F8.5)')'STATEI=',STATEI%VEC(1,IND,IN)
+                WRITE(*,FMT='(A7,2F8.5)')'STATEJ=',STATEJ%VEC(1,IND,JN)
+              ENDIF
 !             ==  NORMALLY STATEI IS CONJUGATE AND INVERSION THEN LEADS TO    ==
 !             ==  CONJG(CONJG(STATEI))=STATEI                                 ==
               IF(TINVI) THEN
@@ -941,9 +964,20 @@ END MODULE RIXS_MODULE
             ENDDO
           ENDDO
         ENDDO
-        CAMP=CAMP+MAT*MATP*EXP(CI*DOT_PRODUCT(XQ,RXPOS(:,IAT)))
+        IF(TDBG) THEN
+          WRITE(*,FMT='(A)')''
+          WRITE(*,FMT='(A6,2F10.5,A6,2F10.5)')'MAT=',REAL(MAT),AIMAG(MAT),' MATP=',REAL(MATP),AIMAG(MATP)
+          WRITE(*,FMT='(A6,3F8.4,A6,3F8.4,A6,2F10.5)')'XQ=',XQ(:),'RXPOS=',RXPOS(:,IAT),'E^IQR=',EXP(CI*2.D0*PI*DOT_PRODUCT(XQ,RXPOS(:,IAT)))
+          WRITE(*,FMT='(A,2F10.5)')'MAT*MATP*E^IQR= ',REAL(MAT*MATP*EXP(CI*2.D0*PI*DOT_PRODUCT(XQ,RXPOS(:,IAT)))),AIMAG(MAT*MATP*EXP(CI*2.D0*PI*DOT_PRODUCT(XQ,RXPOS(:,IAT))))
+          WRITE(*,FMT='(A)')''
+        ENDIF
+        CAMP=CAMP+MAT*MATP*EXP(CI*2.D0*PI*DOT_PRODUCT(XQ,RXPOS(:,IAT)))
       ENDDO
       AMPLITUDE=REAL(CAMP*CONJG(CAMP),KIND=8)
+      IF(TDBG) THEN
+        WRITE(*,FMT='(A)')'##########################################'
+        WRITE(*,FMT='(A,2F10.5)')'SUM ATOMS=',AMPLITUDE
+      ENDIF
       END SUBROUTINE RIXS_MATRIXELEMENT     
 
       SUBROUTINE RIXS$REPORT(NFIL,ID)  !MARK: RIXS$REPORT
@@ -978,6 +1012,7 @@ END MODULE RIXS_MODULE
           WRITE(NFIL,FMT='(A10)')'COHERENT: MOMENTUM CONSERVATION'
         ENDIF
         WRITE(NFIL,FMT='(A10,F12.6)')'EI REL:',SPECTRA(ID)%EIREL/EV
+        WRITE(NFIL,FMT='(A10,F12.6)')'EZERO REF:',EZERO/EV
         WRITE(NFIL,FMT='(A10,3F12.6)')'KDIR I:',SPECTRA(ID)%KDIRI(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'KDIR F:',SPECTRA(ID)%KDIRF(:)
         WRITE(NFIL,FMT='(A10,3F12.6)')'KI:',SPECTRA(ID)%KI(:)*ANGSTROM
@@ -1492,6 +1527,7 @@ END MODULE RIXS_MODULE
       INTEGER(4) :: NDIM
       INTEGER(4) :: NSP
       REAL(8) :: RNTOT
+      REAL(8) :: ELSCALE
       REAL(8) :: ADDEL
       INTEGER(4) :: NAT
       INTEGER(4) :: LNXX
@@ -1535,7 +1571,12 @@ END MODULE RIXS_MODULE
       ENDDO
       CALL PDOS$GETI4('NSPIN',NSPIN)
       CALL PDOS$GETI4('NDIM',NDIM)
+!     FOR NON-SPIN-POLARIZED CALCULATIONS, THE NUMBER OF ELECTRONS IS HALF OF 
+!     THE TOTAL NUMBER OF ELECTRONS
+      ELSCALE=1.D0
+      IF(NSPIN.EQ.1.AND.NDIM.EQ.1) ELSCALE=2.D0
       CALL PDOS$GETR8('RNTOT',RNTOT)
+      RNTOT=RNTOT*ELSCALE
       CALL RIXS$GETR8('ADDEL',ADDEL)
       CALL PDOS$GETI4('NAT',NAT)
       CALL PDOS$GETI4('LNXX',LNXX)
@@ -1574,6 +1615,10 @@ END MODULE RIXS_MODULE
 
 !     ==  POTENTIALLY CHANGE TOTAL NUMBER OF ELECTRONS =========================
 !     ==  RECALCULATE OCCUPATIONS AND FERMI ENERGY =============================
+! WARNING: FOR A FLUORINE SYSTEM THE FERMI LEVEL WAS EITHER CALCULATED TO BE AT
+!          THE HOMO OF LUMO LEVEL
+!          IMPLEMENTED FIXED EXTERNALLY SET REFERENCE ENERGY
+!          OCCUPATIONS SHOULD STILL BE CORRECT
       CALL BRILLOUIN$DOS(NBB,NKPT,EIG,OCC,RNTOT+ADDEL,EFERMI)
 
       ! open(33,file='brillouin.dat')
@@ -1617,6 +1662,7 @@ END MODULE RIXS_MODULE
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('NO ATOM OF SPECIES FOUND')
         CALL ERROR$CHVAL('SPECIES',SPECIES)
+        CALL ERROR$MSG('WARNING: SPECIES DETECTION CURRENTLY OVER TWO FIRST LETTERS!')
         CALL ERROR$STOP('DATA$INIT')
       ENDIF
       INDSPECIES=ISPECIES(I)
@@ -1743,17 +1789,19 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE DATA$REPORT  !MARK: DATA$REPORT
+      SUBROUTINE DATA$REPORT(NFIL)  !MARK: DATA$REPORT
 !     **************************************************************************
 !     ** REPORT DATA MODULE                                                   **
 !     **************************************************************************
-      USE DATA_MODULE, ONLY: NATOMS,INDSPECIES,IATMAP,RPOS,TINIT,OCC
+      USE DATA_MODULE, ONLY: NATOMS,INDSPECIES,IATMAP,RPOS,TINIT,OCC,EFERMI
       IMPLICIT NONE
-      INTEGER(4) :: NFIL
+      INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: I
       REAL(8) :: ANGSTROM
+      REAL(8) :: EV
                           CALL TRACE$PUSH('DATA$REPORT')
       CALL CONSTANTS('ANGSTROM',ANGSTROM)
+      CALL CONSTANTS('EV',EV)
       IF(.NOT.TINIT) THEN
         CALL ERROR$MSG('DATA MODULE NOT INITIALIZED')
         CALL ERROR$STOP('DATA$REPORT')
@@ -1771,6 +1819,7 @@ END MODULE RIXS_MODULE
       DO I=1,NATOMS
         WRITE(NFIL,FMT='(I3,"->",I3)')I,IATMAP(I)
       ENDDO
+      WRITE(NFIL,FMT='(A20,F12.6)')'SIM. EFERMI [EV]:',EFERMI/EV
                           CALL TRACE$POP
       END SUBROUTINE DATA$REPORT
 
@@ -2437,6 +2486,14 @@ END MODULE RIXS_MODULE
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'EFEXP[EV]',1,EFEXP)
       EFEXP=EFEXP*EV
+!     ==  READ REFERENCE ENERGY LEVEL  =========================================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EZERO[EV]',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!RIXS:EZERO[EV] MANDATORY')
+        CALL ERROR$STOP('READCNTL$RIXS')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'EZERO[EV]',1,EZERO)
+      EZERO=EZERO*EV
 !     ==  READ LIFE TIME BROADENING  ===========================================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'GAMMA[EV]',1,TCHK)
       IF(.NOT.TCHK) THEN
