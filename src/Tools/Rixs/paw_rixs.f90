@@ -85,11 +85,11 @@ SAVE
 END MODULE DOS_WGHT_MODULE
 !
 !........1.........2.........3.........4.........5.........6.........7.........8
-MODULE READCNTL_MODULE
+MODULE RIXSCNTL_MODULE
 USE LINKEDLIST_MODULE,ONLY : LL_TYPE
 TYPE(LL_TYPE)   :: LL_CNTL
 SAVE
-END MODULE READCNTL_MODULE
+END MODULE RIXSCNTL_MODULE
 !
 !........1.........2.........3.........4.........5.........6.........7.........8
 MODULE DATA_MODULE
@@ -221,7 +221,7 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
       USE LINKEDLIST_MODULE,ONLY : LINKEDLIST$REPORT_UNUSED &
      &                            ,LINKEDLIST$SELECT
-      USE READCNTL_MODULE  ,ONLY : LL_CNTL
+      USE RIXSCNTL_MODULE  ,ONLY : LL_CNTL
       USE RIXS_MODULE, ONLY: RIXS_DEALLOC,SPECTRA
       USE DATA_MODULE, ONLY : DATA_DEALLOC
       USE SPINDIR_MODULE   ,ONLY : SPINDIR !(IS ONLY ALLOCATED)
@@ -287,11 +287,11 @@ END MODULE RIXS_MODULE
 !     ==========================================================================
 !     ==  ANALYZE CONTROL FILE                                                ==
 !     ==========================================================================
-      CALL READCNTL
-      CALL READCNTL$FILES
-      CALL READCNTL$GRID
-      CALL READCNTL$ATOMS
-      CALL READCNTL$RIXS
+      CALL RIXSCNTL
+      CALL RIXSCNTL$FILES
+      CALL RIXSCNTL$GRID
+      CALL RIXSCNTL$ATOMS
+      CALL RIXSCNTL$RIXS
       CALL FILEHANDLER$UNIT('PROT',NFILO)
 !
 !     ==========================================================================
@@ -1011,7 +1011,7 @@ END MODULE RIXS_MODULE
         IF(SPECTRA(ID)%TINCOHERENT) THEN
           WRITE(NFIL,FMT='(A10)')'INCOHERENT: NO MOMENTUM CONSERVATION'
         ELSE
-          WRITE(NFIL,FMT='(A10)')'COHERENT: MOMENTUM CONSERVATION'
+          WRITE(NFIL,FMT='(A21)')'MOMENTUM CONSERVATION'
         ENDIF
         WRITE(NFIL,FMT='(A10,F12.6)')'EI REL:',SPECTRA(ID)%EIREL/EV
         WRITE(NFIL,FMT='(A10,F12.6)')'EZERO REF:',EZERO/EV
@@ -1745,7 +1745,7 @@ END MODULE RIXS_MODULE
 !     **************************************************************************
 !     ** REPORT DATA MODULE                                                   **
 !     **************************************************************************
-      USE DATA_MODULE, ONLY: NATOMS,ISPECIES,IATMAP,RPOS,TINIT,OCC,EFERMI
+      USE DATA_MODULE, ONLY: NATOMS,ISPECIES,ATOMNAMES,IATMAP,RPOS,TINIT,OCC,EFERMI
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: I
@@ -1764,13 +1764,9 @@ END MODULE RIXS_MODULE
      &            '                DATA MODULE REPORT                '
       WRITE(NFIL,FMT='(80("="))')
       WRITE(NFIL,FMT='(A10,I6)')'NATOMS:',NATOMS
-! TODO: PROPER OUTPUT FOR SELECTED ATOMS
-      !WRITE(NFIL,FMT='(A10,I6)')'I SPECIES:',INDSPECIES
-      WRITE(NFIL,FMT='(A10)')'RPOS [ANG]:'
-      WRITE(NFIL,FMT='(3F12.6)')(RPOS(:,I)/ANGSTROM,I=1,NATOMS)
-      WRITE(NFIL,FMT='(A10)')'IATMAP:'
+      WRITE(NFIL,FMT='(A4,A6,A10,A20,A10)')'NAME','','RPOS [ANG]','','INT. MAP'
       DO I=1,NATOMS
-        WRITE(NFIL,FMT='(I3,"->",I3)')I,IATMAP(I)
+        WRITE(NFIL,FMT='(A10,3F10.5,I3,A2,I3)')ATOMNAMES(I),RPOS(:,I)/ANGSTROM,I,'->',IATMAP(I)
       ENDDO
       WRITE(NFIL,FMT='(A20,F12.6)')'SIM. EFERMI [EV]:',EFERMI/EV
                           CALL TRACE$POP
@@ -2204,11 +2200,11 @@ END MODULE RIXS_MODULE
 
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE READCNTL  !MARK: READCNTL
+      SUBROUTINE RIXSCNTL  !MARK: RIXSCNTL
 !     **************************************************************************
 !     **************************************************************************
       USE LINKEDLIST_MODULE
-      USE READCNTL_MODULE, ONLY : LL_CNTL
+      USE RIXSCNTL_MODULE, ONLY : LL_CNTL
       IMPLICIT NONE
       LOGICAL(4),PARAMETER :: TPR=.FALSE.
       LOGICAL(4)           :: TCHK
@@ -2220,7 +2216,7 @@ END MODULE RIXS_MODULE
       INTEGER(4)           :: NUM
       INTEGER(4)           :: NFILO
 !     **************************************************************************
-                          CALL TRACE$PUSH('READCNTL')
+                          CALL TRACE$PUSH('RIXSCNTL')
 !
 !     ==========================================================================
 !     ==  READ CONTROL FILE                                                   ==
@@ -2268,15 +2264,15 @@ END MODULE RIXS_MODULE
 !       ENDDO
                           CALL TRACE$POP
       RETURN
-      END SUBROUTINE READCNTL
+      END SUBROUTINE RIXSCNTL
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE READCNTL$FILES  !MARK: READCNTL$FILES
+      SUBROUTINE RIXSCNTL$FILES  !MARK: RIXSCNTL$FILES
 !     **************************************************************************
 !     ** READ !DCNTL!FILES FROM CONTROL FILE                                  **
 !     **************************************************************************
       USE LINKEDLIST_MODULE
-      USE READCNTL_MODULE, ONLY: LL_CNTL
+      USE RIXSCNTL_MODULE, ONLY: LL_CNTL
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
       INTEGER(4) :: ITH
@@ -2285,7 +2281,7 @@ END MODULE RIXS_MODULE
       CHARACTER(256) :: FILENAME
       CHARACTER(256) :: ROOTNAME
 !     **************************************************************************
-                          CALL TRACE$PUSH('READCNTL$FILES')
+                          CALL TRACE$PUSH('RIXSCNTL$FILES')
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
       CALL LINKEDLIST$EXISTL(LL_CNTL,'FILES',1,TCHK)
@@ -2312,10 +2308,10 @@ END MODULE RIXS_MODULE
         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
       ENDDO
                           CALL TRACE$POP
-      END SUBROUTINE READCNTL$FILES
+      END SUBROUTINE RIXSCNTL$FILES
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE READCNTL$GRID  !MARK: READCNTL$GRID
+      SUBROUTINE RIXSCNTL$GRID  !MARK: RIXSCNTL$GRID
 !     **************************************************************************
 !     ** READ !DCNTL!GRID FROM CONTROL FILE                                   **
 !     **************************************************************************
@@ -2323,7 +2319,7 @@ END MODULE RIXS_MODULE
     !  &                          ,NKPT &
     !  &                          ,STATEARR,STATE 
       USE LINKEDLIST_MODULE
-      USE READCNTL_MODULE, ONLY: LL_CNTL
+      USE RIXSCNTL_MODULE, ONLY: LL_CNTL
       USE RIXS_MODULE, ONLY:  EMIN &
                               ,EMAX &
                               ,DE &
@@ -2336,7 +2332,7 @@ END MODULE RIXS_MODULE
       INTEGER(4)               :: ISPIN,IKPT
       INTEGER(4)               :: NB
 !     **************************************************************************
-                          CALL TRACE$PUSH('READCNTL$GRID')
+                          CALL TRACE$PUSH('RIXSCNTL$GRID')
 !
 !     ==========================================================================
 !     == SET DEFAULT VALUES                                                   ==
@@ -2354,7 +2350,7 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$EXISTL(LL_CNTL,'GRID',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RCNTL:!GRID BLOCK NOT FOUND')
-        CALL ERROR$STOP('READCNTL$GRID')
+        CALL ERROR$STOP('RIXSCNTL$GRID')
       END IF
       CALL LINKEDLIST$SELECT(LL_CNTL,'GRID')
 !     ==  READ ENERGY SPACING (OPTIONAL) =======================================
@@ -2370,7 +2366,7 @@ END MODULE RIXS_MODULE
         CALL ERROR$MSG('SELECT ONLY ONE OF THE ALTERNATIVE OPTIONS, ')
         CALL ERROR$MSG('EITHER !RCNTL!GRID:BROADENING[EV]')
         CALL ERROR$MSG('    OR !RCNTL!GRID:BROADENING[K]')
-        CALL ERROR$STOP('READCNTL$GRID')
+        CALL ERROR$STOP('RIXSCNTL$GRID')
       END IF
       IF(TCHK) THEN
         CALL LINKEDLIST$GET(LL_CNTL,'BROADENING[EV]',1,EBROAD)
@@ -2384,14 +2380,14 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$EXISTD(LL_CNTL,'EMIN[EV]',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RCNTL!GRID:EMIN[EV] IS MANDATORY')
-        CALL ERROR$STOP('READCNTL$GRID')
+        CALL ERROR$STOP('RIXSCNTL$GRID')
       END IF
       CALL LINKEDLIST$GET(LL_CNTL,'EMIN[EV]',1,EMIN)
       EMIN=EMIN*EV
       CALL LINKEDLIST$EXISTD(LL_CNTL,'EMAX[EV]',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RCNTL!GRID:EMAX[EV] IS MANDATORY')
-        CALL ERROR$STOP('READCNTL$GRID')
+        CALL ERROR$STOP('RIXSCNTL$GRID')
       END IF
       CALL LINKEDLIST$GET(LL_CNTL,'EMAX[EV]',1,EMAX)
       EMAX=EMAX*EV
@@ -2399,28 +2395,28 @@ END MODULE RIXS_MODULE
                           CALL TRACE$POP
 !
       RETURN
-      END SUBROUTINE READCNTL$GRID
+      END SUBROUTINE RIXSCNTL$GRID
 
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE READCNTL$ATOMS  !MARK: READCNTL$ATOMS
+      SUBROUTINE RIXSCNTL$ATOMS  !MARK: RIXSCNTL$ATOMS
 !     **************************************************************************
 !     ** READ !RCNTL!ATOMS FROM CONTROL FILE                                  **
 !     **************************************************************************
       USE LINKEDLIST_MODULE
       USE DATA_MODULE, ONLY: ATOMNAMES,NATOMS
-      USE READCNTL_MODULE, ONLY: LL_CNTL
+      USE RIXSCNTL_MODULE, ONLY: LL_CNTL
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
       INTEGER(4) :: IAT
 !     **************************************************************************
-                          CALL TRACE$PUSH('READCNTL$ATOMS')
+                          CALL TRACE$PUSH('RIXSCNTL$ATOMS')
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'RCNTL')
 !     GET NUMBER OF ATOM BLOCKS
       CALL LINKEDLIST$NLISTS(LL_CNTL,'ATOM',NATOMS)
       IF(NATOMS.EQ.0) THEN
         CALL ERROR$MSG('!RCNTL:!ATOM BLOCKS NOT FOUND')
-        CALL ERROR$STOP('READCNTL$ATOMS')
+        CALL ERROR$STOP('RIXSCNTL$ATOMS')
       END IF
       ALLOCATE(ATOMNAMES(NATOMS))
 !     READ ATOM NAMES
@@ -2429,7 +2425,7 @@ END MODULE RIXS_MODULE
         CALL LINKEDLIST$EXISTD(LL_CNTL,'NAME',1,TCHK)
         IF(.NOT.TCHK) THEN
           CALL ERROR$MSG('!RCNTL:!ATOM:NAME MANDATORY')
-          CALL ERROR$STOP('READCNTL$ATOMS')
+          CALL ERROR$STOP('RIXSCNTL$ATOMS')
         END IF
         CALL LINKEDLIST$GET(LL_CNTL,'NAME',1,ATOMNAMES(IAT))
         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
@@ -2439,7 +2435,7 @@ END MODULE RIXS_MODULE
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RCNTL:!ATOM:NAME MUST BE UNIQUE')
         CALL ERROR$CHVAL('ATOM',ATOMNAMES(IAT))
-        CALL ERROR$STOP('READCNTL$ATOMS')
+        CALL ERROR$STOP('RIXSCNTL$ATOMS')
       END IF
 
 
@@ -2449,14 +2445,14 @@ END MODULE RIXS_MODULE
       ENDDO
         
                           CALL TRACE$POP
-      END SUBROUTINE READCNTL$ATOMS
+      END SUBROUTINE RIXSCNTL$ATOMS
 
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE READCNTL$RIXS  !MARK: READCNTL$RIXS
+      SUBROUTINE RIXSCNTL$RIXS  !MARK: RIXSCNTL$RIXS
 ! TODO: IMPLEMENT READING OF COMPLEX NUMBERS
       USE LINKEDLIST_MODULE
       USE RIXS_MODULE
-      USE READCNTL_MODULE, ONLY: LL_CNTL
+      USE RIXSCNTL_MODULE, ONLY: LL_CNTL
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
       INTEGER(4) :: I
@@ -2464,7 +2460,7 @@ END MODULE RIXS_MODULE
       REAL(8) :: POLVAR(2)
       REAL(8) :: VECVAR(3)
       REAL(8) :: EV
-                          CALL TRACE$PUSH('READCNTL$RIXS')
+                          CALL TRACE$PUSH('RIXSCNTL$RIXS')
       CALL CONSTANTS('EV',EV)
       IF(TREADRIXS) THEN
         CALL ERROR$MSG('!RCNTL!RIXS WAS READ BEFORE')
@@ -2479,14 +2475,14 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$EXISTL(LL_CNTL,'RIXS',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RCNTL:!RIXS BLOCK NOT FOUND')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$SELECT(LL_CNTL,'RIXS')
 !       ==  CHECK FOR SPECTRA  =================================================
       CALL LINKEDLIST$EXISTL(LL_CNTL,'SPEC',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:!SPEC BLOCK MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$NLISTS(LL_CNTL,'SPEC',NSPECTRA)
       ALLOCATE(SPECTRA(NSPECTRA))
@@ -2498,14 +2494,14 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$EXISTD(LL_CNTL,'NORMAL',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:NORMAL MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'NORMAL',1,NORMAL)
 !     ==  READ EXPERIMENTAL FERMI LEVEL  =======================================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'EFEXP[EV]',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:EFEXP[EV] MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'EFEXP[EV]',1,EFEXP)
       EFEXP=EFEXP*EV
@@ -2513,7 +2509,7 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$EXISTD(LL_CNTL,'GAMMA[EV]',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:GAMMA[EV] MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'GAMMA[EV]',1,GAMMA)
       GAMMA=GAMMA*EV
@@ -2521,42 +2517,42 @@ END MODULE RIXS_MODULE
       CALL LINKEDLIST$EXISTD(LL_CNTL,'ORBTYPE',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:ORBTYPE MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'ORBTYPE',1,ORBTYPE)
 !     ==  READ SETUP FILE NAME  ================================================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'STPFILE',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:STPFILE MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'STPFILE',1,STPFILE)
 !     ==  READ PRINCIPLE QUANTUM NUMBER OF CORE  ===============================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'NCORE',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:NCORE MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'NCORE',1,NCORE)
 !     ==  READ PRINCIPLE QUANTUM NUMBER OF VALENCE  ============================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'NVAL',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:NVAL MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'NVAL',1,NVAL)
 !     ==  READ ANGULAR MOMENTUM QUANTUM NUMBER OF CORE  ========================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'LCORE',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:LCORE MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'LCORE',1,LCORE)
 !     ==  READ ANGULAR MOMENTUM QUANTUM NUMBER OF VALENCE  =====================
       CALL LINKEDLIST$EXISTD(LL_CNTL,'LVAL',1,TCHK)
       IF(.NOT.TCHK) THEN
         CALL ERROR$MSG('!RIXS:LVAL MANDATORY')
-        CALL ERROR$STOP('READCNTL$RIXS')
+        CALL ERROR$STOP('RIXSCNTL$RIXS')
       ENDIF
       CALL LINKEDLIST$GET(LL_CNTL,'LVAL',1,LVAL)
 !
@@ -2643,7 +2639,7 @@ END MODULE RIXS_MODULE
           IF(.NOT.RIXS_GENERAL%TEIREL) THEN
             CALL ERROR$MSG('EIREL[EV] MANDATORY')
             CALL ERROR$I4VAL('ISPEC',I)
-            CALL ERROR$STOP('READCNTL$RIXS')
+            CALL ERROR$STOP('RIXSCNTL$RIXS')
           ENDIF
         ENDIF
 !       ==  READ INCOMING K-VECTOR DIRECTION  ==================================
@@ -2654,7 +2650,7 @@ END MODULE RIXS_MODULE
           IF(.NOT.RIXS_GENERAL%TKDIRI) THEN
             CALL ERROR$MSG('KI MANDATORY')
             CALL ERROR$I4VAL('ISPEC',I)
-            CALL ERROR$STOP('READCNTL$RIXS')
+            CALL ERROR$STOP('RIXSCNTL$RIXS')
           ENDIF
         ENDIF
 !       ==  READ OUTGOING K-VECTOR DIRECTION  ==================================
@@ -2665,7 +2661,7 @@ END MODULE RIXS_MODULE
           IF(.NOT.RIXS_GENERAL%TKDIRF) THEN
             CALL ERROR$MSG('KF MANDATORY')
             CALL ERROR$I4VAL('ISPEC',I)
-            CALL ERROR$STOP('READCNTL$RIXS')
+            CALL ERROR$STOP('RIXSCNTL$RIXS')
           ENDIF
         ENDIF
 !       ==  READ INCOMING POLARIZATION VECTOR  =================================
@@ -2677,7 +2673,7 @@ END MODULE RIXS_MODULE
           IF(.NOT.RIXS_GENERAL%TPI) THEN
             CALL ERROR$MSG('PI MANDATORY')
             CALL ERROR$I4VAL('ISPEC',I)
-            CALL ERROR$STOP('READCNTL$RIXS')
+            CALL ERROR$STOP('RIXSCNTL$RIXS')
           ENDIF
         ENDIF
 !       ==  READ OUTGOING POLARIZATION VECTOR  =================================
@@ -2689,7 +2685,7 @@ END MODULE RIXS_MODULE
           IF(.NOT.RIXS_GENERAL%TPF) THEN
             CALL ERROR$MSG('PF MANDATORY')
             CALL ERROR$I4VAL('ISPEC',I)
-            CALL ERROR$STOP('READCNTL$RIXS')
+            CALL ERROR$STOP('RIXSCNTL$RIXS')
           ENDIF
         ENDIF
 !       ==  READ FILENAME  =====================================================
@@ -2697,7 +2693,7 @@ END MODULE RIXS_MODULE
         IF(.NOT.TCHK) THEN
           CALL ERROR$MSG('!RIXS:!SPEC:FILE MANDATORY')
           CALL ERROR$I4VAL('ISPEC',I)
-          CALL ERROR$STOP('READCNTL$RIXS')
+          CALL ERROR$STOP('RIXSCNTL$RIXS')
         ENDIF
         CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,SPECTRA(I)%FILENAME)
 !       ==  READ FLAG FOR INCOHERENT CALCULATION  ==============================
@@ -2723,7 +2719,7 @@ END MODULE RIXS_MODULE
       TRIXS=.TRUE.
       TREADRIXS=.TRUE.
                           CALL TRACE$POP
-      END SUBROUTINE READCNTL$RIXS
+      END SUBROUTINE RIXSCNTL$RIXS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE STPA$RUN  !MARK: STPA$RUN
