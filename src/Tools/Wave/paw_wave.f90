@@ -20,6 +20,11 @@
        INTEGER(4)                :: I
        INTEGER(4)                :: NLISTS
 !      ******************************************************************
+!     ==========================================================================
+!     == MPE$INIT MUST BE CALLED ALSO FOR NON-PARALLEL CODES                  ==
+!     ==========================================================================
+      CALL MPE$INIT
+
        I=COMMAND_ARGUMENT_COUNT()
        IF(I.NE.1) THEN
          WRITE(*,FMT='(A)')'CORRECT USAGE: PAW_WAVE.X [FILE]'
@@ -173,6 +178,8 @@
       !CALL LINKEDLIST$SELECT(LL_STRC,'~')
       !CALL LINKEDLIST$SELECT(LL_STRC,'STRUCTURE')
       !CALL LINKEDLIST$REPORT_UNUSED(LL_STRC,NFILO)
+!
+      CALL ERROR$NORMALSTOP()
       STOP
       END
 !
@@ -188,7 +195,7 @@
        TYPE(LL_TYPE)             :: LL_STRC
        CHARACTER(256)            :: TITLE
        INTEGER(4)                :: NFIL
-       INTEGER(4)                :: NFILO !FORTRAN UNIT OF PROTOCOLL FILE
+       INTEGER(4)                :: NFILO !FORTRAN UNIT OF PROTOCOL FILE
        REAL(8)                   :: RBAS(3,3)
        INTEGER(4)                :: NAT
        REAL(8)      ,ALLOCATABLE :: POS(:,:)   !(3,NAT)
