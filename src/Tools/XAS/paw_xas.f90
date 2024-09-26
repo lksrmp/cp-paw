@@ -9,7 +9,7 @@
         INTEGER(4)          :: NB
         REAL(8), POINTER    :: EIG(:)
         REAL(8), POINTER    :: OCC(:)
-        COMPLEX(8), POINTER :: VEC(:,:,:)  
+        COMPLEX(8), POINTER :: PRO(:,:,:)  
       END TYPE STATE_TYPE
 !     GENERAL SETTINGS OF A SIMULATION 
       TYPE SIMULATION_TYPE
@@ -26,7 +26,7 @@
         INTEGER(4), ALLOCATABLE :: LNX(:) ! (NSP)
         INTEGER(4), ALLOCATABLE :: LOX(:,:) ! (LNXX,NSP)
         LOGICAL(4) :: TINV ! INVERSION SYMMETRY
-        REAL(8) :: NKDIV(3) ! K-POINT DIVISIONS
+        INTEGER(4) :: NKDIV(3) ! K-POINT DIVISIONS
         INTEGER(4) :: ISHIFT(3) ! K-POINT SHIFTS
         REAL(8) :: RNTOT
         REAL(8) :: NEL
@@ -37,6 +37,7 @@
         CHARACTER(16), ALLOCATABLE :: ATOMID(:) ! (NAT) ATOM IDENTIFIERS
         INTEGER(4), ALLOCATABLE :: ISPECIES(:) ! (NAT) SPECIES INDEX
         REAL(8), ALLOCATABLE :: XK(:,:) ! (3,NKPT) K-POINTS IN REL. COORD.
+        REAL(8), ALLOCATABLE :: WKPT(:) ! (NKPT) K-POINT WEIGHTS
         TYPE(SETUP_TYPE), ALLOCATABLE :: SETUP(:)
         TYPE(STATE_TYPE), ALLOCATABLE :: STATEARR(:,:)
         TYPE(STATE_TYPE), POINTER :: STATE
@@ -132,54 +133,57 @@
 !     READ XCNTL FILE
       CALL FILEHANDLER$UNIT('XCNTL',NFIL)
       CALL XASCNTL$READ(NFIL)
-      CALL XASCNTL$FILES('GROUNDSTATE')
-      CALL XASCNTL$FILES('EXCITESTATE')
 
-!     READ FIRST FILE
       CALL XAS$SELECT('GROUNDSTATE')
+      CALL XASCNTL$FILES('GROUNDSTATE')
       CALL XAS$READ
+      CALL XAS$REPORT
       CALL XAS$UNSELECT
 
-!     READ SECOND FILE
       CALL XAS$SELECT('EXCITESTATE')
+      CALL XASCNTL$FILES('EXCITESTATE')
       CALL XAS$READ
+      CALL XAS$REPORT
       CALL XAS$UNSELECT
+
+      CALL DATACONSISTENCY
+
 
 !     REPORT UNUSED LINKEDLISTS
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFIL)
-      CALL RADIAL$REPORT(NFIL)
+
 
      
-      CALL XAS$ISELECT(1)
-      OPEN(UNIT=NFIL,FILE='gs_1_psphi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,1,'PSPHI')
-      CLOSE(NFIL)
-      OPEN(UNIT=NFIL,FILE='gs_2_psphi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,2,'PSPHI')
-      CLOSE(NFIL)
-      OPEN(UNIT=NFIL,FILE='gs_1_aephi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,1,'AEPHI')
-      CLOSE(NFIL)
-      OPEN(UNIT=NFIL,FILE='gs_2_aephi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,2,'AEPHI')
-      CLOSE(NFIL)
-      CALL XAS$UNSELECT
+      ! CALL XAS$ISELECT(1)
+      ! OPEN(UNIT=NFIL,FILE='gs_1_psphi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,1,'PSPHI')
+      ! CLOSE(NFIL)
+      ! OPEN(UNIT=NFIL,FILE='gs_2_psphi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,2,'PSPHI')
+      ! CLOSE(NFIL)
+      ! OPEN(UNIT=NFIL,FILE='gs_1_aephi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,1,'AEPHI')
+      ! CLOSE(NFIL)
+      ! OPEN(UNIT=NFIL,FILE='gs_2_aephi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,2,'AEPHI')
+      ! CLOSE(NFIL)
+      ! CALL XAS$UNSELECT
 
-      CALL XAS$ISELECT(2)
-      OPEN(UNIT=NFIL,FILE='exc_1_psphi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,1,'PSPHI')
-      CLOSE(NFIL)
-      OPEN(UNIT=NFIL,FILE='exc_2_psphi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,2,'PSPHI')
-      CLOSE(NFIL)
-      OPEN(UNIT=NFIL,FILE='exc_1_aephi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,1,'AEPHI')
-      CLOSE(NFIL)
-      OPEN(UNIT=NFIL,FILE='exc_2_aephi.dat',STATUS='REPLACE')
-      CALL XAS$WRITEPHI(NFIL,2,'AEPHI')
-      CLOSE(NFIL)
-      CALL XAS$UNSELECT
+      ! CALL XAS$ISELECT(2)
+      ! OPEN(UNIT=NFIL,FILE='exc_1_psphi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,1,'PSPHI')
+      ! CLOSE(NFIL)
+      ! OPEN(UNIT=NFIL,FILE='exc_2_psphi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,2,'PSPHI')
+      ! CLOSE(NFIL)
+      ! OPEN(UNIT=NFIL,FILE='exc_1_aephi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,1,'AEPHI')
+      ! CLOSE(NFIL)
+      ! OPEN(UNIT=NFIL,FILE='exc_2_aephi.dat',STATUS='REPLACE')
+      ! CALL XAS$WRITEPHI(NFIL,2,'AEPHI')
+      ! CLOSE(NFIL)
+      ! CALL XAS$UNSELECT
 
       CALL FILEHANDLER$CLOSEALL
                           CALL TRACE$POP
@@ -194,7 +198,8 @@
       USE XAS_MODULE, ONLY: NSIM,SELECTED,THIS,SIM
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
-
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$ISELECT')
       IF(I.GT.NSIM.OR.I.LT.0) THEN
         CALL ERROR$MSG('I NOT IN RANGE')
         CALL ERROR$I4VAL('I',I)
@@ -216,6 +221,7 @@
         THIS=>SIM(I)
         SELECTED=.TRUE.
       ENDIF
+                          CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$ISELECT
 
@@ -227,6 +233,8 @@
       USE XAS_MODULE, ONLY: SELECTED,THIS,SIM
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$SELECT')
       IF(SELECTED) THEN
         CALL ERROR$MSG('ANOTHER SIMULATION IS ALREADY SELECTED')
         CALL ERROR$CHVAL('SELECTED ID',THIS%ID)
@@ -244,6 +252,7 @@
         CALL ERROR$MSG('ID MUST BE GROUNDSTATE OR EXCITESTATE')
         CALL ERROR$STOP('XAS$SELECT')
       END IF
+                          CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$SELECT
 
@@ -254,12 +263,15 @@
 !     **************************************************************************
       USE XAS_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$UNSELECT')
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('CANNOT UNSELECT A SIMULATION THAT IS NOT SELECTED')
         CALL ERROR$STOP('XAS$UNSELECT')
       END IF
       SELECTED=.FALSE.
       NULLIFY(THIS)
+                          CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$UNSELECT
 ! !
@@ -422,75 +434,80 @@
 !       CALL ERROR$STOP('XAS$READPDOS')
 !       STOP
 !       END SUBROUTINE XAS$READPDOS
-
-! !     ..................................................................
-!       SUBROUTINE DATACONSISTENCY  ! MARK: DATACONSISTENCY
-! !     **************************************************************************
-! !     ** CHECKS CONSISTENCY OF PDOS DATA                                      **
-! ! TODO: IMPLEMENT THIS SUBROUTINE FURTHER, TEST THE CHECKS, ADD ADDITIONAL CHECKS
-! !     **************************************************************************
-!       USE XASPDOS_MODULE, ONLY: PD,NPD
-!       IMPLICIT NONE
-!       INTEGER(4) :: IPD
-!       INTEGER(4) :: I,J
-!       DO IPD=2,NPD
-!         IF(PD(IPD)%FLAG.NE.PD(1)%FLAG)THEN
-!           CALL ERROR$MSG('FLAG INCONSISTENT BETWEEN PDOS FILES')
-!           CALL ERROR$I4VAL('IPD',IPD)
-!           CALL ERROR$CHVAL('PD(IPD)%FLAG',PD(IPD)%FLAG)
-!           CALL ERROR$CHVAL('PD(1)%FLAG',PD(1)%FLAG)
-!           CALL ERROR$STOP('DATACONSISTENCY')
-!         END IF
-!         IF(PD(IPD)%NAT.NE.PD(1)%NAT)THEN
-!           CALL ERROR$MSG('NAT INCONSISTENT BETWEEN PDOS FILES')
-!           CALL ERROR$I4VAL('IPD',IPD)
-!           CALL ERROR$I4VAL('PD(IPD)%NAT',PD(IPD)%NAT)
-!           CALL ERROR$I4VAL('PD(1)%NAT',PD(1)%NAT)
-!           CALL ERROR$STOP('DATACONSISTENCY')
-!         END IF
-!         IF(PD(IPD)%NKPT.NE.PD(1)%NKPT)THEN
-!           CALL ERROR$MSG('NKPT INCONSISTENT BETWEEN PDOS FILES')
-!           CALL ERROR$I4VAL('IPD',IPD)
-!           CALL ERROR$I4VAL('PD(IPD)%NKPT',PD(IPD)%NKPT)
-!           CALL ERROR$I4VAL('PD(1)%NKPT',PD(1)%NKPT)
-!           CALL ERROR$STOP('DATACONSISTENCY')
-!         END IF
-!         IF(PD(IPD)%NSPIN.NE.PD(1)%NSPIN)THEN
-!           CALL ERROR$MSG('NSPIN INCONSISTENT BETWEEN PDOS FILES')
-!           CALL ERROR$I4VAL('IPD',IPD)
-!           CALL ERROR$I4VAL('PD(IPD)%NSPIN',PD(IPD)%NSPIN)
-!           CALL ERROR$I4VAL('PD(1)%NSPIN',PD(1)%NSPIN)
-!           CALL ERROR$STOP('DATACONSISTENCY')
-!         END IF
-!         IF(PD(IPD)%NDIM.NE.PD(1)%NDIM)THEN
-!           CALL ERROR$MSG('NDIM INCONSISTENT BETWEEN PDOS FILES')
-!           CALL ERROR$I4VAL('IPD',IPD)
-!           CALL ERROR$I4VAL('PD(IPD)%NDIM',PD(IPD)%NDIM)
-!           CALL ERROR$I4VAL('PD(1)%NDIM',PD(1)%NDIM)
-!           CALL ERROR$STOP('DATACONSISTENCY')
-!         END IF
-!         DO I=1,3
-!           IF(PD(IPD)%NKDIV(I).NE.PD(1)%NKDIV(I))THEN
-!             CALL ERROR$MSG('NKDIV INCONSISTENT BETWEEN PDOS FILES')
-!             CALL ERROR$I4VAL('IPD',IPD)
-!             CALL ERROR$I4VAL('PD(IPD)%NKDIV',PD(IPD)%NKDIV(I))
-!             CALL ERROR$I4VAL('PD(1)%NKDIV',PD(1)%NKDIV(I))
-!             CALL ERROR$STOP('DATACONSISTENCY')
-!           END IF
-!         ENDDO
-!         DO I=1,3
-!           DO J=1,3
-!             IF(PD(IPD)%RBAS(I,J).NE.PD(1)%RBAS(I,J))THEN
-!               CALL ERROR$MSG('RBAS INCONSISTENT BETWEEN PDOS FILES')
-!               CALL ERROR$I4VAL('IPD',IPD)
-!               CALL ERROR$R8VAL('PD(IPD)%RBAS',PD(IPD)%RBAS(I,J))
-!               CALL ERROR$R8VAL('PD(1)%RBAS',PD(1)%RBAS(I,J))
-!               CALL ERROR$STOP('DATACONSISTENCY')
-!             END IF
-!           ENDDO
-!         ENDDO
-!       ENDDO
-!       END SUBROUTINE DATACONSISTENCY
+!
+!     ..................................................................
+      SUBROUTINE DATACONSISTENCY  ! MARK: DATACONSISTENCY
+!     **************************************************************************
+!     ** CHECKS CONSISTENCY OF PDOS DATA                                      **
+! TODO: IMPLEMENT THIS SUBROUTINE FURTHER, TEST THE CHECKS, ADD ADDITIONAL CHECKS
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: THIS,SIMULATION_TYPE
+      IMPLICIT NONE
+      TYPE(SIMULATION_TYPE), POINTER :: THIS1,THIS2
+      INTEGER(4) :: I
+      REAL(8),PARAMETER :: TOL=1.D-8
+!     **************************************************************************
+                          CALL TRACE$PUSH('DATACONSISTENCY')
+      CALL XAS$SELECT('GROUNDSTATE')
+      THIS1=>THIS
+      CALL XAS$UNSELECT
+      CALL XAS$SELECT('EXCITESTATE')
+      THIS2=>THIS
+      CALL XAS$UNSELECT
+      
+      IF(THIS1%NAT.NE.THIS2%NAT)THEN
+        CALL ERROR$MSG('NAT INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$I4VAL('GROUNDSTATE%NAT',THIS1%NAT)
+        CALL ERROR$I4VAL('EXCITESTATE%NAT',THIS2%NAT)
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(THIS1%NKPT.NE.THIS2%NKPT)THEN
+        CALL ERROR$MSG('NKPT INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$I4VAL('GROUNDSTATE%NKPT',THIS1%NKPT)
+        CALL ERROR$I4VAL('EXCITESTATE%NKPT',THIS2%NKPT)
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(THIS1%NSPIN.NE.THIS2%NSPIN)THEN
+        CALL ERROR$MSG('NSPIN INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$I4VAL('GROUNDSTATE%NSPIN',THIS1%NSPIN)
+        CALL ERROR$I4VAL('EXCITESTATE%NSPIN',THIS2%NSPIN)
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(THIS1%NDIM.NE.1.OR.THIS2%NDIM.NE.1)THEN
+        CALL ERROR$MSG('ONLY IMPLEMENTED FOR NDIM=1')
+        CALL ERROR$I4VAL('GROUNDSTATE%NDIM',THIS1%NDIM)
+        CALL ERROR$I4VAL('EXCITESTATE%NDIM',THIS2%NDIM)
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+! TODO: CHECK IF NECESARRY
+      IF(THIS1%TINV.NEQV.THIS2%TINV)THEN
+        CALL ERROR$MSG('TINV INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$L4VAL('GROUNDSTATE%TINV',THIS1%TINV)
+        CALL ERROR$L4VAL('EXCITESTATE%TINV',THIS2%TINV)
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(ANY(ABS(THIS1%NKDIV-THIS2%NKDIV).NE.0))THEN
+        CALL ERROR$MSG('NKDIV INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(ANY(ABS(THIS1%ISHIFT-THIS2%ISHIFT).NE.0))THEN
+        CALL ERROR$MSG('ISHIFT INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(THIS1%TSHIFT.NEQV.THIS2%TSHIFT)THEN
+        CALL ERROR$MSG('TSHIFT INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$L4VAL('GROUNDSTATE%TSHIFT',THIS1%TSHIFT)
+        CALL ERROR$L4VAL('EXCITESTATE%TSHIFT',THIS2%TSHIFT)
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+      IF(ANY(ABS(THIS1%RBAS-THIS2%RBAS).GT.TOL)) THEN
+        CALL ERROR$MSG('RBAS INCONSISTENT BETWEEN SIMULATIONS')
+        CALL ERROR$STOP('DATACONSISTENCY')
+      END IF
+! TODO: CHECK FOR ATOMIC POSITIONS
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE DATACONSISTENCY
 
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -506,73 +523,13 @@
                           CALL TRACE$PUSH('XASCNTL$READ')
       CALL LINKEDLIST$NEW(LL_CNTL)
       CALL LINKEDLIST$READ(LL_CNTL,NFIL,'~')
-
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$MARK(LL_CNTL,1)
-
-                        CALL TRACE$POP
+                          CALL TRACE$POP
       END SUBROUTINE XASCNTL$READ
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASCNTL$FILES  ! MARK: XASCNTL$FILES
-! !     **************************************************************************
-!       USE XASCNTL_MODULE, ONLY: LL_CNTL
-!       USE LINKEDLIST_MODULE
-!       USE STRINGS_MODULE
-!       IMPLICIT NONE
-!       LOGICAL(4) :: TCHK
-!       LOGICAL(4) :: PDOS1
-!       LOGICAL(4) :: PDOS2
-!       INTEGER(4) :: NUM
-!       INTEGER(4) :: I
-!       CHARACTER(32) :: ID
-!       CHARACTER(256) :: FILENAME
-!       LOGICAL(4) :: EXT
-! !     **************************************************************************
-!                           CALL TRACE$PUSH('XASCNTL$FILES')
-!       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
-!       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
-!       CALL LINKEDLIST$EXISTL(LL_CNTL,'FILES',1,TCHK)
-!       IF(.NOT.TCHK) THEN
-!         CALL ERROR$MSG('!FILES NOT FOUND IN XCNTL')
-!         CALL ERROR$STOP('XASCNTL$FILES')
-!       END IF
-!       CALL LINKEDLIST$SELECT(LL_CNTL,'FILES')
-!       CALL LINKEDLIST$NLISTS(LL_CNTL,'FILE',NUM)
-! print *,'NUM',NUM
-!       IF(NUM.EQ.0) THEN
-!         CALL ERROR$MSG('NO FILES DEFINED IN XCNTL')
-!         CALL ERROR$STOP('XASCNTL$FILES')
-!       END IF
-!       DO I=1,NUM
-! print *,'I',I
-!         CALL LINKEDLIST$SELECT(LL_CNTL,'FILE',I)
-!         CALL LINKEDLIST$GET(LL_CNTL,'ID',0,ID)
-!         ID=+ID
-!         CALL LINKEDLIST$GET(LL_CNTL,'NAME',0,FILENAME)
-!         CALL LINKEDLIST$GET(LL_CNTL,'EXT',0,EXT)
-!         CALL FILEHANDLER$SETFILE(ID,EXT,FILENAME)
-!         IF(ID.EQ.'PDOS1') THEN
-!           PDOS1=.TRUE.
-!         ELSE IF(ID.EQ.'PDOS2') THEN
-!           PDOS2=.TRUE.
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
-!       ENDDO
-!       IF((.NOT.PDOS1).AND.(.NOT.PDOS2)) THEN
-!         CALL ERROR$MSG('PDOS FILES NOT DEFINED IN !XCNTL!FILES')
-!         CALL ERROR$STOP('XASCNTL$FILES')
-!       ELSE IF(.NOT.PDOS1) THEN
-!         CALL ERROR$MSG('PDOS1 FILE NOT DEFINED IN !XCNTL!FILES')
-!         CALL ERROR$STOP('XASCNTL$FILES')
-!       ELSE IF(.NOT.PDOS2) THEN
-!         CALL ERROR$MSG('PDOS2 FILE NOT DEFINED IN !XCNTL!FILES')
-!         CALL ERROR$STOP('XASCNTL$FILES')
-!       END IF
-!                           CALL TRACE$POP
-!       END SUBROUTINE XASCNTL$FILES
-
-      SUBROUTINE XASCNTL$FILES(FLAG)  ! MARK: XASCNTL$FILES
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASCNTL$FILES(ID)  ! MARK: XASCNTL$FILES
 !     **************************************************************************
 !     **                                                                      **
 !     **************************************************************************
@@ -580,7 +537,7 @@
       USE XAS_MODULE, ONLY: THIS,SELECTED
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
-      CHARACTER(11), INTENT(IN) :: FLAG ! GROUNDSTATE OR EXCITESTATE
+      CHARACTER(11), INTENT(IN) :: ID ! GROUNDSTATE OR EXCITESTATE
       LOGICAL(4) :: TCHK
       INTEGER(4) :: NFIL
       CHARACTER(256) :: FILENAME
@@ -592,611 +549,35 @@
         CALL ERROR$STOP('XASCNTL$FILES')
       END IF
 !     CHECK IF FLAG IS RECOGNIZED
-      IF(FLAG.NE.'GROUNDSTATE'.AND.FLAG.NE.'EXCITESTATE') THEN
-        CALL ERROR$MSG('FLAG NOT RECOGNIZED')
-        CALL ERROR$CHVAL('FLAG',FLAG)
-        CALL ERROR$MSG('FLAG MUST BE GROUNDSTATE OR EXCITESTATE')
+      IF(ID.NE.'GROUNDSTATE'.AND.ID.NE.'EXCITESTATE') THEN
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$MSG('ID MUST BE GROUNDSTATE OR EXCITESTATE')
         CALL ERROR$STOP('XASCNTL$FILES')
       END IF
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
-      CALL LINKEDLIST$EXISTL(LL_CNTL,FLAG,1,TCHK)
+      CALL LINKEDLIST$EXISTL(LL_CNTL,ID,1,TCHK)
       IF(.NOT.TCHK) THEN
-        CALL ERROR$MSG('!'//FLAG//' NOT FOUND IN XCNTL')
+        CALL ERROR$MSG('!'//ID//' NOT FOUND IN XCNTL')
         CALL ERROR$STOP('XASCNTL$FILES')
       END IF
-      CALL LINKEDLIST$SELECT(LL_CNTL,FLAG)
+      CALL LINKEDLIST$SELECT(LL_CNTL,ID)
       CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
       IF(.NOT.TCHK) THEN
-        CALL ERROR$MSG('FILE NOT FOUND IN !'//FLAG)
+        CALL ERROR$MSG('FILE NOT FOUND IN !'//ID)
         CALL ERROR$STOP('XASCNTL$FILES')
       END IF
       CALL LINKEDLIST$GET(LL_CNTL,'FILE',0,FILENAME)
     
       CALL XAS$SETCH('FILE',FILENAME)
-      CALL XAS$SETCH('FLAG',FLAG)
-      CALL FILEHANDLER$SETFILE(FLAG,.FALSE.,TRIM(FILENAME))
+      CALL XAS$SETCH('ID',ID)
+      CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(FILENAME))
                           CALL TRACE$POP
       END SUBROUTINE XASCNTL$FILES
-
-
-
-
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASSTP$NEW(NFIL_,ISTP,TCHK)  ! MARK: XASSTP$NEW
-! !     **************************************************************************
-! !     **                                                                      **
-! !     **************************************************************************
-!       USE XASSTP_MODULE, ONLY: STP
-!       USE LINKEDLIST_MODULE
-!       IMPLICIT NONE
-!       INTEGER(4)  ,INTENT(IN) :: NFIL_
-!       INTEGER(4) ,INTENT(IN) :: ISTP
-!       LOGICAL(4)  ,INTENT(OUT):: TCHK
-!       TYPE(LL_TYPE)           :: LL_STP_
-!       CHARACTER(6)            :: STRING
-!       CHARACTER(16)           :: TYPE
-!       REAL(8)                 :: R1
-!       REAL(8)                 :: DEX
-!       INTEGER(4)              :: LNX
-! !     **********************************************************************
-!       LL_STP_=STP(ISTP)%LL
-!       TCHK=.FALSE.
-! !     == FIRST REMOVE OLD LIST IF NEEDED
-!       IF(STP(ISTP)%NFIL.NE.0) THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'~')
-! !       CALL LINKEDLIST$DELETE(LL_STP_)
-!         CALL LINKEDLIST$RMLIST(LL_STP_,'SETUP')
-!         STP(ISTP)%GID=0
-!         STP(ISTP)%LNX=0
-!         STP(ISTP)%NR=0
-!         STP(ISTP)%NFIL=0
-!       END IF
-!       IF(NFIL_.EQ.0) RETURN
-! !
-! !     ======================================================================  
-! !     == CHECK IF THE FILE IS A LINKEDLIST                                ==  
-! !     ======================================================================  
-! !PRINT*,'CHECK'
-!       TCHK=.TRUE.
-!       REWIND NFIL_
-!       READ(NFIL_,*)STRING
-!       REWIND NFIL_
-!       IF(STRING.NE.'!SETUP') THEN
-!         TCHK=.FALSE.  
-!         RETURN
-!       END IF
-!       STP(ISTP)%NFIL=NFIL_
-! !
-! !     ======================================================================  
-! !     == CREATE NEW LINKED LIST AND READ                                  ==  
-! !     ======================================================================  
-! !PRINT*,'CREATE LINKEDLIST',STRING
-!       CALL LINKEDLIST$NEW(LL_STP_)
-! !PRINT*,'READ',NFIL
-!       CALL LINKEDLIST$READ(LL_STP_,STP(ISTP)%NFIL,'MONOMER')
-!       TCHK=.TRUE.
-! !
-! !     ======================================================================  
-! !     == READ SOME DATA                                                   ==  
-! !     ======================================================================  
-! !     == LNX
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!       CALL LINKEDLIST$GET(LL_STP_,'LNX',0,LNX)
-!       STP(ISTP)%LNX=LNX
-! !     == GRID
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'GRID')
-!       CALL LINKEDLIST$GET(LL_STP_,'TYPE',0,TYPE)
-!       CALL LINKEDLIST$GET(LL_STP_,'R1',0,R1)
-!       CALL LINKEDLIST$GET(LL_STP_,'DEX',0,DEX)
-!       CALL LINKEDLIST$GET(LL_STP_,'NR',0,STP(ISTP)%NR)
-!       CALL RADIAL$NEW(TRIM(TYPE),STP(ISTP)%GID)
-!       CALL RADIAL$SETR8(STP(ISTP)%GID,'R1',R1)
-!       CALL RADIAL$SETR8(STP(ISTP)%GID,'DEX',DEX)
-!       CALL RADIAL$SETI4(STP(ISTP)%GID,'NR',STP(ISTP)%NR)
-! !     == NB,NC
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!       CALL LINKEDLIST$GET(LL_STP_,'NB',0,STP(ISTP)%NB)
-!       CALL LINKEDLIST$GET(LL_STP_,'NC',0,STP(ISTP)%NC)
-!       STP(ISTP)%LL=LL_STP_
-!       RETURN
-!       END
-
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASSTP$GETI4(ID,ISTP,VAL)  ! MARK: XASSTP$GETI4
-! !     **************************************************************************
-! !     **                                                                      **
-! !     **************************************************************************
-!       USE XASSTP_MODULE, ONLY: STP
-!       USE LINKEDLIST_MODULE
-!       IMPLICIT NONE
-!       CHARACTER(*),INTENT(IN) :: ID
-!       INTEGER(4)  ,INTENT(IN) :: ISTP
-!       INTEGER(4)  ,INTENT(OUT):: VAL
-!       TYPE(LL_TYPE)           :: LL_STP_
-! !     **************************************************************************
-!       LL_STP_=STP(ISTP)%LL
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-! !
-! !     ==========================================================================
-! !     == #(PARTIAL WAVES)                                                     ==
-! !     ==========================================================================
-!       IF(ID.EQ.'LNX') THEN
-!         VAL=STP(ISTP)%LNX
-! !
-! !     ==========================================================================
-! !     == #(RADIAL GRID POINTS)                                                ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'NR') THEN
-!         VAL=STP(ISTP)%NR
-! !
-! !     ==========================================================================
-! !     == GRID ID                                                              ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'GID') THEN
-!         VAL=STP(ISTP)%GID
-! !
-! !     ==========================================================================
-! !     == NUMBER OF CORE STATES                                                ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'NC') THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         CALL LINKEDLIST$GET(LL_STP_,'NC',0,VAL)
-! !
-! !     ==========================================================================
-! !     == NUMBER OF ATOMIC STATES AVAILABLE                                    ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'NB') THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         CALL LINKEDLIST$GET(LL_STP_,'NB',0,VAL)
-! !
-! !     ==========================================================================
-! !     ==  WRONG ID                                                            ==
-! !     ==========================================================================
-!       ELSE
-!         CALL ERROR$MSG('ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID',ID)
-!         CALL ERROR$STOP('XASSTP$GETI4')
-!       END IF
-!       RETURN
-!       END
-
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASSTP$GETR8(ID,ISTP,VAL)  ! MARK: XASSTP$GETR8
-! !     **************************************************************************
-! !     **                                                                      **
-! !     **************************************************************************
-!       USE XASSTP_MODULE, ONLY: STP
-!       USE LINKEDLIST_MODULE
-!       IMPLICIT NONE
-!       CHARACTER(*),INTENT(IN) :: ID
-!       INTEGER(4)  ,INTENT(IN) :: ISTP
-!       REAL(8)     ,INTENT(OUT):: VAL
-!       TYPE(LL_TYPE)           :: LL_STP_
-! !     **********************************************************************
-!       LL_STP_=STP(ISTP)%LL
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-!       IF(ID.EQ.'AEZ') THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'GENERIC')
-!         CALL LINKEDLIST$GET(LL_STP_,'AEZ',0,VAL)
-!       ELSE IF(ID.EQ.'PSZ') THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'PSZ',0,VAL)
-!       ELSE IF(ID.EQ.'RCSM') THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'RCSM',0,VAL)
-!       ELSE
-!         CALL ERROR$MSG('ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID',ID)
-!         CALL ERROR$STOP('XASSTP$GETR8')
-!       END IF
-!       RETURN
-!       END
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASSTP$GETI4A(ID,ISTP,LENG,VAL)  ! MARK: XASSTP$GETI4A
-! !     **************************************************************************
-! !     **                                                                      **
-! !     **************************************************************************
-!       USE XASSTP_MODULE, ONLY: STP
-!       USE LINKEDLIST_MODULE
-!       IMPLICIT NONE
-!       CHARACTER(*),INTENT(IN) :: ID
-!       INTEGER(4)  ,INTENT(IN) :: ISTP
-!       INTEGER(4)  ,INTENT(IN) :: LENG
-!       INTEGER(4)  ,INTENT(OUT):: VAL(LENG)
-!       TYPE(LL_TYPE)           :: LL_STP_
-!       INTEGER(4)  ,ALLOCATABLE:: IWORK(:)
-! !     **********************************************************************
-!       LL_STP_=STP(ISTP)%LL
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-! !
-! !     ==  ANGULAR MOMENTA OF THE PARTIAL WAVES  ==========================
-!       IF(ID.EQ.'LOX') THEN
-!         IF(LENG.NE.STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.LNX)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETI4A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'LOX',0,VAL)
-! !
-! !     ==  ANGULAR MOMENTUM OF THE CORE STATES =============================
-!       ELSE IF(ID.EQ.'LOFC') THEN
-!         IF(LENG.NE.STP(ISTP)%NC) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NC)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NC',STP(ISTP)%NC)
-!           CALL ERROR$STOP('XASSTP$GETI4A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         ALLOCATE(IWORK(STP(ISTP)%NB))
-!         CALL LINKEDLIST$GET(LL_STP_,'L',0,IWORK)
-!         VAL(:)=IWORK(1:STP(ISTP)%NC)
-!         DEALLOCATE(IWORK)
-! !
-! !     == #(NODES) OF THE CORE STATES =====================================
-!       ELSE IF(ID.EQ.'NNOFC') THEN
-!         IF(LENG.NE.STP(ISTP)%NC) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NC)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NC',STP(ISTP)%NC)
-!           CALL ERROR$STOP('XASSTP$GETI4A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         ALLOCATE(IWORK(STP(ISTP)%NB))
-!         CALL LINKEDLIST$GET(LL_STP_,'NN',0,IWORK)
-!         VAL(:)=IWORK(1:STP(ISTP)%NC)
-!         DEALLOCATE(IWORK)
-!       ELSE
-!         CALL ERROR$MSG('ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID',ID)
-!         CALL ERROR$STOP('XASSTP$GETI4A')
-!       END IF
-!       RETURN
-!       END
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASSTP$GETR8A(ID,ISTP,LENG,VAL)  ! MARK: XASSTP$GETR8A
-! !     **************************************************************************
-! !     **                                                                      **
-! !     **************************************************************************
-!       USE XASSTP_MODULE, ONLY: STP
-!       USE LINKEDLIST_MODULE
-!       IMPLICIT NONE
-!       CHARACTER(*),INTENT(IN) :: ID
-!       INTEGER(4)  ,INTENT(IN) :: ISTP
-!       INTEGER(4)  ,INTENT(IN) :: LENG
-!       REAL(8)     ,INTENT(OUT):: VAL(LENG)
-!       TYPE(LL_TYPE)           :: LL_STP_
-!       REAL(8)     ,ALLOCATABLE:: WORK(:)
-!       INTEGER(4)              :: I,I1,I2
-!       INTEGER(4)  ,ALLOCATABLE:: LOFi(:)
-! !     **************************************************************************
-!       LL_STP_=STP(ISTP)%LL
-!       CALL LINKEDLIST$SELECT(LL_STP_,'~')
-!       CALL LINKEDLIST$SELECT(LL_STP_,'SETUP')
-! !
-! !     ==========================================================================
-! !     == PROJECTOR FUNCTIONS                                                  ==
-! !     ==========================================================================
-!       IF(ID.EQ.'PRO') THEN
-!         IF(LENG.NE.STP(ISTP)%NR*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR*LNX(')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         DO I=1,STP(ISTP)%LNX
-!           I1=STP(ISTP)%NR*(I-1)+1
-!           I2=STP(ISTP)%NR*I
-!           CALL LINKEDLIST$GET(LL_STP_,'PRO',I,VAL(I1:I2))
-!         ENDDO
-! !
-! !     ==========================================================================
-! !     == ALL-ELECTRON PARTIAL WAVES                                           ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'AEPHI') THEN
-!         IF(LENG.NE.STP(ISTP)%NR*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR*LNX(')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         DO I=1,STP(ISTP)%LNX
-!           I1=STP(ISTP)%NR*(I-1)+1
-!           I2=STP(ISTP)%NR*I
-!           CALL LINKEDLIST$GET(LL_STP_,'AEPHI',I,VAL(I1:I2))
-!         ENDDO
-! !
-! !     ==========================================================================
-! !     == PSEUDO PARTIAL WAVES                                                 ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'PSPHI') THEN
-!         IF(LENG.NE.STP(ISTP)%NR*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR*LNX(')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         DO I=1,STP(ISTP)%LNX
-!           I1=STP(ISTP)%NR*(I-1)+1
-!           I2=STP(ISTP)%NR*I
-!           CALL LINKEDLIST$GET(LL_STP_,'PSPHI',I,VAL(I1:I2))
-!         ENDDO
-! !
-! !     ==========================================================================
-! !     == ALL-ELECTRON CORE DENSITY                                            ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'AECORE') THEN
-!         IF(LENG.NE.STP(ISTP)%NR) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'AECORE',0,VAL)
-! !
-! !     ==========================================================================
-! !     == PSEUDO CORE DENSITY                                                  ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'PSCORE') THEN
-!         IF(LENG.NE.STP(ISTP)%NR) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'PSCORE',0,VAL)
-! !
-! !     ==========================================================================
-! !     == POTENTIAL VADD                                                       ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'VADD') THEN
-!         IF(LENG.NE.STP(ISTP)%NR) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'VADD',0,VAL)
-! !
-! !     ==========================================================================
-! !     == ONE-CENTER DIFFERENCE KINETIC ENERGY MATRIX                          ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'DT') THEN
-!         IF(LENG.NE.STP(ISTP)%LNX*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.LNX**2)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'DT',0,VAL)
-! !
-! !     ==========================================================================
-! !     == ONE-CENTER DIFFERENCE OVERLAP MATRIX                                 ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'DO') THEN
-!         IF(LENG.NE.STP(ISTP)%LNX*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.LNX**2)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'DO',0,VAL)
-! !
-! !     ==========================================================================
-! !     == ONE-CENTER DIFFERENCE HAMILTONIAN OF THE ATOM                        ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'DH') THEN
-!         IF(LENG.NE.STP(ISTP)%LNX*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.LNX**2)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         CALL LINKEDLIST$GET(LL_STP_,'DH',0,VAL)
-! !
-! !     ==========================================================================
-! !     == ALL-ELECTRON ATOMIC POTENTIAL                                        ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'AEPOT') THEN
-!         IF(LENG.NE.STP(ISTP)%NR) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         CALL LINKEDLIST$GET(LL_STP_,'AEPOT',0,VAL)
-! !
-! !     ==========================================================================
-! !     == ENERGIES OF THE CORE STATES                                          ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'EOFC') THEN
-!         IF(LENG.NE.STP(ISTP)%NC) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NC)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NC',STP(ISTP)%NC)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         ALLOCATE(WORK(STP(ISTP)%NB))
-!         CALL LINKEDLIST$GET(LL_STP_,'E',0,WORK)
-!         VAL(:)=WORK(1:STP(ISTP)%NC)
-!         DEALLOCATE(WORK)
-! !
-! !     ==========================================================================
-! !     == OCCUPATIONS OF THE CORE STATES                                       ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'FOFC') THEN
-!         IF(LENG.NE.STP(ISTP)%NC) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NC)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NC',STP(ISTP)%NC)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         ALLOCATE(WORK(STP(ISTP)%NB))
-!         CALL LINKEDLIST$GET(LL_STP_,'OCC',0,WORK)
-!         VAL(:)=WORK(1:STP(ISTP)%NC)
-!         DEALLOCATE(WORK)
-! !
-! !     ==========================================================================
-! !     == NODELESS PARTIAL WAVES                                               ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'NDLSPHI') THEN
-!         IF(LENG.NE.STP(ISTP)%NR*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR*LNX(')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         DO I=1,STP(ISTP)%LNX
-!           I1=STP(ISTP)%NR*(I-1)+1
-!           I2=STP(ISTP)%NR*I
-!           CALL LINKEDLIST$GET(LL_STP_,'NDLSPHI',I,VAL(I1:I2))
-!         ENDDO
-! !
-! !     ==========================================================================
-! !     == KINETIC ENERGY OF NODELESS PARTIAL WAVES                             ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'NDLSTPHI') THEN
-!         IF(LENG.NE.STP(ISTP)%NR*STP(ISTP)%LNX) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR*LNX(')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$I4VAL('LNX',STP(ISTP)%LNX)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AUGMENTATION')
-!         DO I=1,STP(ISTP)%LNX
-!           I1=STP(ISTP)%NR*(I-1)+1
-!           I2=STP(ISTP)%NR*I
-!           CALL LINKEDLIST$GET(LL_STP_,'NDLSTPHI',I,VAL(I1:I2))
-!         ENDDO
-! !
-! !     ==========================================================================
-! !     == READ SET OF NODELESS ATOMIC CORE STATES                              ==
-! !     ==========================================================================
-!       ELSE IF(ID.EQ.'AEPSICORE') THEN
-!         CALL LINKEDLIST$SELECT(LL_STP_,'AESCF')
-!         IF(LENG.NE.STP(ISTP)%NR*STP(ISTP)%NC) THEN
-!           CALL ERROR$MSG('SIZE INCONSISTENT (LENG.NE.NR*NC)')
-!           CALL ERROR$CHVAL('ID',ID)
-!           CALL ERROR$I4VAL('LENG',LENG)
-!           CALL ERROR$I4VAL('NR',STP(ISTP)%NR)
-!           CALL ERROR$I4VAL('Nc',STP(ISTP)%NC)
-!           CALL ERROR$STOP('XASSTP$GETR8A')
-!         END IF
-!         DO I=1,STP(ISTP)%NC
-!           I1=1+(I-1)*STP(ISTP)%NR
-!           I2=I1-1+STP(ISTP)%NR
-!           CALL LINKEDLIST$GET(LL_STP_,'PHI-NODELESS',I,VAL(I1:I2))
-!         ENDDO
-!         ALLOCATE(LOFi(STP(ISTP)%NC))
-!         CALL XASSTP$GETI4A('LOFC',ISTP,STP(ISTP)%NC,LOFi)
-!         CALL XASSTP_NDLSTONODAL(STP(ISTP)%GID,STP(ISTP)%NR,STP(ISTP)%NC,LOFI,VAL)
-!         DEALLOCATE(LOFi)
-! !
-! !     ==========================================================================
-! !     == WRONG ID                                                             ==
-! !     ==========================================================================
-!       ELSE
-!         CALL ERROR$MSG('ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID',ID)
-!         CALL ERROR$STOP('XASSTP$GETR8A')
-!       END IF
-!       RETURN
-!       END
-
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE XASSTP_NDLSTONODAL(GID,NR,NC,LOFI,PHI)  ! MARK: XASSTP_NDLSTONODAL
-! !     **************************************************************************
-! !     ** TRANSFORM NODELESS CORES STATES INTO CORRECT ALL-ELECTRON CORE STATES**
-! !     **************************************************************************
-!       IMPLICIT NONE
-!       INTEGER(4)  ,INTENT(IN)    :: GID
-!       INTEGER(4)  ,INTENT(IN)    :: NR
-!       INTEGER(4)  ,INTENT(IN)    :: NC
-!       INTEGER(4)  ,INTENT(IN)    :: LOFI(NC)
-!       REAL(8)     ,INTENT(INOUT) :: PHI(NR,NC)
-!       REAL(8)                    :: R(NR)
-!       REAL(8)                    :: AUX(NR)
-!       REAL(8)                    :: VAL
-!       INTEGER(4)                 :: IB1,IB2
-! !     **************************************************************************
-!       call radial$r(gid,nr,r)
-!       DO IB1=1,NC
-! !
-! !       ========================================================================
-! !       == NORMALIZE                                                          ==
-! !       ========================================================================
-!         AUX(:)=R(:)**2*PHI(:,IB1)**2
-!         CALL RADIAL$INTEGRAL(GID,NR,AUX,VAL)
-!         PHI(:,IB1)=PHI(:,IB1)/SQRT(VAL)
-! !
-! !       ========================================================================
-! !       == ORTHOGONALIZE HIGHER STATES                                        ==
-! !       ========================================================================
-!         DO IB2=IB1+1,NC
-!           IF(LOFI(IB2).NE.LOFI(IB1)) CYCLE
-!           AUX(:)=R(:)**2*PHI(:,IB1)*PHI(:,IB2)
-!           CALL RADIAL$INTEGRAL(GID,NR,AUX,VAL)
-!           PHI(:,IB2)=PHI(:,IB2)-PHI(:,IB1)*VAL
-!         ENDDO
-!       ENDDO
-!       RETURN
-!       END
 !      
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE INITIALIZEFILEHANDLER
-!     **************************************************************************
 !     **************************************************************************
       USE STRINGS_MODULE
       CHARACTER(256) :: ROOTNAME
@@ -1204,6 +585,7 @@
       INTEGER(4)     :: ISVAR
       INTEGER(4)     :: NARGS
 !     **************************************************************************
+                          CALL TRACE$PUSH('INITIALIZEFILEHANDLER')
       NARGS=COMMAND_ARGUMENT_COUNT()
       IF(NARGS.LT.1) THEN
         CALL ERROR$MSG('ARGUMENT LIST OF EXECUTABLE IS EMPTY')
@@ -1220,24 +602,21 @@
       CALL FILEHANDLER$SETROOT(ROOTNAME)
       CALL STANDARDFILES
       CALL FILEHANDLER$SETFILE('XCNTL',.FALSE.,XASINNAME)
+                          CALL TRACE$POP
       RETURN
       END SUBROUTINE INITIALIZEFILEHANDLER
 !
 !      ..1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE STANDARDFILES
 !     **************************************************************************
-!     **                                                                      **
-!     **************************************************************************
       USE STRINGS_MODULE
       IMPLICIT NONE
       CHARACTER(32)        :: ID
 !     **************************************************************************
                                    CALL TRACE$PUSH('STANDARDFILES')
-!  
 !     ==========================================================================
 !     == SET STANDARD FILENAMES                                               ==
 !     ==========================================================================
-!
 !     ==  ERROR FILE ===========================================================
       ID=+'ERR'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XERR')
@@ -1245,7 +624,6 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','APPEND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
-!
 !     ==  PROTOCOL FILE ========================================================
       ID=+'PROT'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XPROT')
@@ -1253,7 +631,6 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','APPEND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
-!
 !     ==  CONTROL FILE  == =====================================================
       ID=+'XCNTL'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XCNTL')
@@ -1261,40 +638,20 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
-!
-!     ==  PDOS FILE   ==========================================================
+!     ==  GROUNDSTATE XAS FILE   ===============================================
       ID=+'GROUNDSTATE'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.GROUND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','OLD')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','UNFORMATTED')
-!
-!     ==  PDOS FILE   ==========================================================
+!     ==  EXCITED STATE XAS FILE   =============================================
       ID=+'EXCITESTATE'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.EXCITE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','OLD')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','UNFORMATTED')
-! !
-! !     ==  DENSITY OF STATES FILE PRODUCES AS OUTPUT ============================
-! !     ==  WILL BE ATTACHED TO DIFFERENT FILES DURING EXECUTION =================
-!       ID=+'PDOSOUT'
-!       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.PDOSOUT')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
-! !
-! !     ==  NUMBER OF STATES FILE PRODUCES AS OUTPUT =============================
-! !     ==  WILL BE ATTACHED TO DIFFERENT FILES DURING EXECUTION =================
-!       ID=+'PNOSOUT'
-!       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.PNOSOUT')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
-!       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
                                    CALL TRACE$POP
       RETURN
       END SUBROUTINE STANDARDFILES
@@ -1322,6 +679,10 @@
       REAL(8) :: R1
       REAL(8) :: R1_
       INTEGER(4) :: LNX
+      INTEGER(4) :: NB
+      INTEGER(4) :: IB
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
       LOGICAL(4) :: TCHK
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$READ')
@@ -1329,7 +690,7 @@
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('XAS$READ')
       END IF
-      CALL FILEHANDLER$UNIT(THIS%FLAG,NFIL)
+      CALL FILEHANDLER$UNIT(THIS%ID,NFIL)
       REWIND(NFIL)
 !     ==========================================================================
 !     == READ GENERAL QUANTATIES                                              ==
@@ -1337,9 +698,9 @@
       READ(NFIL)THIS%NAT,THIS%NSP,THIS%NKPT,THIS%NSPIN,THIS%NDIM,THIS%NPRO, &
      &          THIS%LNXX,THIS%FLAG
       ALLOCATE(THIS%LNX(THIS%NSP))
-      ALLOCATE(LOX(THIS%LNXX,THIS%NSP))
-      READ(NFIL)THIS%LNX,THIS%LOX
-      READ(NFIL)THIS%NKDIV,THIS%ISHIFT,THIS%RNTOT,THIS%NEL,ILOGICAL
+      ALLOCATE(THIS%LOX(THIS%LNXX,THIS%NSP))
+      READ(NFIL)THIS%LNX(:),THIS%LOX(:,:)
+      READ(NFIL)THIS%NKDIV(:),THIS%ISHIFT(:),THIS%RNTOT,THIS%NEL,ILOGICAL
       THIS%TINV=.FALSE.
       IF(ILOGICAL.EQ.1) THIS%TINV=.TRUE.
       READ(NFIL)THIS%SPACEGROUP,ILOGICAL
@@ -1351,7 +712,7 @@
       ALLOCATE(THIS%R(3,THIS%NAT))
       ALLOCATE(THIS%ATOMID(THIS%NAT))
       ALLOCATE(THIS%ISPECIES(THIS%NAT))
-      READ(NFIL)THIS%RBAS,THIS%R,THIS%ATOMID,THIS%ISPECIES
+      READ(NFIL)THIS%RBAS(:,:),THIS%R(:,:),THIS%ATOMID(:),THIS%ISPECIES(:)
 !     ==========================================================================
 !     == ELEMENT SPECIFIC QUANTITIES                                          ==
 !     ==========================================================================
@@ -1387,89 +748,93 @@
         LNX=THIS%LNX(ISP)
         ALLOCATE(THIS%SETUP(ISP)%PSPHI(NR,LNX))
         ALLOCATE(THIS%SETUP(ISP)%AEPHI(NR,LNX))
-        READ(NFIL)THIS%SETUP(ISP)%PSPHI
-        READ(NFIL)THIS%SETUP(ISP)%AEPHI
+        READ(NFIL)THIS%SETUP(ISP)%PSPHI(:,:)
+        READ(NFIL)THIS%SETUP(ISP)%AEPHI(:,:)
       ENDDO
 !     ==========================================================================
 !     == READ PROJECTIONS                                                     ==
 !     ==========================================================================
-! TODO: CONTINUE HERE
+      ALLOCATE(THIS%XK(3,THIS%NKPT))
+      ALLOCATE(THIS%WKPT(THIS%NKPT))
+      ALLOCATE(THIS%STATEARR(THIS%NKPT,THIS%NSPIN))
+      DO IKPT=1,THIS%NKPT
+        DO ISPIN=1,THIS%NSPIN
+          THIS%STATE=>THIS%STATEARR(IKPT,ISPIN)
+          READ(NFIL)THIS%XK(:,IKPT),NB,THIS%WKPT(IKPT)
+          THIS%STATE%NB=NB
+          ALLOCATE(THIS%STATE%EIG(NB))
+          ALLOCATE(THIS%STATE%PRO(THIS%NDIM,THIS%NPRO,NB))
+          ALLOCATE(THIS%STATE%OCC(NB))
+          DO IB=1,NB
+            READ(NFIL)THIS%STATE%EIG(IB)
+            READ(NFIL)THIS%STATE%OCC(IB)
+            READ(NFIL)THIS%STATE%PRO(:,:,IB)
+          ENDDO
+        ENDDO ! END LOOP OVER SPIN
+      ENDDO ! END LOOP OVER KPOINTS
                           CALL TRACE$POP
       END SUBROUTINE XAS$READ
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XAS_READPHI(NFIL)  ! MARK: XAS_READPHI
+      SUBROUTINE XAS$REPORT  ! MARK: XAS$REPORT
 !     **************************************************************************
-!     ** READ RADIAL GRIDS AND INITIALIZE RADIAL MODULE                       **
+!     ** REPORT DATA FOR A SELECTED SIMULATION                                **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS
-      USE RADIAL_MODULE, ONLY: NGID
+      USE XAS_MODULE, ONLY: THIS, SELECTED
       IMPLICIT NONE
-      INTEGER(4)  ,INTENT(IN) :: NFIL
-      INTEGER(4) :: NSP
-      INTEGER(4) :: ISP
-      INTEGER(4) :: IGID
-      INTEGER(4) :: IGID_
-      CHARACTER(8) :: GRIDTYPE
-      CHARACTER(8) :: GRIDTYPE_
-      INTEGER(4) :: NR
-      INTEGER(4) :: NR_
-      REAL(8) :: DEX
-      REAL(8) :: DEX_
-      REAL(8) :: R1
-      REAL(8) :: R1_
-      LOGICAL(4) :: TCHK
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: IAT,ISP
+      CHARACTER(256) :: FORMAT
 !     **************************************************************************
-                          CALL TRACE$PUSH('XAS_READPHI')
-!     NUMBER OF SETUPS/SPECIES
-      READ(NFIL) THIS%NSP
-!     CHECK IF SETUP ALREADY ALLOCATED
-      IF(ALLOCATED(THIS%SETUP)) THEN
-        CALL ERROR$MSG('SETUP ALREADY ALLOCATED')
-        CALL ERROR$STOP('XAS_READPHI')
+                          CALL TRACE$PUSH('XAS$REPORT')
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO SIMULATION SELECTED')
+        CALL ERROR$STOP('XAS$REPORT')
       END IF
-      ALLOCATE(THIS%SETUP(THIS%NSP))
-!     LOOP THROUGH SETUPS
-      DO ISP=1,THIS%NSP
-        READ(NFIL)GRIDTYPE,NR,DEX,R1,THIS%SETUP(ISP)%LNX
-        THIS%SETUP(ISP)%NR=NR
-!       CHECK IF RADIAL GRID WITH SAME PROPERTIES ALREADY EXISTS
-        TCHK=.FALSE.
-        IF(NGID.GT.0) THEN
-          DO IGID=1,NGID
-            CALL RADIAL$GETCH(IGID,'TYPE',GRIDTYPE_)
-            CALL RADIAL$GETI4(IGID,'NR',NR_)
-            CALL RADIAL$GETR8(IGID,'DEX',DEX_)
-            CALL RADIAL$GETR8(IGID,'R1',R1_)
-            IF(GRIDTYPE.EQ.GRIDTYPE_.AND.NR.EQ.NR_.AND.DEX.EQ.DEX_.AND.R1.EQ.R1_) THEN
-              IGID_=IGID
-              TCHK=.TRUE.
-              EXIT
-            END IF
-          ENDDO
-        ENDIF
-!       IF GRID ALREADY EXISTS, USE ITS GID. ELSE CREATE NEW GRID
-        IF(TCHK) THEN
-          THIS%SETUP(ISP)%GID=IGID_
-        ELSE
-          CALL RADIAL$NEW(GRIDTYPE,THIS%SETUP(ISP)%GID)
-          CALL RADIAL$SETI4(THIS%SETUP(ISP)%GID,'NR',NR)
-          CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'DEX',DEX)
-          CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'R1',R1)
-        ENDIF
-
-!       ALLOCATE AND READ (AUXILIARY) PARTIAL WAVES
-        ALLOCATE(THIS%SETUP(ISP)%AEPHI(NR,THIS%SETUP(ISP)%LNX))
-        READ(NFIL) THIS%SETUP(ISP)%AEPHI
-        ALLOCATE(THIS%SETUP(ISP)%PSPHI(NR,THIS%SETUP(ISP)%LNX))
-        READ(NFIL) THIS%SETUP(ISP)%PSPHI
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A14,A14)')'SIMULATION',THIS%ID
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A10,A)')'FILE:',TRIM(THIS%FILE)
+      WRITE(NFIL,FMT='(A10,I10)')'NAT:',THIS%NAT
+      WRITE(NFIL,FMT='(A10,I10)')'NSP:',THIS%NSP
+      WRITE(NFIL,FMT='(A10,I10)')'NKPT:',THIS%NKPT
+      WRITE(NFIL,FMT='(A10,I10)')'NSPIN:',THIS%NSPIN
+      WRITE(NFIL,FMT='(A10,I10)')'NDIM:',THIS%NDIM
+      WRITE(NFIL,FMT='(A10,I10)')'NPRO:',THIS%NPRO
+      WRITE(NFIL,FMT='(A10,I10)')'LNXX:',THIS%LNXX
+      WRITE(NFIL,FMT='(A10,L10)')'TINV:',THIS%TINV
+      WRITE(NFIL,FMT='(A10,3I10)')'NKDIV:',THIS%NKDIV(:)
+      WRITE(NFIL,FMT='(A10,3I10)')'ISHIFT:',THIS%ISHIFT(:)
+      WRITE(NFIL,FMT='(A10,F10.4)')'RNTOT:',THIS%RNTOT
+      WRITE(NFIL,FMT='(A10,F10.4)')'NEL:',THIS%NEL
+      WRITE(NFIL,FMT='(A10,I10)')'SPACEGR.:',THIS%SPACEGROUP
+      WRITE(NFIL,FMT='(A10,L10)')'TSHIFT:',THIS%TSHIFT
+      WRITE(NFIL,FMT='(A10,3F10.4)')'RBAS:',THIS%RBAS(:,1)
+      DO IAT=2,3
+        WRITE(NFIL,FMT='(A10,3F10.4)')' ',THIS%RBAS(:,IAT)
       ENDDO
+      WRITE(NFIL,FMT='(5A10)')'ATOM','X','Y','Z','SPECIES'
+      DO IAT=1,THIS%NAT
+        WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
+      ENDDO
+      WRITE(NFIL,FMT='(4A10)')'SETUP','GID','LNX','LOX'
+      DO ISP=1,THIS%NSP
+        IF(THIS%LNXX.GT.9) THEN
+          WRITE(FORMAT,'("(3I10,",I2,"I10)")')THIS%LNXX
+        ELSE
+          WRITE(FORMAT,'("(3I10,",I1,"I10)")')THIS%LNXX
+        END IF
+        WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%LNX(ISP),THIS%LOX(:,ISP)
+      ENDDO
+      CALL RADIAL$REPORT(NFIL)
                           CALL TRACE$POP
-      END SUBROUTINE XAS_READPHI
-
+      END SUBROUTINE XAS$REPORT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$GETCH(ID,VAL)  ! MARK: XAS$GETCH
 !     **************************************************************************
-!     **                                                                      **
+!     ** GET CHARACTER IN XAS MODULE                                          **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: THIS, SELECTED
       IMPLICIT NONE
@@ -1484,6 +849,8 @@
         VAL=THIS%FILE
       ELSE IF(ID.EQ.'FLAG') THEN
         VAL=THIS%FLAG
+      ELSE IF(ID.EQ.'ID') THEN
+        VAL=THIS%ID
       ELSE
         CALL ERROR$MSG('ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID',ID)
@@ -1491,10 +858,11 @@
       END IF
       RETURN
       END SUBROUTINE XAS$GETCH
-
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$SETCH(ID,VAL)  ! MARK: XAS$SETCH
 !     **************************************************************************
-!     **                                                                      **
+!     ** SET CHARACTER IN XAS MODULE                                          **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: THIS, SELECTED
       IMPLICIT NONE
@@ -1509,6 +877,8 @@
         THIS%FILE=VAL
       ELSE IF(ID.EQ.'FLAG') THEN
         THIS%FLAG=VAL
+      ELSE IF(ID.EQ.'ID') THEN
+        THIS%ID=VAL
       ELSE
         CALL ERROR$MSG('ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID',ID)
@@ -1516,7 +886,8 @@
       END IF
       RETURN
       END SUBROUTINE XAS$SETCH
-
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$WRITEPHI(NFIL,ISP,ID)  ! MARK: XAS$WRITEPHI
 !     **************************************************************************
 !     **                                                                      **
@@ -1527,7 +898,7 @@
       INTEGER(4), INTENT(IN) :: ISP ! SELECT SETUP
       CHARACTER(*) ,INTENT(IN) :: ID ! SELECT AEPHI OR PSPHI
       INTEGER(4) :: IR
-      REAL(8), ALLOCATABLE :: R(:)
+      REAL(8), ALLOCATABLE :: R(:) ! (NR)
       REAL(8), ALLOCATABLE :: PSI(:,:) ! (NR,LNX)
 !     **************************************************************************
       ALLOCATE(R(THIS%SETUP(ISP)%NR))
