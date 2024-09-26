@@ -99,7 +99,8 @@ export PAWLIST=" \
         paw_kpoints \
         paw_vext \
         paw_vdw \
-        paw_opteels" 
+        paw_opteels \
+        paw_xasdet" 
 
 # TOOLS contains the names of the source files for the tools including 
 # the path relative to the tool directory $(BASEDIR)/src/
@@ -122,7 +123,8 @@ export TOOLLIST=" \
         Tools/Wave/paw_1davpot \
         Tools/Wave/paw_cmcwave \
         Tools/Wave/paw_wave \
-        Tools/Bands/paw_bands"
+        Tools/Bands/paw_bands"   
+        #Tools/XAS/paw_xas"
 
 # files from $(BASEDIR)/src/Buildtools to be placed in etc
 export ADMINLIST=" \
