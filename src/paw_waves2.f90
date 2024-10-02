@@ -130,7 +130,9 @@ ELSE
           THIS%OPSI(:,:,:)=THIS%PSI0(:,:,:)
 !++++++++++++++++++++++++ FROM HERE +++++++++++++++++++++++++++++++++++++
 !         __ THIS$PROJ=<PTILDE|THIS%PSI0>_______________________________________
+          CALL TIMING$CLOCKON('WAVES_ORTHO_OPSI')
           CALL WAVES_OPSI(NB,NBH,NPRO,NAT,NGL,R0,THIS%PROJ,THIS%OPSI)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPSI')
 !++++++++++++++++++++++++ TO HERE +++++++++++++++++++++++++++++++++++++++
 END IF
 !
@@ -247,6 +249,7 @@ END IF
 !         ======================================================================
 !         ==  CALCULATE PROJECTIONS FOR THE NEW POSITIONS                     ==
 !         ======================================================================
+          CALL TIMING$CLOCKON('WAVES_ORTHO_PROJ')
           CALL WAVES_PROJECTIONS(MAP,GSET,NAT,RP,NGL,NDIM,NBH,NPRO &
      &                                                     ,THIS%PSIM,THIS%PROJ)
           CALL MPE$COMBINE('K','+',THIS%PROJ)
@@ -254,20 +257,24 @@ END IF
           CALL WAVES_PROJECTIONS(MAP,GSET,NAT,RP,NGL,NDIM,NBH,NPRO &
      &                                                         ,THIS%OPSI,OPROJ)
           CALL MPE$COMBINE('K','+',OPROJ)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_PROJ')
 !
 !         ======================================================================
 !         ==  1C-OVERLAP OF <PSI0|PSI0>, <OPSI|PSI0> AND <OPSI|OPSI>          ==
 !         ======================================================================
+          CALL TIMING$CLOCKON('WAVES_ORTHO_1COLAP')
           ALLOCATE(MAT(NB,NB))
           CALL WAVES_1COVERLAP(MAP,NDIM,NBH,NB,NPRO,THIS%PROJ,THIS%PROJ,MAT)
           ALLOCATE(OMAT(NB,NB))
           CALL WAVES_1COVERLAP(MAP,NDIM,NBH,NB,NPRO,OPROJ,THIS%PROJ,OMAT)
           ALLOCATE(OOMAT(NB,NB))
           CALL WAVES_1COVERLAP(MAP,NDIM,NBH,NB,NPRO,OPROJ,OPROJ,OOMAT)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_1COLAP')
 !
 !         ======================================================================
 !         ==  NOW ADD OVERLAP OF PSEUDO WAVE FUNCTIONS                        ==
 !         ======================================================================
+          CALL TIMING$CLOCKON('WAVES_ORTHO_OLAP')
           ALLOCATE(AUXMAT(NB,NB))
           CALL WAVES_OVERLAP(.TRUE.,NGL,NDIM,NBH,NB,THIS%PSIM,THIS%PSIM,AUXMAT)
           DO I=1,NB
@@ -288,6 +295,7 @@ END IF
             ENDDO
           ENDDO
           DEALLOCATE(AUXMAT)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OLAP')
 !
 !         ======================================================================
 !         ==  CALCULATE LAGRANGE PARAMETERS                                   ==
@@ -358,6 +366,7 @@ END IF
             ENDDO
           ENDDO
 !
+          CALL TIMING$CLOCKON('WAVES_ORTHO_LAGR')
           IF(TSAFEORTHO) THEN
             CALL PLANEWAVE$GETL4('TINV',TINV)
             IF(TINV) THEN
@@ -386,16 +395,21 @@ END IF
           DEALLOCATE(OMAT)
           DEALLOCATE(OOMAT)
           IF(.NOT.TSAFEORTHO)DEALLOCATE(SMAP)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_LAGR')
 !
 !         ======================================================================
 !         ==  CALCULATE |PSI(+)>=|PSI>+|CHI>LAMBDA                            ==
 !         ======================================================================
+          CALL TIMING$CLOCKON('WAVES_ORTHO_OPSI')
           CALL WAVES_ADDOPSI(NGL,NDIM,NBH,NB,THIS%PSIM,THIS%OPSI,LAMBDA)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPSI')
           DEALLOCATE(THIS%OPSI)
 !PRINT*,'WARNING FROM WAVES$ORTHOGONALIZE:'
 !PRINT*,'MAKE SURE THAT PDOS AND GRAPHICS PICK UP A CONSISTENT SET OF '
 !PRINT*,'WAVE FUNCTIONS  AND PROJECTOR FUNCTIONS'
+          CALL TIMING$CLOCKON('WAVES_ORTHO_OPROJ')
           CALL WAVES_ADDOPROJ(NPRO,NDIM,NBH,NB,THIS%PROJ,OPROJ,LAMBDA)
+          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPROJ')
           DEALLOCATE(OPROJ)
 !
 !         ======================================================================
