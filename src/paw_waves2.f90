@@ -389,7 +389,7 @@ END IF
               CALL WAVES_ORTHO_X_C(NB,OCC(1,IKPT,ISPIN),OOMAT,MAT,OMAT,LAMBDA)
             END IF
           ELSE
-            CALL WAVES_ORTHO_Y_C(NB,MAT,OMAT,OOMAT,LAMBDA,SMAP)
+            CALL WAVES_ORTHO_Y_C_SPEED(NB,MAT,OMAT,OOMAT,LAMBDA)
           END IF
           DEALLOCATE(MAT)
           DEALLOCATE(OMAT)
@@ -1097,7 +1097,7 @@ END IF
          N=MAP(NU)
 !
 !        ===============================================================
-!        == NORMALIZE PHI(N)                                          ==
+!        == NORMALIZED PHI(N)                                          ==
 !        == PHI(N)=PHI(N)+CHI(N)*Z(N)                                 ==
 !        ===============================================================
 !CHANGED THIS TO MAKE IT SIMPLER PB 070127
@@ -1349,6 +1349,217 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
        ENDDO
        RETURN
        END SUBROUTINE TESTB
+      END
+!
+!      .................................................................
+      SUBROUTINE WAVES_ORTHO_Y_C_SPEED(NB,PHIPHI,CHIPHI,CHICHI,X)
+!      **                                                             **
+!      **  CALCULATE LAGRANGE MULTIPLIERS FOR ORTHOGONALIZATION       **
+!      **    |PHI(I)>=|PHI(I)>+SUM_J |CHI(J)>X(J,I)                   **
+!      **  WITH                                                       **
+!      **    X(I>J)=0                                                 **
+!      **                                                             **
+!      **  ATTENTION!! CHIPHI0=<CHI|O|PHI>                            **
+!      **        AND   PHIPHI0=<PHI|O|PHI>                            **
+!      **        CONVERSION IS DONE IN THE INITIALIZATION             **
+!      **                                                             **
+!      *****************************************************************
+       IMPLICIT NONE
+       INTEGER(4),INTENT(IN) :: NB
+       COMPLEX(8),INTENT(IN) :: PHIPHI(NB,NB) !<PHI_I|O|PHI_J>
+       COMPLEX(8),INTENT(IN) :: CHIPHI(NB,NB) !<PHI_I|O|CHI>
+       COMPLEX(8),INTENT(IN) :: CHICHI(NB,NB) !<CHI_I|O|CHI_J>
+       COMPLEX(8),INTENT(OUT):: X(NB,NB)      ! X(I>J)=0
+       COMPLEX(8)            :: A(NB,NB)
+       COMPLEX(8)            :: B(NB,NB)
+       COMPLEX(8)            :: C(NB,NB)
+       COMPLEX(8)            :: ALPHA(NB,NB)   ! (I>J)=0
+       COMPLEX(8)            :: WORK(NB,NB)    
+       COMPLEX(8)            :: Z(NB)
+       INTEGER(4)            :: I,J,K,L,N
+       COMPLEX(8)            :: CSVAR
+       REAL(8)               :: SVAR,SVAR1,SVAR2
+       REAL(8)               :: MAXDEV
+       LOGICAL   ,PARAMETER  :: TTEST=.FALSE.
+       REAL(8)   ,PARAMETER  :: TOL=1.D-10
+       INTEGER(4)            :: NU,N0,IU,JU
+       REAL(8)               :: R8SMALL
+!      *****************************************************************
+                             CALL TRACE$PUSH('WAVES_ORTHO_Y_C')
+       R8SMALL=TINY(R8SMALL)*1.D+5
+       R8SMALL=1.D-10
+!
+!      =================================================================
+!      ==  INITIALIZE                                                 ==
+!      =================================================================
+       A(:,:)=PHIPHI(:,:)
+       B(:,:)=CHIPHI(:,:)
+       C(:,:)=CHICHI(:,:)
+       X(:,:)=(0.D0,0.D0)
+       ALPHA(:,:)=(0.D0,0.D0)
+       DO I=1,NB
+         A(I,I)=A(I,I)-(1.D0,0.D0)
+         ALPHA(I,I)=(1.D0,0.D0)
+       ENDDO
+!
+!      =================================================================
+!      ==  ORTHOGONALIZATION LOOP                                     ==
+!      =================================================================
+!                            CALL TRACE$PASS('BEFORE ORTHOGONALIZATION LOOP')
+       DO N=1,NB
+!
+!        ===============================================================
+!        == NORMALIZED PHI(N)                                          ==
+!        == PHI(N)=PHI(N)+CHI(N)*Z(N)                                 ==
+!        ===============================================================
+!CHANGED THIS TO MAKE IT SIMPLER PB 070127
+         SVAR = REAL( REAL(B(N,N))**2-A(N,N)*C(N,N) )
+         SVAR1=-REAL(B(N,N),KIND=8)
+         IF(SVAR.GE.0.D0) THEN
+           SVAR2=SQRT(SVAR)
+!          == CHOOSE THE SIGN OF THE ROOT SUCH RESULT IS SMALL
+           IF(SVAR1*SVAR2.GE.0.D0) THEN
+             Z(N)=SVAR1-SVAR2
+           ELSE
+             Z(N)=SVAR1+SVAR2
+           END IF
+         ELSE
+           PRINT*,'ORTHOGONALIZATION FAILED! TRYING BEST APPROXIMATION...',SVAR
+           Z(N)=SVAR1
+         END IF
+         Z(N)=Z(N)/REAL(C(N,N)+R8SMALL,KIND=8)
+!        == TEST FOR NANS (NAN = NOT A NUMBER)
+         IF(SVAR.NE.SVAR) THEN
+PRINT*,'MARKE 1',N,B(N,N),A(N,N),C(N,N)
+PRINT*,'MARKE 2',N,B(N,N)**2-A(N,N)*C(N,N)
+PRINT*,'PHIPHI',(PHIPHI(I,I),I=1,NB)
+PRINT*,'A     ',(A(I,I),I=1,NB)
+           CALL ERROR$MSG('NAN DETECTED')
+           CALL ERROR$STOP('WAVES_ORTHO_Y_C')
+         END IF
+!
+!        ===============================================================
+!        == NOW UPDATE MATRICES                                       ==
+!        ===============================================================
+         N0=N   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
+!N0=1
+!        == A(N,M)+B(N,N)*DELTA(M)=0  ======================
+         X(:,N)=X(:,N)+ALPHA(:,N)*Z(N)
+         A(N,:)=A(N,:)+CONJG(Z(N))*B(N,:)
+         A(:,N)=A(:,N)+CONJG(B(N,:))*Z(N)
+         A(N,N)=A(N,N)+CONJG(Z(N))*C(N,N)*Z(N)
+         B(:,N)=B(:,N)+C(:,N)*Z(N)
+!
+!        ===============================================================
+!        == ORTHOGONALIZE HIGHER PHIS TO THIS PHI                     ==
+!        == PHI(J)=PHI(J)+CHI(N)*Z(J)       J>N                       ==
+!        ===============================================================
+         Z(1:N)=(0.D0,0.D0)
+         Z(N+1:NB)=-CONJG(A(N+1:NB,N)/(B(N,N)+R8SMALL))
+!
+!        ===============================================================
+!        == NOW UPDATE MATRICES                                       ==
+!        ===============================================================
+         N0=N+1   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
+!N0=1
+!          == A(N,M)+B(N,N)*DELTA(M)=0  ======================
+         DO J=N0,NB
+           X(:,J)=X(:,J)+ALPHA(:,N)*Z(J)
+         ENDDO           
+        !  DO I=N0,NB
+        !    DO J=1,NB
+        !      A(I,J)=A(I,J)+CONJG(Z(I))*B(N,J)
+        !    ENDDO
+        !  ENDDO
+         DO I=N0,NB
+           A(I,:)=A(I,:)+CONJG(Z(I))*B(N,:)
+         ENDDO      
+        !  DO I=1,NB
+        !    DO J=N0,NB
+        !      A(I,J)=A(I,J)+CONJG(B(N,I))*Z(J) 
+        !    ENDDO
+        !  ENDDO
+         DO I=1,NB
+           A(I,N0:NB)=A(I,N0:NB)+CONJG(B(N,I))*Z(N0:NB)
+         ENDDO
+
+         DO I=N0,NB
+           DO J=N0,NB
+             A(I,J)=A(I,J)+CONJG(Z(I))*C(N,N)*Z(J)
+           ENDDO
+         ENDDO
+
+        !  DO I=1,NB
+        !    DO J=N0,NB
+        !      B(I,J)=B(I,J)+C(I,N)*Z(J)
+        !    ENDDO
+        !  ENDDO
+         DO I=1,NB
+           B(I,N0:NB)=B(I,N0:NB)+C(I,N)*Z(N0:NB)
+         ENDDO
+!
+!        ===============================================================
+!        == ORTHOGONALIZE HIGHER CHIS TO THIS PHI                     ==
+!        == CHI(M)=CHI(M)+CHI(N)*DELTA(M)   M>N                       ==
+!        ===============================================================
+!               CALL TRACE$PASS('ORTHOGONALIZE HIGHER CHIS TO THIS PHI')
+         Z(1:N)=(0.D0,0.D0)
+!        == |CHI(J)>=|CHI(J)>+|CHI(N)>*Z(J) ==========================
+!        == B(M,N)+B(N,N)*DELTA(M)=0
+         Z(N+1:NB)=-CONJG(B(N+1:NB,N)/(B(N,N)+R8SMALL))
+
+
+         N0=N+1   !SET N0=N+1 FOR FAST CALCULATION AND N0=1 FOR TESTS
+!N0=1
+        !  DO I=1,NB
+        !    DO J=N0,NB
+        !      ALPHA(I,J)=ALPHA(I,J)+ALPHA(I,N)*Z(J)
+        !    ENDDO
+        !  ENDDO
+         DO I=1,NB
+           ALPHA(I,N0:NB)=ALPHA(I,N0:NB)+ALPHA(I,N)*Z(N0:NB)
+         ENDDO
+        !  DO I=N0,NB
+        !    DO J=1,NB
+        !      B(I,J)=B(I,J)+CONJG(Z(I))*B(N,J)
+        !    ENDDO 
+        !  ENDDO
+         DO I=N0,NB
+           B(I,:)=B(I,:)+CONJG(Z(I))*B(N,:)
+         ENDDO
+!IF(ABS(B(N,N)).GT.HUGE(B)) THEN
+! PRINT*,B(N,N),Z
+! CALL ERROR$STOP('ERROR')
+!END IF
+         WORK(:,:)=(0.D0,0.D0)
+        !  DO I=N0,NB
+        !    DO J=1,NB
+        !      WORK(I,J)=WORK(I,J)+CONJG(Z(I))*C(N,J) 
+        !    ENDDO
+        !  ENDDO
+         DO I=N0,NB
+           WORK(I,:)=WORK(I,:)+CONJG(Z(I))*C(N,:)
+         ENDDO
+        !  DO I=1,NB
+        !    DO J=N0,NB
+        !      WORK(I,J)=WORK(I,J)+C(I,N)*Z(J)
+        !    ENDDO
+        !  ENDDO
+         DO I=1,NB
+           WORK(I,N0:NB)=WORK(I,N0:NB)+C(I,N)*Z(N0:NB)
+         ENDDO
+        !  DO I=N0,NB
+        !    DO J=N0,NB
+        !      WORK(I,J)=WORK(I,J)+CONJG(Z(I))*C(N,N)*Z(J)
+        !    ENDDO
+        !  ENDDO
+         DO I=N0,NB
+           WORK(I,N0:NB)=WORK(I,N0:NB)+CONJG(Z(I))*C(N,N)*Z(N0:NB)
+         ENDDO
+         C(:,:)=C(:,:)+WORK(:,:)
+       ENDDO
+                             CALL TRACE$POP
+       RETURN
       END
 !
 !      .................................................................
