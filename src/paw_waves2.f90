@@ -130,9 +130,9 @@ ELSE
           THIS%OPSI(:,:,:)=THIS%PSI0(:,:,:)
 !++++++++++++++++++++++++ FROM HERE +++++++++++++++++++++++++++++++++++++
 !         __ THIS$PROJ=<PTILDE|THIS%PSI0>_______________________________________
-          CALL TIMING$CLOCKON('WAVES_ORTHO_OPSI')
+          ! CALL TIMING$CLOCKON('WAVES_ORTHO_OPSI')
           CALL WAVES_OPSI(NB,NBH,NPRO,NAT,NGL,R0,THIS%PROJ,THIS%OPSI)
-          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPSI')
+          ! CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPSI')
 !++++++++++++++++++++++++ TO HERE +++++++++++++++++++++++++++++++++++++++
 END IF
 !
@@ -249,7 +249,7 @@ END IF
 !         ======================================================================
 !         ==  CALCULATE PROJECTIONS FOR THE NEW POSITIONS                     ==
 !         ======================================================================
-          CALL TIMING$CLOCKON('WAVES_ORTHO_PROJ')
+          ! CALL TIMING$CLOCKON('WAVES_ORTHO_PROJ')
           CALL WAVES_PROJECTIONS(MAP,GSET,NAT,RP,NGL,NDIM,NBH,NPRO &
      &                                                     ,THIS%PSIM,THIS%PROJ)
           CALL MPE$COMBINE('K','+',THIS%PROJ)
@@ -257,24 +257,24 @@ END IF
           CALL WAVES_PROJECTIONS(MAP,GSET,NAT,RP,NGL,NDIM,NBH,NPRO &
      &                                                         ,THIS%OPSI,OPROJ)
           CALL MPE$COMBINE('K','+',OPROJ)
-          CALL TIMING$CLOCKOFF('WAVES_ORTHO_PROJ')
+          ! CALL TIMING$CLOCKOFF('WAVES_ORTHO_PROJ')
 !
 !         ======================================================================
 !         ==  1C-OVERLAP OF <PSI0|PSI0>, <OPSI|PSI0> AND <OPSI|OPSI>          ==
 !         ======================================================================
-          CALL TIMING$CLOCKON('WAVES_ORTHO_1COLAP')
+          ! CALL TIMING$CLOCKON('WAVES_ORTHO_1COLAP')
           ALLOCATE(MAT(NB,NB))
           CALL WAVES_1COVERLAP(MAP,NDIM,NBH,NB,NPRO,THIS%PROJ,THIS%PROJ,MAT)
           ALLOCATE(OMAT(NB,NB))
           CALL WAVES_1COVERLAP(MAP,NDIM,NBH,NB,NPRO,OPROJ,THIS%PROJ,OMAT)
           ALLOCATE(OOMAT(NB,NB))
           CALL WAVES_1COVERLAP(MAP,NDIM,NBH,NB,NPRO,OPROJ,OPROJ,OOMAT)
-          CALL TIMING$CLOCKOFF('WAVES_ORTHO_1COLAP')
+          ! CALL TIMING$CLOCKOFF('WAVES_ORTHO_1COLAP')
 !
 !         ======================================================================
 !         ==  NOW ADD OVERLAP OF PSEUDO WAVE FUNCTIONS                        ==
 !         ======================================================================
-          CALL TIMING$CLOCKON('WAVES_ORTHO_OLAP')
+          ! CALL TIMING$CLOCKON('WAVES_ORTHO_OLAP')
           ALLOCATE(AUXMAT(NB,NB))
           CALL WAVES_OVERLAP(.TRUE.,NGL,NDIM,NBH,NB,THIS%PSIM,THIS%PSIM,AUXMAT)
           DO I=1,NB
@@ -295,7 +295,7 @@ END IF
             ENDDO
           ENDDO
           DEALLOCATE(AUXMAT)
-          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OLAP')
+          ! CALL TIMING$CLOCKOFF('WAVES_ORTHO_OLAP')
 !
 !         ======================================================================
 !         ==  CALCULATE LAGRANGE PARAMETERS                                   ==
@@ -389,7 +389,8 @@ END IF
               CALL WAVES_ORTHO_X_C(NB,OCC(1,IKPT,ISPIN),OOMAT,MAT,OMAT,LAMBDA)
             END IF
           ELSE
-            CALL WAVES_ORTHO_Y_C_SPEED(NB,MAT,OMAT,OOMAT,LAMBDA)
+            ! CALL WAVES_ORTHO_Y_C_SPEED(NB,MAT,OMAT,OOMAT,LAMBDA)
+            CALL WAVES_ORTHO_Y_C(NB,MAT,OMAT,OOMAT,LAMBDA,SMAP)
           END IF
           DEALLOCATE(MAT)
           DEALLOCATE(OMAT)
@@ -400,16 +401,16 @@ END IF
 !         ======================================================================
 !         ==  CALCULATE |PSI(+)>=|PSI>+|CHI>LAMBDA                            ==
 !         ======================================================================
-          CALL TIMING$CLOCKON('WAVES_ORTHO_OPSI')
+          ! CALL TIMING$CLOCKON('WAVES_ORTHO_OPSI')
           CALL WAVES_ADDOPSI(NGL,NDIM,NBH,NB,THIS%PSIM,THIS%OPSI,LAMBDA)
-          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPSI')
+          ! CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPSI')
           DEALLOCATE(THIS%OPSI)
 !PRINT*,'WARNING FROM WAVES$ORTHOGONALIZE:'
 !PRINT*,'MAKE SURE THAT PDOS AND GRAPHICS PICK UP A CONSISTENT SET OF '
 !PRINT*,'WAVE FUNCTIONS  AND PROJECTOR FUNCTIONS'
-          CALL TIMING$CLOCKON('WAVES_ORTHO_OPROJ')
+          ! CALL TIMING$CLOCKON('WAVES_ORTHO_OPROJ')
           CALL WAVES_ADDOPROJ(NPRO,NDIM,NBH,NB,THIS%PROJ,OPROJ,LAMBDA)
-          CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPROJ')
+          ! CALL TIMING$CLOCKOFF('WAVES_ORTHO_OPROJ')
           DEALLOCATE(OPROJ)
 !
 !         ======================================================================
@@ -1077,6 +1078,7 @@ END IF
 !      =================================================================
 !      ==  INITIALIZE                                                 ==
 !      =================================================================
+       CALL TIMING$CLOCKON('WAVES_ORTHO_INIT')
        DO I=1,NB
          DO J=1,NB
            A(I,J)=PHIPHI(I,J)
@@ -1088,11 +1090,13 @@ END IF
          A(I,I)=A(I,I)-(1.D0,0.D0)
          ALPHA(I,I)=(1.D0,0.D0)
        ENDDO
+       CALL TIMING$CLOCKOFF('WAVES_ORTHO_INIT')
 !
 !      =================================================================
 !      ==  ORTHOGONALIZATION LOOP                                     ==
 !      =================================================================
 !                            CALL TRACE$PASS('BEFORE ORTHOGONALIZATION LOOP')
+       CALL TIMING$CLOCKON('WAVES_ORTHO_LOOP')
        DO NU=1,NB
          N=MAP(NU)
 !
@@ -1129,6 +1133,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
 !        ===============================================================
 !        == NOW UPDATE MATRICES                                       ==
 !        ===============================================================
+         CALL TIMING$CLOCKON('WAVES_ORTHO_UPDATE1')
          NU0=NU   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
 !N0=1
          DO I=1,NB
@@ -1152,11 +1157,13 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
              PRINT*,N,N,CSVAR
            END IF
          END IF
+         CALL TIMING$CLOCKOFF('WAVES_ORTHO_UPDATE1')
 !
 !        ===============================================================
 !        == ORTHOGONALIZE HIGHER PHIS TO THIS PHI                     ==
 !        == PHI(J)=PHI(J)+CHI(N)*Z(J)       J>N                       ==
 !        ===============================================================
+         CALL TIMING$CLOCKON('WAVES_ORTHO_HIGHER')
          DO IU=1,NU
            I=MAP(IU)
            Z(I)=(0.D0,0.D0)
@@ -1165,10 +1172,12 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
            I=MAP(IU)
            Z(I)=-CONJG(A(I,N)/(B(N,N)+R8SMALL))
          ENDDO
+         CALL TIMING$CLOCKOFF('WAVES_ORTHO_HIGHER')
 !
 !        ===============================================================
 !        == NOW UPDATE MATRICES                                       ==
 !        ===============================================================
+         CALL TIMING$CLOCKON('WAVES_ORTHO_UPDATE2')
          NU0=NU+1   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
 !N0=1
 !          == A(N,M)+B(N,N)*DELTA(M)=0  ======================
@@ -1203,6 +1212,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
              B(I,J)=B(I,J)+C(I,N)*Z(J)
            ENDDO
          ENDDO
+         CALL TIMING$CLOCKOFF('WAVES_ORTHO_UPDATE2')
 !
          IF(TTEST) THEN
            DO IU=1,NU
@@ -1223,6 +1233,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
 !        == CHI(M)=CHI(M)+CHI(N)*DELTA(M)   M>N                       ==
 !        ===============================================================
 !               CALL TRACE$PASS('ORTHOGONALIZE HIGHER CHIS TO THIS PHI')
+         CALL TIMING$CLOCKON('WAVES_ORTHO_CHI')
          DO IU=1,NU
            I=MAP(IU)
            Z(I)=(0.D0,0.D0)
@@ -1247,10 +1258,12 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
              B(I,J)=B(I,J)+CONJG(Z(I))*B(N,J)
            ENDDO 
          ENDDO
+         CALL TIMING$CLOCKOFF('WAVES_ORTHO_CHI')
 !IF(ABS(B(N,N)).GT.HUGE(B)) THEN
 ! PRINT*,B(N,N),Z
 ! CALL ERROR$STOP('ERROR')
 !END IF
+         CALL TIMING$CLOCKON('WAVES_ORTHO_WORK')
          WORK(:,:)=0.D0
          DO IU=NU0,NB
            I=MAP(IU)
@@ -1272,6 +1285,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
            ENDDO
          ENDDO
          C(:,:)=C(:,:)+WORK(:,:)
+         CALL TIMING$CLOCKOFF('WAVES_ORTHO_WORK')
          IF(TTEST) THEN
            DO IU=NU+1,NB
              I=MAP(IU)
@@ -1286,6 +1300,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
             ENDDO
          END IF
        ENDDO
+       CALL TIMING$CLOCKOFF('WAVES_ORTHO_LOOP')
 !
 !      =================================================================
 !      == TEST ORTHOGONALITY                                          ==
