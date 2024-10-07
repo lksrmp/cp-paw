@@ -11,4 +11,4 @@
 ##
 ##    Author: P. Bloechl, May 2024
 ################################################################################
-sed -e "s/[$]/__/g" </dev/stdin >/dev/stdout
+sed -e "s/[$]/__/g" -e "s/__OMP /\$OMP /g" </dev/stdin >/dev/stdout

@@ -148,8 +148,16 @@ esac
 for X in ifort mpifort mpif90 mpiifort gfortran ; do
    if [[ -n $(echo ${FC} | grep $X) ]] ; then
      case $X in
-       gfortran)       COMPILER=gfortran ;;
-       ifort|mpiifort) COMPILER=ifort ;;
+       gfortran)       
+         COMPILER=gfortran
+         FCFLAGS="${FCFLAGS} -fopenmp"
+         LDFLAGS="${LDFLAGS} -fopenmp"
+         ;;
+       ifort|mpiifort) 
+         COMPILER=ifort
+         FCFLAGS="${FCFLAGS} -qopenmp"
+         LDFLAGS="${LDFLAGS} -qopenmp"
+         ;;
        mpifort|mpif90) COMPILER=$(mpif90 --showme:command) ;;
        flang-new|ifx|nagfor|nvfortran|xlf) 
           echo "error in $0: compiler $X not yet supported by this parmfile"
