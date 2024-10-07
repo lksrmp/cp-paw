@@ -1514,34 +1514,32 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
          NU0=NU+1   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
 !N0=1
 !          == A(N,M)+B(N,N)*DELTA(M)=0  ======================  
-         !$OMP PARALLEL DO PRIVATE(JU,J,I) SHARED(X,ALPHA,Z,MAP,N,NB) 
+         !$OMP PARALLEL PRIVATE(IU,JU,J,I) SHARED(X,ALPHA,A,B,C,Z,MAP,N,NB) 
+         !$OMP DO
          DO JU=NU0,NB
           J=MAP(JU)
           DO I=1,NB
             X(I,J)=X(I,J)+ALPHA(I,N)*Z(J)
           ENDDO
          ENDDO   
-         !$OMP END PARALLEL DO
-         
-         !$OMP PARALLEL DO PRIVATE(IU,I,J) SHARED(A,B,Z,MAP,N,NB)
+         !$OMP END DO
+         !$OMP DO
          DO IU=NU0,NB
            I=MAP(IU)
            DO J=1,NB
              A(I,J)=A(I,J)+CONJG(Z(I))*B(N,J)
            ENDDO
          ENDDO
-         !$OMP END PARALLEL DO
-
-         !$OMP PARALLEL DO PRIVATE(I,JU,J) SHARED(A,B,Z,MAP,N,NB)
+         !$OMP END DO
+         !$OMP DO
          DO I=1,NB
            DO JU=NU0,NB
              J=MAP(JU)
              A(I,J)=A(I,J)+CONJG(B(N,I))*Z(J) 
            ENDDO
          ENDDO
-         !$OMP END PARALLEL DO
-
-         !$OMP PARALLEL DO PRIVATE(IU,JU,I,J) SHARED(A,C,Z,MAP,N,NB)
+         !$OMP END DO
+         !$OMP DO
          DO IU=NU0,NB
            I=MAP(IU)
            DO JU=NU0,NB
@@ -1549,16 +1547,16 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
              A(I,J)=A(I,J)+CONJG(Z(I))*C(N,N)*Z(J)
            ENDDO
          ENDDO
-         !$OMP END PARALLEL DO
-
-         !$OMP PARALLEL DO PRIVATE(I,JU,J) SHARED(B,C,Z,MAP,N,NB)
+         !$OMP END DO
+         !$OMP DO
          DO I=1,NB
            DO JU=NU0,NB
              J=MAP(JU)
              B(I,J)=B(I,J)+C(I,N)*Z(J)
            ENDDO
          ENDDO
-          !$OMP END PARALLEL DO
+         !$OMP END DO
+         !$OMP END PARALLEL
          CALL TIMING$CLOCKOFF('WAVES_ORTHO_UPDATE2')
 !
          IF(TTEST) THEN
@@ -1614,23 +1612,24 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
          CALL TIMING$CLOCKON('WAVES_ORTHO_WORK')
 ! 28% of total runtime
          WORK(:,:)=0.D0
-         !$OMP PARALLEL DO PRIVATE(IU,I,J) SHARED(WORK,C,Z,MAP,N,NB)
+         !$OMP PARALLEL PRIVATE(IU,JU,I,J) SHARED(WORK,C,Z,MAP,N,NB)
+         !$OMP DO
          DO IU=NU0,NB
            I=MAP(IU)
            DO J=1,NB
              WORK(I,J)=WORK(I,J)+CONJG(Z(I))*C(N,J) 
            ENDDO
          ENDDO
-         !$OMP END PARALLEL DO
-         !$OMP PARALLEL DO PRIVATE(I,JU,J) SHARED(WORK,C,Z,MAP,N,NB)
+         !$OMP END DO
+         !$OMP DO
          DO I=1,NB
            DO JU=NU0,NB
              J=MAP(JU)
              WORK(I,J)=WORK(I,J)+C(I,N)*Z(J)
            ENDDO
          ENDDO
-         !$OMP END PARALLEL DO
-         !$OMP PARALLEL DO PRIVATE(IU,JU,I,J) SHARED(WORK,C,Z,MAP,N,NB)
+         !$OMP END DO
+         !$OMP DO
          DO IU=NU0,NB
            I=MAP(IU)
            DO JU=NU0,NB
@@ -1638,7 +1637,8 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
              WORK(I,J)=WORK(I,J)+CONJG(Z(I))*C(N,N)*Z(J)
            ENDDO
          ENDDO
-         !$OMP END PARALLEL DO
+         !$OMP END DO
+         !$OMP END PARALLEL
          C(:,:)=C(:,:)+WORK(:,:)
          CALL TIMING$CLOCKOFF('WAVES_ORTHO_WORK')
          IF(TTEST) THEN
