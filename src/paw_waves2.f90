@@ -1336,6 +1336,336 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
        RETURN
        END SUBROUTINE TESTB
       END
+
+!
+!      .................................................................
+      SUBROUTINE WAVES_ORTHO_Y_C_MPE(NB,PHIPHI,CHIPHI,CHICHI,X,MAP)
+!      **                                                             **
+!      **  CALCULATE LAGRANGE MULTIPLIERS FOR ORTHOGONALIZATION       **
+!      **    |PHI(I)>=|PHI(I)>+SUM_J |CHI(J)>X(J,I)                   **
+!      **  WITH                                                       **
+!      **    X(I>J)=0                                                 **
+!      **                                                             **
+!      **  ATTENTION!! CHIPHI0=<CHI|O|PHI>                            **
+!      **        AND   PHIPHI0=<PHI|O|PHI>                            **
+!      **        CONVERSION IS DONE IN THE INITIALIZATION             **
+!      **                                                             **
+!      *****************************************************************
+       IMPLICIT NONE
+       INTEGER(4),INTENT(IN) :: NB
+       COMPLEX(8),INTENT(IN) :: PHIPHI(NB,NB) !<PHI_I|O|PHI_J>
+       COMPLEX(8),INTENT(IN) :: CHIPHI(NB,NB) !<PHI_I|O|CHI>
+       COMPLEX(8),INTENT(IN) :: CHICHI(NB,NB) !<CHI_I|O|CHI_J>
+       COMPLEX(8),INTENT(OUT):: X(NB,NB)      ! X(I>J)=0
+       INTEGER(4),INTENT(IN) :: MAP(NB)
+       COMPLEX(8)            :: A(NB,NB)
+       COMPLEX(8)            :: B(NB,NB)
+       COMPLEX(8)            :: C(NB,NB)
+       COMPLEX(8)            :: ALPHA(NB,NB)   ! (I>J)=0
+       COMPLEX(8)            :: WORK(NB,NB)    
+       COMPLEX(8)            :: Z(NB)
+       INTEGER(4)            :: I,J,K,L,N
+       COMPLEX(8)            :: CSVAR
+       REAL(8)               :: SVAR,SVAR1,SVAR2
+       REAL(8)               :: MAXDEV
+       LOGICAL   ,PARAMETER  :: TTEST=.FALSE.
+       REAL(8)   ,PARAMETER  :: TOL=1.D-10
+       INTEGER(4)            :: NU,NU0,IU,JU
+       REAL(8)               :: R8SMALL
+       INTEGER(4)            :: NTASKS,THISTASK
+       INTEGER(4)            :: ICOUNT
+!      *****************************************************************
+                             CALL TRACE$PUSH('WAVES_ORTHO_Y_C_MPE')
+       CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+       R8SMALL=TINY(R8SMALL)*1.D+5
+       R8SMALL=1.D-10
+!
+!      =================================================================
+!      ==  INITIALIZE                                                 ==
+!      =================================================================
+       DO I=1,NB
+         DO J=1,NB
+           A(I,J)=PHIPHI(I,J)
+           B(I,J)=CHIPHI(I,J)
+           C(I,J)=CHICHI(I,J)
+           X(I,J)=(0.D0,0.D0)
+           ALPHA(I,J)=(0.D0,0.D0)
+         ENDDO
+         A(I,I)=A(I,I)-(1.D0,0.D0)
+         ALPHA(I,I)=(1.D0,0.D0)
+       ENDDO
+!
+!      =================================================================
+!      ==  ORTHOGONALIZATION LOOP                                     ==
+!      =================================================================
+!                            CALL TRACE$PASS('BEFORE ORTHOGONALIZATION LOOP')
+       DO NU=1,NB
+         N=MAP(NU)
+!
+!        ===============================================================
+!        == NORMALIZE PHI(N)                                          ==
+!        == PHI(N)=PHI(N)+CHI(N)*Z(N)                                 ==
+!        ===============================================================
+!CHANGED THIS TO MAKE IT SIMPLER PB 070127
+         SVAR = REAL( REAL(B(N,N))**2-A(N,N)*C(N,N) )
+         SVAR1=-REAL(B(N,N),KIND=8)
+         IF(SVAR.GE.0.D0) THEN
+           SVAR2=SQRT(SVAR)
+!          == CHOOSE THE SIGN OF THE ROOT SUCH RESULT IS SMALL
+           IF(SVAR1*SVAR2.GE.0.D0) THEN
+             Z(N)=SVAR1-SVAR2
+           ELSE
+             Z(N)=SVAR1+SVAR2
+           END IF
+         ELSE
+           PRINT*,'ORTHOGONALIZATION FAILED! TRYING BEST APPROXIMATION...',SVAR
+           Z(N)=SVAR1
+         END IF
+         Z(N)=Z(N)/REAL(C(N,N)+R8SMALL,KIND=8)
+!        == TEST FOR NANS (NAN = NOT A NUMBER)
+         IF(SVAR.NE.SVAR) THEN
+PRINT*,'MARKE 1',N,B(N,N),A(N,N),C(N,N)
+PRINT*,'MARKE 2',N,B(N,N)**2-A(N,N)*C(N,N)
+PRINT*,'PHIPHI',(PHIPHI(I,I),I=1,NB)
+PRINT*,'A     ',(A(I,I),I=1,NB)
+           CALL ERROR$MSG('NAN DETECTED')
+           CALL ERROR$STOP('WAVES_ORTHO_Y_C_MPE')
+         END IF
+!
+!        ===============================================================
+!        == NOW UPDATE MATRICES                                       ==
+!        ===============================================================
+         NU0=NU   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
+!N0=1
+         DO I=1,NB
+!          == A(N,M)+B(N,N)*DELTA(M)=0  ======================
+           X(I,N)=X(I,N)+ALPHA(I,N)*Z(N)
+         ENDDO           
+         DO J=1,NB
+           A(N,J)=A(N,J)+CONJG(Z(N))*B(N,J)
+         ENDDO
+         DO I=1,NB
+           A(I,N)=A(I,N)+CONJG(B(N,I))*Z(N) 
+         ENDDO
+         A(N,N)=A(N,N)+CONJG(Z(N))*C(N,N)*Z(N)
+         DO I=1,NB
+           B(I,N)=B(I,N)+C(I,N)*Z(N)
+         ENDDO
+         IF(TTEST) THEN
+           CALL TESTA(N,N,CSVAR)
+           IF(ABS(CSVAR).GT.TOL) THEN
+             WRITE(*,FMT='("NORMALIZATION OF PHI(",I4,")")')N
+             PRINT*,N,N,CSVAR
+           END IF
+         END IF
+!
+!        ===============================================================
+!        == ORTHOGONALIZE HIGHER PHIS TO THIS PHI                     ==
+!        == PHI(J)=PHI(J)+CHI(N)*Z(J)       J>N                       ==
+!        ===============================================================
+         DO IU=1,NU
+           I=MAP(IU)
+           Z(I)=(0.D0,0.D0)
+         ENDDO
+         DO IU=NU+1,NB
+           I=MAP(IU)
+           Z(I)=-CONJG(A(I,N)/(B(N,N)+R8SMALL))
+         ENDDO
+!
+!        ===============================================================
+!        == NOW UPDATE MATRICES                                       ==
+!        ===============================================================
+         NU0=NU+1   !SET N0=N FOR FAST CALCULATION AND N0=1 FOR TESTS
+!N0=1
+!          == A(N,M)+B(N,N)*DELTA(M)=0  ======================
+         DO JU=NU0,NB
+           J=MAP(JU)
+           DO I=1,NB
+             X(I,J)=X(I,J)+ALPHA(I,N)*Z(J)
+           ENDDO
+         ENDDO           
+         DO IU=NU0,NB
+           I=MAP(IU)
+           DO J=1,NB
+             A(I,J)=A(I,J)+CONJG(Z(I))*B(N,J)
+           ENDDO
+         ENDDO
+         DO I=1,NB
+           DO JU=NU0,NB
+             J=MAP(JU)
+             A(I,J)=A(I,J)+CONJG(B(N,I))*Z(J) 
+           ENDDO
+         ENDDO
+         DO IU=NU0,NB
+           I=MAP(IU)
+           DO JU=NU0,NB
+             J=MAP(JU)
+             A(I,J)=A(I,J)+CONJG(Z(I))*C(N,N)*Z(J)
+           ENDDO
+         ENDDO
+         DO I=1,NB
+           DO JU=NU0,NB
+             J=MAP(JU)
+             B(I,J)=B(I,J)+C(I,N)*Z(J)
+           ENDDO
+         ENDDO
+!
+         IF(TTEST) THEN
+           DO IU=1,NU
+             I=MAP(IU)
+             DO JU=NU,NB
+               J=MAP(JU)
+               CALL TESTA(I,J,CSVAR)
+               IF(ABS(CSVAR).GT.TOL) THEN
+                 WRITE(*,FMT='("HIGHER PHIS ORTHOGONALIZED TO PHI(",I4,")")')N
+                 PRINT*,I,J,CSVAR
+               END IF
+             ENDDO
+           ENDDO
+         END IF
+!
+!        ===============================================================
+!        == ORTHOGONALIZE HIGHER CHIS TO THIS PHI                     ==
+!        == CHI(M)=CHI(M)+CHI(N)*DELTA(M)   M>N                       ==
+!        ===============================================================
+!               CALL TRACE$PASS('ORTHOGONALIZE HIGHER CHIS TO THIS PHI')
+         DO IU=1,NU
+           I=MAP(IU)
+           Z(I)=(0.D0,0.D0)
+         ENDDO
+         DO IU=NU+1,NB
+           I=MAP(IU)
+!          == |CHI(J)>=|CHI(J)>+|CHI(N)>*Z(J) ==========================
+!          == B(M,N)+B(N,N)*DELTA(M)=0
+           Z(I)=-CONJG(B(I,N)/(B(N,N)+R8SMALL))
+         ENDDO
+         NU0=NU+1   !SET N0=N+1 FOR FAST CALCULATION AND N0=1 FOR TESTS
+!N0=1
+         DO I=1,NB
+           DO JU=NU0,NB
+             J=MAP(JU)
+             ALPHA(I,J)=ALPHA(I,J)+ALPHA(I,N)*Z(J)
+           ENDDO
+         ENDDO
+         DO IU=NU0,NB
+           I=MAP(IU)
+           DO J=1,NB
+             B(I,J)=B(I,J)+CONJG(Z(I))*B(N,J)
+           ENDDO 
+         ENDDO
+!IF(ABS(B(N,N)).GT.HUGE(B)) THEN
+! PRINT*,B(N,N),Z
+! CALL ERROR$STOP('ERROR')
+!END IF
+
+         ICOUNT=0
+         WORK(:,:)=0.D0
+         DO IU=NU0,NB
+           ICOUNT=ICOUNT+1
+           IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
+           I=MAP(IU)
+           DO J=1,NB
+             WORK(I,J)=WORK(I,J)+CONJG(Z(I))*C(N,J) 
+           ENDDO
+         ENDDO
+         DO I=1,NB
+           ICOUNT=ICOUNT+1
+           IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
+           DO JU=NU0,NB
+             J=MAP(JU)
+             WORK(I,J)=WORK(I,J)+C(I,N)*Z(J)
+           ENDDO
+         ENDDO
+         DO IU=NU0,NB
+           ICOUNT=ICOUNT+1
+           IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
+           I=MAP(IU)
+           DO JU=NU0,NB
+             J=MAP(JU)
+             WORK(I,J)=WORK(I,J)+CONJG(Z(I))*C(N,N)*Z(J)
+           ENDDO
+         ENDDO
+         CALL MPE$COMBINE('MONOMER','+',WORK)
+         C(:,:)=C(:,:)+WORK(:,:)
+         IF(TTEST) THEN
+           DO IU=NU+1,NB
+             I=MAP(IU)
+             DO JU=1,NU
+               J=MAP(JU)
+               CALL TESTB(I,J,CSVAR)
+               IF(ABS(CSVAR).GT.TOL) THEN
+!                WRITE(*,FMT='("HIGHER CHIS ORTHOGONALIZED TO PHI(",I4,")")')N
+!                PRINT*,I,J,CSVAR
+               END IF
+             ENDDO
+            ENDDO
+         END IF
+       ENDDO
+!
+!      =================================================================
+!      == TEST ORTHOGONALITY                                          ==
+!      =================================================================
+       IF(TTEST) THEN
+         MAXDEV=0.D0
+         DO I=1,NB
+           DO J=1,NB
+             CSVAR=PHIPHI(I,J)
+             DO K=1,NB
+               CSVAR=CSVAR+CONJG(X(K,I))*CHIPHI(K,J) &
+      &                   +CONJG(CHIPHI(K,I))*X(K,J)
+               DO L=1,NB
+                 CSVAR=CSVAR+CONJG(X(K,I))*CHICHI(K,L)*X(L,J)
+               ENDDO
+             ENDDO
+             IF(I.EQ.J) CSVAR=CSVAR-(1.D0,0.D0)
+             MAXDEV=MAX(MAXDEV,ABS(CSVAR))
+             IF(ABS(CSVAR).GT.TOL) THEN
+               CALL ERROR$MSG('ORTHOGONALIZATION FAILED')
+               CALL ERROR$I4VAL('I',I)
+               CALL ERROR$I4VAL('J',J)
+               CALL ERROR$C8VAL('<PHI(+)|O|PHI(+)>-1',CSVAR)
+               CALL ERROR$STOP('WAVES_ORTHO_Y')
+             END IF
+           ENDDO
+         ENDDO
+         PRINT*,'MAX. DEVIATION IN ORTHO_Y_C',MAXDEV
+       END IF
+                             CALL TRACE$POP
+       RETURN
+       CONTAINS
+!      .................................................................
+       SUBROUTINE TESTA(I,J,CSVAR)
+       INTEGER(4),INTENT(IN) :: I
+       INTEGER(4),INTENT(IN) :: J
+       COMPLEX(8),INTENT(OUT):: CSVAR
+!      *****************************************************************
+       CSVAR=PHIPHI(I,J)
+       DO K=1,NB
+         CSVAR=CSVAR+CONJG(X(K,I))*CHIPHI(K,J)+CONJG(CHIPHI(K,I))*X(K,J)
+         DO L=1,NB
+           CSVAR=CSVAR+CONJG(X(K,I))*CHICHI(K,L)*X(L,J)
+         ENDDO
+       ENDDO
+       IF(I.EQ.J) CSVAR=CSVAR-(1.D0,0.D0)
+       RETURN
+       END SUBROUTINE TESTA
+!      .................................................................
+       SUBROUTINE TESTB(I,J,CSVAR)
+       INTEGER(4),INTENT(IN) :: I
+       INTEGER(4),INTENT(IN) :: J
+       COMPLEX(8),INTENT(OUT):: CSVAR
+!      *****************************************************************
+       CSVAR=CHIPHI(I,J)
+       DO K=1,NB
+         CSVAR=CSVAR+CONJG(ALPHA(K,I))*CHIPHI(K,J)+CHIPHI(I,K)*X(K,J)
+         DO L=1,NB
+           CSVAR=CSVAR+CONJG(ALPHA(K,I))*CHICHI(K,L)*X(L,J)
+         ENDDO
+       ENDDO
+       RETURN
+       END SUBROUTINE TESTB
+      END
+
 !
 !      .................................................................
        SUBROUTINE WAVES_ORTHO_Y(NB,PHIPHI0,CHIPHI0,CHICHI0,RLAMBDA)
@@ -2093,7 +2423,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
       ENDDO 
       ALLOCATE(X(NB,NB))
 !== SPEICHERZUGRIFFSFEHLER IFC10
-      CALL WAVES_ORTHO_Y_C(NB,OVERLAP,OVERLAP,OVERLAP,X,SMAP)
+      CALL WAVES_ORTHO_Y_C_MPE(NB,OVERLAP,OVERLAP,OVERLAP,X,SMAP)
       DEALLOCATE(OVERLAP)
       DEALLOCATE(SMAP)
 !     
