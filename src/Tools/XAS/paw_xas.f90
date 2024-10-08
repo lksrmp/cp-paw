@@ -1,16 +1,23 @@
 !........1.........2.........3.........4.........5.........6.........7.........8
       MODULE XAS_MODULE
       TYPE SETUP_TYPE
-        INTEGER(4) :: GID
-        REAL(8), ALLOCATABLE :: PSPHI(:,:)
-        REAL(8), ALLOCATABLE :: AEPHI(:,:)
+        INTEGER(4) :: GID ! GRID ID FOR RADIAL MESH
+        REAL(8), ALLOCATABLE :: PSPHI(:,:) ! PSEUDO PARTIAL WAVE
+        REAL(8), ALLOCATABLE :: AEPHI(:,:) ! AE PARTIAL WAVE
       END TYPE SETUP_TYPE
+
       TYPE STATE_TYPE
-        INTEGER(4)          :: NB
-        REAL(8), POINTER    :: EIG(:)
+        INTEGER(4)          :: NB ! #(STATES)
+        REAL(8), POINTER    :: EIG(:) ! (NB) EIGENVALUES
         REAL(8), POINTER    :: OCC(:)
-        COMPLEX(8), POINTER :: PRO(:,:,:)  
+        COMPLEX(8), POINTER :: PROJ(:,:,:) ! (NDIM,NB,NPRO) PROJECTIONS
       END TYPE STATE_TYPE
+
+      TYPE OVERLAP_TYPE
+        COMPLEX(8), POINTER :: PW(:,:) ! (NB1,NB2) PLANE WAVE OVERLAP
+        REAL(8), POINTER    :: S(:,:) ! (NPRO1,NPRO2) ATOMIC OVERLAP
+      END TYPE OVERLAP_TYPE
+
 !     GENERAL SETTINGS OF A SIMULATION 
       TYPE SIMULATION_TYPE
         CHARACTER(11) :: ID ! SIMULATION IDENTIFIER (GROUNDSTATE,EXCITESTATE)
@@ -38,62 +45,20 @@
         INTEGER(4), ALLOCATABLE :: ISPECIES(:) ! (NAT) SPECIES INDEX
         REAL(8), ALLOCATABLE :: XK(:,:) ! (3,NKPT) K-POINTS IN REL. COORD.
         REAL(8), ALLOCATABLE :: WKPT(:) ! (NKPT) K-POINT WEIGHTS
-        TYPE(SETUP_TYPE), ALLOCATABLE :: SETUP(:)
-        TYPE(STATE_TYPE), ALLOCATABLE :: STATEARR(:,:)
-        TYPE(STATE_TYPE), POINTER :: STATE
+        TYPE(SETUP_TYPE), ALLOCATABLE :: SETUP(:) ! (NSP) ARRAY OF SETUPS
+        TYPE(STATE_TYPE), ALLOCATABLE :: STATEARR(:,:) ! (NKPT,NSPIN) ARRAY OF STATES
+        TYPE(STATE_TYPE), POINTER :: STATE ! CURRENT STATE
       END TYPE SIMULATION_TYPE
+
 ! WARNING: CHANGING THIS NUMBER MIGHT BREAK SOME CODE
 !     INDEX 1 IS GROUNDSTATE AND 2 EXCITED STATE
       INTEGER(4), PARAMETER :: NSIM=2  ! #(SIMULATIONS)
       LOGICAL,SAVE :: SELECTED=.FALSE.
-      TYPE(SIMULATION_TYPE), TARGET :: SIM(NSIM)
-      TYPE(SIMULATION_TYPE), POINTER :: THIS
+      TYPE(SIMULATION_TYPE), TARGET :: SIM(NSIM) ! (NSIM) ARRAY OF SIMULATIONS
+      TYPE(SIMULATION_TYPE), POINTER :: THIS ! CURRENT SIMULATION
+      TYPE(OVERLAP_TYPE), ALLOCATABLE, TARGET :: OVERLAPARR(:,:) ! (NKPT,NSPIN)
+      TYPE(OVERLAP_TYPE), POINTER :: OVERLAP ! CURRENT OVERLAP
       END MODULE XAS_MODULE
-
-
-!       MODULE XASPDOS_MODULE  ! MARK: XASPDOS_MODULE
-!         TYPE STATE_TYPE
-!           INTEGER(4)          :: NB
-!           REAL(8), POINTER    :: EIG(:)
-!           REAL(8), POINTER    :: OCC(:)
-!           COMPLEX(8), POINTER :: VEC(:,:,:)  
-!         END TYPE STATE_TYPE
-!         TYPE PDOS_TYPE
-!           CHARACTER(6)                 :: FLAG
-!           INTEGER(4)                   :: NAT
-!           INTEGER(4)                   :: NSP
-!           INTEGER(4)                   :: NKPT
-!           INTEGER(4)                   :: NSPIN
-!           INTEGER(4)                   :: NDIM
-!           INTEGER(4)                   :: NPRO
-!           INTEGER(4)                   :: NKDIV(3)
-!           INTEGER(4)                   :: ISHIFT(3)
-!           REAL(8)                      :: RNTOT
-!           REAL(8)                      :: NEL
-!           LOGICAL(4)                   :: TINV
-!           INTEGER(4)                   :: LNXX
-!           REAL(8)                      :: RBAS(3,3)
-!           REAL(8)   ,ALLOCATABLE       :: R(:,:)
-!           INTEGER(4),ALLOCATABLE       :: LNX(:)
-!           INTEGER(4),ALLOCATABLE       :: LOX(:,:)
-!           INTEGER(4),ALLOCATABLE       :: ISPECIES(:)
-!           CHARACTER(16),ALLOCATABLE    :: ATOMID(:)
-!           INTEGER(4),ALLOCATABLE       :: IZ(:)
-!           REAL(8)   ,ALLOCATABLE       :: RAD(:)
-!           REAL(8)   ,ALLOCATABLE       :: PHIOFR(:,:)
-!           REAL(8)   ,ALLOCATABLE       :: DPHIDR(:,:)
-!           REAL(8)   ,ALLOCATABLE       :: OV(:,:,:)
-!           REAL(8)   ,ALLOCATABLE       :: XK(:,:)
-!           REAL(8)   ,ALLOCATABLE       :: WKPT(:)
-!           TYPE(STATE_TYPE),ALLOCATABLE :: STATEARR(:,:)
-!           TYPE(STATE_TYPE),POINTER     :: STATE
-!           INTEGER(4)                   :: SPACEGROUP
-!           LOGICAL(4)                   :: TSHIFT
-!         END TYPE PDOS_TYPE
-! ! WARNING: CHANGING THIS NUMBER MIGHT BREAK SOME CODE
-!         INTEGER(4), PARAMETER :: NPD=2  ! NUMBER OF PDOS FILES
-!         TYPE(PDOS_TYPE), TARGET :: PD(NPD) 
-!       END MODULE XASPDOS_MODULE
 
       MODULE XASCNTL_MODULE  ! MARK: XASCNTL_MODULE
         USE LINKEDLIST_MODULE, ONLY: LL_TYPE
@@ -130,19 +95,27 @@
       CALL MPE$INIT
 !     INITIALIZE FILES
       CALL INITIALIZEFILEHANDLER
+
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+      CALL CPPAW_WRITEVERSION(NFIL)
 !     READ XCNTL FILE
       CALL FILEHANDLER$UNIT('XCNTL',NFIL)
       CALL XASCNTL$READ(NFIL)
 
       CALL XAS$SELECT('GROUNDSTATE')
       CALL XASCNTL$FILES('GROUNDSTATE')
-      CALL XAS$READ
-      CALL XAS$REPORT
       CALL XAS$UNSELECT
 
       CALL XAS$SELECT('EXCITESTATE')
       CALL XASCNTL$FILES('EXCITESTATE')
+      CALL XAS$UNSELECT
+
       CALL XAS$READ
+
+      CALL XAS$SELECT('GROUNDSTATE')
+      CALL XAS$REPORT
+      CALL XAS$UNSELECT
+      CALL XAS$SELECT('EXCITESTATE')
       CALL XAS$REPORT
       CALL XAS$UNSELECT
 
@@ -440,6 +413,7 @@
 !     **************************************************************************
 !     ** CHECKS CONSISTENCY OF PDOS DATA                                      **
 ! TODO: IMPLEMENT THIS SUBROUTINE FURTHER, TEST THE CHECKS, ADD ADDITIONAL CHECKS
+! TODO: COMBINE WITH TEST SUBROUTINE IN XAS$READ
 !     **************************************************************************
       USE XAS_MODULE, ONLY: THIS,SIMULATION_TYPE
       IMPLICIT NONE
@@ -500,11 +474,12 @@
         CALL ERROR$L4VAL('EXCITESTATE%TSHIFT',THIS2%TSHIFT)
         CALL ERROR$STOP('DATACONSISTENCY')
       END IF
-      IF(ANY(ABS(THIS1%RBAS-THIS2%RBAS).GT.TOL)) THEN
+      IF(SUM(ABS(THIS1%RBAS-THIS2%RBAS)).GT.TOL) THEN
         CALL ERROR$MSG('RBAS INCONSISTENT BETWEEN SIMULATIONS')
         CALL ERROR$STOP('DATACONSISTENCY')
       END IF
 ! TODO: CHECK FOR ATOMIC POSITIONS
+! TODO: CHECK FOR XK
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE DATACONSISTENCY
@@ -661,10 +636,13 @@
 !     **************************************************************************
 !     **  READ FILE PRODUCED BY SIMULATION CODE                               **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS,SELECTED
+      USE XAS_MODULE, ONLY: THIS,SELECTED,SIMULATION_TYPE,SIM,OVERLAP,OVERLAPARR
       USE RADIAL_MODULE, ONLY: NGID
       IMPLICIT NONE
-      INTEGER(4) :: NFIL
+      INTEGER(4), PARAMETER :: NSIM=2
+      REAL(8), PARAMETER :: TOL=1.D-8
+      INTEGER(4) :: NFIL(NSIM)
+      INTEGER(4) :: IS
       INTEGER(4) :: ILOGICAL
       INTEGER(4) :: ISP
       INTEGER(4) :: GID
@@ -679,100 +657,275 @@
       REAL(8) :: R1
       REAL(8) :: R1_
       INTEGER(4) :: LNX
-      INTEGER(4) :: NB
       INTEGER(4) :: IB
+      INTEGER(4) :: IB1,IB2
       INTEGER(4) :: IKPT
+      INTEGER(4) :: IG
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: NKPT_
+      INTEGER(4) :: NB_
+      INTEGER(4) :: NSPIN_
       INTEGER(4) :: ISPIN
       LOGICAL(4) :: TCHK
+      CHARACTER(8) :: KEY(NSIM)
+      INTEGER(4) :: NGG(NSIM)
+      INTEGER(4) :: NDIM(NSIM)
+      INTEGER(4) :: NB(NSIM)
+      INTEGER(4) :: NBH(NSIM)
+      LOGICAL(4) :: TSUPER(NSIM)
+      INTEGER(4), ALLOCATABLE :: IGVEC(:,:,:) ! (NSIM,3,NGG)
+      REAL(8) :: XK(NSIM,3)
+      COMPLEX(8), ALLOCATABLE :: PSIK1(:,:,:) ! (NGG,NDIM,NB)
+      COMPLEX(8), ALLOCATABLE :: PSIK2(:,:,:) ! (NGG,NDIM,NB)
+      COMPLEX(8), ALLOCATABLE :: PROJ1(:,:,:)  ! (NDIM,NB,NPRO)
+      COMPLEX(8), ALLOCATABLE :: PROJ2(:,:,:)  ! (NDIM,NB,NPRO)
+      REAL(8), ALLOCATABLE :: OCC(:,:,:) ! (NB,NKPT,NSPIN)
+      REAL(8), ALLOCATABLE :: EIG1(:) ! (NB)
+      REAL(8), ALLOCATABLE :: EIG2(:) ! (NB)
+      COMPLEX(8), ALLOCATABLE :: OVLAP(:,:) ! (NB,NB)
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$READ')
-      IF(.NOT.SELECTED) THEN
-        CALL ERROR$MSG('NO SIMULATION SELECTED')
-        CALL ERROR$STOP('XAS$READ')
-      END IF
-      CALL FILEHANDLER$UNIT(THIS%ID,NFIL)
-      REWIND(NFIL)
 !     ==========================================================================
-!     == READ GENERAL QUANTATIES                                              ==
+!     == LOOP OVER BOTH SIMULATIONS                                           ==
+!     == REQUIRED TO CALCULATE OVERLAP ON READ AND NOT STORE PLANE WAVE BASIS ==
 !     ==========================================================================
-      READ(NFIL)THIS%NAT,THIS%NSP,THIS%NKPT,THIS%NSPIN,THIS%NDIM,THIS%NPRO, &
-     &          THIS%LNXX,THIS%FLAG
-      ALLOCATE(THIS%LNX(THIS%NSP))
-      ALLOCATE(THIS%LOX(THIS%LNXX,THIS%NSP))
-      READ(NFIL)THIS%LNX(:),THIS%LOX(:,:)
-      READ(NFIL)THIS%NKDIV(:),THIS%ISHIFT(:),THIS%RNTOT,THIS%NEL,ILOGICAL
-      THIS%TINV=.FALSE.
-      IF(ILOGICAL.EQ.1) THIS%TINV=.TRUE.
-      READ(NFIL)THIS%SPACEGROUP,ILOGICAL
-      THIS%TSHIFT=.FALSE.
-      IF(ILOGICAL.EQ.1) THIS%TSHIFT=.TRUE.
-!     ==========================================================================
-!     == READ ATOMIC STRUCTURE                                                ==
-!     ==========================================================================
-      ALLOCATE(THIS%R(3,THIS%NAT))
-      ALLOCATE(THIS%ATOMID(THIS%NAT))
-      ALLOCATE(THIS%ISPECIES(THIS%NAT))
-      READ(NFIL)THIS%RBAS(:,:),THIS%R(:,:),THIS%ATOMID(:),THIS%ISPECIES(:)
-!     ==========================================================================
-!     == ELEMENT SPECIFIC QUANTITIES                                          ==
-!     ==========================================================================
-      ALLOCATE(THIS%SETUP(THIS%NSP))
-!     LOOP THROUGH SPECIES
-      DO ISP=1,THIS%NSP
-        READ(NFIL)GRIDTYPE,NR,DEX,R1
-!       CHECK IF RADIAL GRID WITH SAME PROPERTIES ALREADY EXISTS
-        TCHK=.FALSE.
-        IF(NGID.GT.0) THEN
-          DO IGID=1,NGID
-            CALL RADIAL$GETCH(IGID,'TYPE',GRIDTYPE_)
-            CALL RADIAL$GETI4(IGID,'NR',NR_)
-            CALL RADIAL$GETR8(IGID,'DEX',DEX_)
-            CALL RADIAL$GETR8(IGID,'R1',R1_)
-            IF(GRIDTYPE.EQ.GRIDTYPE_.AND.NR.EQ.NR_.AND.DEX.EQ.DEX_.AND.R1.EQ.R1_) THEN
-              GID=IGID
-              TCHK=.TRUE.
-              EXIT
-            END IF
+      DO IS=1,NSIM
+        CALL XAS$ISELECT(IS)
+        CALL FILEHANDLER$UNIT(THIS%ID,NFIL(IS))
+        REWIND(NFIL(IS))
+!       ========================================================================
+!       == READ GENERAL QUANTATIES                                            ==
+!       ========================================================================
+!       NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
+        READ(NFIL(IS))THIS%NAT,THIS%NSP,THIS%NKPT,THIS%NSPIN,THIS%NDIM,THIS%NPRO, &
+       &          THIS%LNXX,THIS%FLAG
+        ALLOCATE(THIS%LNX(THIS%NSP))
+        ALLOCATE(THIS%LOX(THIS%LNXX,THIS%NSP))
+!       LNX(NSP),LOX(LNXX,NSP)
+        READ(NFIL(IS))THIS%LNX,THIS%LOX
+!       NKDIV(3),ISHIFT(3),RNTOT,NEL,TINV
+        READ(NFIL(IS))THIS%NKDIV,THIS%ISHIFT,THIS%RNTOT,THIS%NEL,ILOGICAL
+        THIS%TINV=.FALSE.
+        IF(ILOGICAL.EQ.1) THIS%TINV=.TRUE.
+!       SPACEGROUP,TSHIFT
+        READ(NFIL(IS))THIS%SPACEGROUP,ILOGICAL
+        THIS%TSHIFT=.FALSE.
+        IF(ILOGICAL.EQ.1) THIS%TSHIFT=.TRUE.
+!       ========================================================================
+!       == READ ATOMIC STRUCTURE                                              ==
+!       ========================================================================
+        ALLOCATE(THIS%R(3,THIS%NAT))
+        ALLOCATE(THIS%ATOMID(THIS%NAT))
+        ALLOCATE(THIS%ISPECIES(THIS%NAT))
+!       RBAS(3,3),R(3,NAT),ATOMID(NAT),ISPECIES(NAT)
+        READ(NFIL(IS))THIS%RBAS,THIS%R,THIS%ATOMID,THIS%ISPECIES
+!       ==========================================================================
+!       == ELEMENT SPECIFIC QUANTITIES                                          ==
+!       ==========================================================================
+        ALLOCATE(THIS%SETUP(THIS%NSP))
+!       LOOP THROUGH SPECIES
+        DO ISP=1,THIS%NSP
+!         GRIDTYPE,NR,DEX,R1
+          READ(NFIL(IS))GRIDTYPE,NR,DEX,R1
+!         CHECK IF RADIAL GRID WITH SAME PROPERTIES ALREADY EXISTS
+          TCHK=.FALSE.
+          IF(NGID.GT.0) THEN
+            DO IGID=1,NGID
+              CALL RADIAL$GETCH(IGID,'TYPE',GRIDTYPE_)
+              CALL RADIAL$GETI4(IGID,'NR',NR_)
+              CALL RADIAL$GETR8(IGID,'DEX',DEX_)
+              CALL RADIAL$GETR8(IGID,'R1',R1_)
+              IF(GRIDTYPE.EQ.GRIDTYPE_.AND.NR.EQ.NR_.AND.DEX.EQ.DEX_.AND.R1.EQ.R1_) THEN
+                GID=IGID
+                TCHK=.TRUE.
+                EXIT
+              END IF
+            ENDDO
+          ENDIF
+!         IF GRID ALREADY EXISTS, USE ITS GID. ELSE CREATE NEW GRID
+          IF(TCHK) THEN
+            THIS%SETUP(ISP)%GID=GID
+          ELSE
+            CALL RADIAL$NEW(GRIDTYPE,THIS%SETUP(ISP)%GID)
+            CALL RADIAL$SETI4(THIS%SETUP(ISP)%GID,'NR',NR)
+            CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'DEX',DEX)
+            CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'R1',R1)
+          ENDIF
+!         ALLOCATE AND READ (AUXILIARY) PARTIAL WAVES
+          LNX=THIS%LNX(ISP)
+          ALLOCATE(THIS%SETUP(ISP)%PSPHI(NR,LNX))
+          ALLOCATE(THIS%SETUP(ISP)%AEPHI(NR,LNX))
+!         PSPHI(NR,LNX)
+          READ(NFIL(IS))THIS%SETUP(ISP)%PSPHI
+!         AEPHI(NR,LNX)
+          READ(NFIL(IS))THIS%SETUP(ISP)%AEPHI
+        ENDDO
+!       ==================================================================
+!       == OCCUPATIONS AND K-POINTS AND THEIR WEIGHTS                   ==
+!       ==================================================================
+        READ(NFIL(IS))NB_,NKPT_,NSPIN_
+        ALLOCATE(THIS%STATEARR(NKPT_,NSPIN_))
+        ALLOCATE(THIS%XK(3,NKPT_))
+        ALLOCATE(THIS%WKPT(NKPT_))
+        ALLOCATE(OCC(NB_,NKPT_,NSPIN_))
+!       OCC(NB,NKPT,NSPIN),XK(3,NKPT),WKPT(NKPT)
+        READ(NFIL(IS))OCC,THIS%XK,THIS%WKPT
+        DO IKPT=1,NKPT_
+          DO ISPIN=1,NSPIN_
+            THIS%STATE=>THIS%STATEARR(IKPT,ISPIN)
+            THIS%STATE%NB=NB_
+            ALLOCATE(THIS%STATE%OCC(NB_))
+            THIS%STATE%OCC(:)=OCC(:,IKPT,ISPIN)
           ENDDO
-        ENDIF
-!       IF GRID ALREADY EXISTS, USE ITS GID. ELSE CREATE NEW GRID
-        IF(TCHK) THEN
-          THIS%SETUP(ISP)%GID=GID
-        ELSE
-          CALL RADIAL$NEW(GRIDTYPE,THIS%SETUP(ISP)%GID)
-          CALL RADIAL$SETI4(THIS%SETUP(ISP)%GID,'NR',NR)
-          CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'DEX',DEX)
-          CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'R1',R1)
-        ENDIF
-!       ALLOCATE AND READ (AUXILIARY) PARTIAL WAVES
-        LNX=THIS%LNX(ISP)
-        ALLOCATE(THIS%SETUP(ISP)%PSPHI(NR,LNX))
-        ALLOCATE(THIS%SETUP(ISP)%AEPHI(NR,LNX))
-        READ(NFIL)THIS%SETUP(ISP)%PSPHI(:,:)
-        READ(NFIL)THIS%SETUP(ISP)%AEPHI(:,:)
+        ENDDO
+        DEALLOCATE(OCC)
+        CALL XAS$UNSELECT
       ENDDO
-!     ==========================================================================
-!     == READ PROJECTIONS                                                     ==
-!     ==========================================================================
-      ALLOCATE(THIS%XK(3,THIS%NKPT))
-      ALLOCATE(THIS%WKPT(THIS%NKPT))
-      ALLOCATE(THIS%STATEARR(THIS%NKPT,THIS%NSPIN))
-      DO IKPT=1,THIS%NKPT
-        DO ISPIN=1,THIS%NSPIN
-          THIS%STATE=>THIS%STATEARR(IKPT,ISPIN)
-          READ(NFIL)THIS%XK(:,IKPT),NB,THIS%WKPT(IKPT)
-          THIS%STATE%NB=NB
-          ALLOCATE(THIS%STATE%EIG(NB))
-          ALLOCATE(THIS%STATE%PRO(THIS%NDIM,THIS%NPRO,NB))
-          ALLOCATE(THIS%STATE%OCC(NB))
-          DO IB=1,NB
-            READ(NFIL)THIS%STATE%EIG(IB)
-            READ(NFIL)THIS%STATE%OCC(IB)
-            READ(NFIL)THIS%STATE%PRO(:,:,IB)
+
+!     ==================================================================
+!     == DATA CONSISTENCY CHECKS BETWEEN BOTH SIMULATIONS             ==
+!     ==================================================================
+      CALL DATACONSISTENCY
+
+!     ALLOCATE STORAGE ARRAYS FOR OVERLAP_TYPES AND STATE_TYPES
+      ALLOCATE(OVERLAPARR(SIM(1)%NKPT,SIM(1)%NSPIN))
+!
+!     ==================================================================
+!     == WAVE FUNCTIONS AND PROJECTIONS                               ==
+!     ==================================================================
+      NKPT=SIM(1)%NKPT
+!     LOOP OVER K POINTS
+      DO IKPT=1,NKPT
+!       READ GENERAL INFORMATION ABOUT K POINT
+        DO IS=1,NSIM
+!         KEY,NGG,NDIM,NB,NBH,TSUPER
+          READ(NFIL(IS))KEY(IS),NGG(IS),NDIM(IS),NB(IS),ILOGICAL
+          TSUPER(IS)=.FALSE.
+          IF(ILOGICAL.EQ.1) TSUPER(IS)=.TRUE.
+        ENDDO
+!       READ K POINT AND G VECTORS (PREVIOUSLY CHECKED IF #(NGG1,NGG2) SAME)
+        ALLOCATE(IGVEC(NSIM,3,NGG(1)))
+        DO IS=1,NSIM
+!
+!         XK(3),IGVEC(3,NGG)
+          READ(NFIL(IS))XK(IS,:),IGVEC(IS,:,:)
+        ENDDO
+!       ==================================================================
+!       == DATA CHECKS                                                  ==
+!       ==================================================================
+! NOTE: DATA CHECKS USE VARIABLES FROM THIS SUBROUTINE, POSITION OF CALL MATTERS        
+        CALL TEST
+        DEALLOCATE(IGVEC)
+
+! WARNING: REQUIRES SUPER WAVE FUNCTIONS TO BE UNRAVELED
+! TODO: STORAGE SOLUTION
+        ALLOCATE(PSIK1(NGG(1),NDIM(1),NB(1)))
+        ALLOCATE(PSIK2(NGG(2),NDIM(2),NB(2)))
+        ALLOCATE(EIG1(NB(1)))
+        ALLOCATE(EIG2(NB(2)))
+!       LOOP OVER SPIN
+        DO ISPIN=1,SIM(1)%NSPIN
+!         SET STATE POINTER
+          DO IS=1,NSIM
+!           SET POINTER TO SPECIFIC STATE(IKPT,ISPIN)
+            SIM(IS)%STATE=>SIM(IS)%STATEARR(IKPT,ISPIN)
+!           CHECK IF NB CONSISTENT FOR OCCUPATIONS AND EIGENVALUES/PROJECTIONS
+            IF(NB(IS).NE.SIM(IS)%STATE%NB) THEN
+              CALL ERROR$MSG('NB FOR PROJECTIONS AND EIGENVALUES NOT THE SAME')
+              CALL ERROR$MSG('FOR OCCUPATIONS AND EIGENVALUES/PROJECTIONS')
+              CALL ERROR$I4VAL('NB_OCC',SIM(IS)%STATE%NB)
+              CALL ERROR$I4VAL('NB_PROJ',NB(IS))
+              CALL ERROR$STOP('XAS$READ')
+            END IF
+!           ALLOCATE STORAGE FOR PROJECTIONS
+            ALLOCATE(SIM(IS)%STATE%PROJ(NDIM(IS),NB(IS),SIM(IS)%NPRO))
+!           ALLOCATE STORAGE FOR EIGENVALUES
+            ALLOCATE(SIM(IS)%STATE%EIG(NB(IS)))
           ENDDO
+!         SET POINTER TO SPECIFIC OVERLAP(IKPT,ISPIN)
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+! WARNING: FIND OUT REQUIRED ORDER OF OVERLAP
+!         ALLOCATE STORAGE FOR OVERLAP
+          ALLOCATE(OVERLAP%PW(NB(1),NB(2)))
+
+!         READ PLANE WAVE BASIS
+          READ(NFIL(1))PSIK1
+          READ(NFIL(2))PSIK2
+!         READ PROJECTIONS
+          READ(NFIL(1))SIM(1)%STATE%PROJ
+          READ(NFIL(2))SIM(2)%STATE%PROJ
+!         READ EIGENVALUES
+          READ(NFIL(1))SIM(1)%STATE%EIG
+          READ(NFIL(2))SIM(2)%STATE%EIG
+
+          DO IB1=1,NB(1) ! LOOP OVER BANDS
+            DO IB2=1,NB(2) ! LOOP OVER BANDS
+!             NO NDIM LOOP AS NDIM=1
+!             SUM OVER G VECTORS
+              OVERLAP%PW(IB1,IB2)=SUM(CONJG(PSIK1(:,1,IB1))*PSIK2(:,1,IB2))
+            ENDDO ! END LOOP OVER BANDS
+          ENDDO ! END LOOP OVER BANDS
         ENDDO ! END LOOP OVER SPIN
-      ENDDO ! END LOOP OVER KPOINTS
+        DEALLOCATE(EIG2)
+        DEALLOCATE(EIG1)
+        DEALLOCATE(PSIK1)
+        DEALLOCATE(PSIK2)
+      ENDDO ! END LOOP OVER K POINTS
                           CALL TRACE$POP
+      
+      CONTAINS
+        SUBROUTINE TEST!(NSIM,KEY,NGG,NDIM,TSUPER,XK,IGVEC)
+        ! INTEGER(4), INTENT(IN) :: NSIM
+        ! CHARACTER(8), INTENT(IN) :: KEY(NSIM)
+        ! INTEGER(4), INTENT(IN) :: NGG(NSIM)
+        ! INTEGER(4), INTENT(IN) :: NDIM(NSIM)
+        ! LOGICAL(4), INTENT(IN) :: TSUPER(NSIM)
+        ! REAL(8), INTENT(IN) :: XK(NSIM,3)
+        ! INTEGER(4), INTENT(IN) :: IGVEC(NSIM,3,NGG(1))
+        IF(KEY(1).NE.KEY(2)) THEN
+          CALL ERROR$MSG('KEYS NOT THE SAME IN BOTH SIMULATIONS')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$CHVAL('KEY1',KEY(1))
+          CALL ERROR$CHVAL('KEY2',KEY(2))
+          CALL ERROR$STOP('XAS$READ')
+        END IF
+        IF(NGG(1).NE.NGG(2)) THEN
+          CALL ERROR$MSG('NGG NOT THE SAME IN BOTH SIMULATIONS')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('NGG1',NGG(1))
+          CALL ERROR$I4VAL('NGG2',NGG(2))
+          CALL ERROR$STOP('XAS$READ')
+        END IF
+        IF(NDIM(1).NE.NDIM(2)) THEN
+          CALL ERROR$MSG('NDIM NOT THE SAME IN BOTH SIMULATIONS')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('NDIM1',NDIM(1))
+          CALL ERROR$I4VAL('NDIM2',NDIM(2))
+          CALL ERROR$STOP('XAS$READ')
+        END IF
+! TODO: CHECK NDIM AGAINST PREVIOUSLY READ ONE
+        IF(TSUPER(1).NEQV.TSUPER(2)) THEN
+          CALL ERROR$MSG('TSUPER NOT THE SAME IN BOTH SIMULATIONS')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$L4VAL('TSUPER1',TSUPER(1))
+          CALL ERROR$L4VAL('TSUPER2',TSUPER(2))
+          CALL ERROR$STOP('XAS$READ')
+        END IF
+!       CHECK IF XK SAME IN BOTH SIMULATIONS
+        IF(SUM(ABS(XK(1,:)-XK(2,:)))>TOL) THEN
+          CALL ERROR$MSG('XK NOT THE SAME IN BOTH SIMULATIONS')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$R8VAL('XK1',XK(1,:))
+          CALL ERROR$R8VAL('XK2',XK(2,:))
+          CALL ERROR$STOP('XAS$READ')
+        END IF
+!       CHECK IF IGVEC SAME IN BOTH SIMULATIONS
+        IF(ANY(IGVEC(1,:,:).NE.IGVEC(2,:,:))) THEN
+          CALL ERROR$MSG('IGVEC NOT THE SAME IN BOTH SIMULATIONS')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$STOP('XAS$READ')
+        END IF
+        END SUBROUTINE TEST
       END SUBROUTINE XAS$READ
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -783,7 +936,7 @@
       USE XAS_MODULE, ONLY: THIS, SELECTED
       IMPLICIT NONE
       INTEGER(4) :: NFIL
-      INTEGER(4) :: IAT,ISP
+      INTEGER(4) :: IAT,ISP,ISPIN,IKPT
       CHARACTER(256) :: FORMAT
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$REPORT')
@@ -828,6 +981,12 @@
         WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%LNX(ISP),THIS%LOX(:,ISP)
       ENDDO
       CALL RADIAL$REPORT(NFIL)
+      WRITE(NFIL,FMT='(3A10)')'IKPT','ISPIN','NB'
+      DO IKPT=1,THIS%NKPT
+        DO ISPIN=1,THIS%NSPIN
+          WRITE(NFIL,FMT='(3I10)')IKPT,ISPIN,THIS%STATEARR(IKPT,ISPIN)%NB
+        ENDDO
+      ENDDO
                           CALL TRACE$POP
       END SUBROUTINE XAS$REPORT
 !
@@ -897,13 +1056,15 @@
       INTEGER(4)  ,INTENT(IN) :: NFIL
       INTEGER(4), INTENT(IN) :: ISP ! SELECT SETUP
       CHARACTER(*) ,INTENT(IN) :: ID ! SELECT AEPHI OR PSPHI
+      INTEGER(4) :: NR
       INTEGER(4) :: IR
       REAL(8), ALLOCATABLE :: R(:) ! (NR)
       REAL(8), ALLOCATABLE :: PSI(:,:) ! (NR,LNX)
 !     **************************************************************************
-      ALLOCATE(R(THIS%SETUP(ISP)%NR))
-      ALLOCATE(PSI(THIS%SETUP(ISP)%NR,THIS%SETUP(ISP)%LNX))
-      CALL RADIAL$R(THIS%SETUP(ISP)%GID,THIS%SETUP(ISP)%NR,R)
+      CALL RADIAL$GETI4(THIS%SETUP(ISP)%GID,'NR',NR)
+      ALLOCATE(R(NR))
+      ALLOCATE(PSI(NR,THIS%LNX(ISP)))
+      CALL RADIAL$R(THIS%SETUP(ISP)%GID,NR,R)
       IF(ID.EQ.'AEPHI') THEN
         PSI=THIS%SETUP(ISP)%AEPHI
       ELSE IF(ID.EQ.'PSPHI') THEN
@@ -913,7 +1074,7 @@
         CALL ERROR$CHVAL('ID',ID)
         CALL ERROR$STOP('XAS$WRITEPHI')
       END IF
-      DO IR=1,THIS%SETUP(ISP)%NR
+      DO IR=1,NR
         WRITE(NFIL,*) R(IR),PSI(IR,:)
       ENDDO
       DEALLOCATE(PSI)

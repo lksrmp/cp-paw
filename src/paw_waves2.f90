@@ -2930,10 +2930,6 @@ PRINT*,'CELLSCALE ',CELLSCALE
       REAL(8), ALLOCATABLE :: OCC(:,:,:) ! (NBX,NKPT,NSPIN) OCCUPATION NUMBERS
       REAL(8), ALLOCATABLE :: XK(:,:) ! (3,NKPT) K-POINTS IN RELATIVE COORDINATES
       REAL(8), ALLOCATABLE :: WKPT(:) ! (NKPT) K-POINT WEIGHTS
-      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NBH,NPRO) PROJECTIONS
-      COMPLEX(8), ALLOCATABLE :: VECTOR1(:,:,:) ! (NDIM,NPRO,NB) PROJECTIONS
-      REAL(8), ALLOCATABLE :: EIG(:) ! (NB) EIGENVALUES
-      COMPLEX(8), ALLOCATABLE :: VEC(:,:,:) ! (NDIM,NPRO,NB) EIGENVECTORS
 
       LOGICAL(4) :: TKGROUP
 
@@ -2944,6 +2940,20 @@ PRINT*,'CELLSCALE ',CELLSCALE
       INTEGER(4) :: GID
       INTEGER(4) :: ILOGICAL
       LOGICAL(4) :: TCHK
+      INTEGER(4) :: NGG
+      LOGICAL(4) :: TSUPER
+      CHARACTER(8) :: KEY
+      INTEGER(4) :: IKPTL
+      INTEGER(4) :: NKPTL
+      REAL(8) :: XKPT(3)
+      REAL(8) :: GBAS(3,3)
+      INTEGER(4), ALLOCATABLE :: IGVECG(:,:) ! (3,NGG)
+      INTEGER(4), ALLOCATABLE :: IGVECL(:,:) ! (3,NGL)
+      COMPLEX(8), ALLOCATABLE :: PSIG(:,:,:) ! (NGG,NDIM,NBH) GLOBAL PLANE WAVES
+      COMPLEX(8), ALLOCATABLE :: PSIL(:,:,:) ! (NGL,NDIM,NBH) LOCAL PLANE WAVES
+      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NBH,NPRO) PROJECTIONS
+      COMPLEX(8), ALLOCATABLE :: VECTORPROJ(:,:,:) ! (NDIM,NB,NPRO) PROJECTIONS
+      COMPLEX(8), ALLOCATABLE :: VECTORPSIG(:,:,:) ! (NGG,NDIM,NB) PROJECTIONS
 !     **************************************************************************
                           CALL TRACE$PUSH('WAVES$WRITEXAS')
       CALL XASDET$GETL4('INIT',TCHK)
@@ -3000,13 +3010,17 @@ PRINT*,'CELLSCALE ',CELLSCALE
       LOX(:,:)=MAP%LOX(:,:)
 
       IF(THISTASK.EQ.1)THEN
+!       NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
         WRITE(NFIL)NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
-        WRITE(NFIL)LNX(:),LOX(:,:)
+!       LNX(NSP),LOX(LNXX,NSP)
+        WRITE(NFIL)LNX,LOX
         ILOGICAL=1
         IF(.NOT.TINV)ILOGICAL=0
-        WRITE(NFIL)NKDIV(:),ISHIFT(:),RNTOT,NEL,ILOGICAL
+!       NKDIV(3),ISHIFT(3),RNTOT,NEL,TINV
+        WRITE(NFIL)NKDIV,ISHIFT,RNTOT,NEL,ILOGICAL
         ILOGICAL=1
         IF(.NOT.TSHIFT)ILOGICAL=0
+!       SPACEGROUP,TSHIFT
         WRITE(NFIL)SPACEGROUP,ILOGICAL
       ENDIF
 !
@@ -3021,7 +3035,8 @@ PRINT*,'CELLSCALE ',CELLSCALE
       CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
       CALL ATOMLIST$GETCHA('NAME',0,NAT,ATOMID)
       IF(THISTASK.EQ.1)THEN
-        WRITE(NFIL)RBAS,R,ATOMID,ISPECIES(:)
+!       RBAS(3,3),R(3,NAT),ATOMID(NAT),ISPECIES(NAT)
+        WRITE(NFIL)RBAS,R,ATOMID,ISPECIES
       ENDIF
 !
 !     ==================================================================
@@ -3041,18 +3056,20 @@ PRINT*,'CELLSCALE ',CELLSCALE
         CALL SETUP$GETR8A('PSPHI',NR*LNX(ISP),PSPHI)
         CALL SETUP$GETR8A('AEPHI',NR*LNX(ISP),AEPHI)
         IF(THISTASK.EQ.1)THEN
+!         GRIDTYPE,NR,DEX,R1
           WRITE(NFIL)GRIDTYPE,NR,DEX,R1
+!         PSPHI(NR,LNX(ISP))
           WRITE(NFIL)PSPHI(:,:)
+!         AEPHI(NR,LNX(ISP))
           WRITE(NFIL)AEPHI(:,:)
         ENDIF
         DEALLOCATE(PSPHI)
         DEALLOCATE(AEPHI)
         CALL SETUP$UNSELECT()
       ENDDO
-!
-!     ==========================================================================
-!     ==  PROJECTIONS                                                         ==
-!     ==========================================================================
+!     ==================================================================
+!     == OCCUPATIONS AND K-POINTS AND THEIR WEIGHTS                   ==
+!     ==================================================================
       CALL DYNOCC$GETI4('NB',NBX)
       ALLOCATE(OCC(NBX,NKPT,NSPIN))
       CALL DYNOCC$GETR8A('OCC',NBX*NKPT*NSPIN,OCC)
@@ -3060,126 +3077,142 @@ PRINT*,'CELLSCALE ',CELLSCALE
       CALL DYNOCC$GETR8A('XK',3*NKPT,XK)
       ALLOCATE(WKPT(NKPT))
       CALL DYNOCC$GETR8A('WKPT',NKPT,WKPT)
-
-      IKPT=0  ! IKPT IS THE K-POINT INDEX LOCAL TO MPE-GROUP K
+      IF(THISTASK.EQ.1)THEN
+!       NB,NKPT,NSPIN
+        WRITE(NFIL)NBX,NKPT,NSPIN
+!       OCC(NB,NKPT,NSPIN),XK(3,NKPT),WKPT(NKPT)
+        WRITE(NFIL)OCC,XK,WKPT
+      ENDIF
+!
+!     ==================================================================
+!     == WAVE FUNCTIONS AND PROJECTIONS                               ==
+!     ==================================================================
+      IKPTL=0
+!     LOOP OVER GLOBAL K-POINTS
       DO IKPTG=1,NKPT
-        TKGROUP=THISTASK.EQ.KMAP(IKPTG)
+!       CHECK IF THISTASK IS MAIN TASK FOR THE K-POINT GROUP
+        TKGROUP=(THISTASK.EQ.KMAP(IKPTG))
+!       SET OTHER TASKS IN K-POINT GROUP ACTIVE
         CALL MPE$BROADCAST('K',1,TKGROUP)
+!       ONLY LEAVE K-POINT GROUP AND PRINTING FIRST TASK RUNNING
         IF(.NOT.(THISTASK.EQ.1.OR.TKGROUP)) CYCLE
-        IF(TKGROUP)IKPT=IKPT+1
+        IF(TKGROUP) THEN
+!         COUNT UP LOCAL K-POINT INDEX
+          IKPTL=IKPTL+1
+!         SELECT CORRECT WAVES
+          CALL WAVES_SELECTWV(IKPTL,1)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+!         CHECK IF EIGENVECTORS AND EIGENVALUES ARE SET AND AVAILABLE
+          IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
+            CALL ERROR$MSG('EIGENVECTORS NOT PRESENT')
+            CALL ERROR$STOP('WAVES$WRITEXAS')
+          ENDIF
+          IF(.NOT.ASSOCIATED(THIS%EIGVAL)) THEN
+            CALL ERROR$MSG('EIGENVALUES NOT PRESENT')
+            CALL ERROR$STOP('WAVES$WRITEXAS')
+          ENDIF
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          NB=THIS%NB
+          CALL PLANEWAVE$GETI4('NGG',NGG)
+          CALL PLANEWAVE$GETL4('TINV',TSUPER)
+        ENDIF
+!       ==================================================================
+!       == GENERAL INFORMATION ABOUT THE K-POINT                        ==
+!       ==================================================================
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NGG)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NB)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NBH)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,TSUPER)
+!       KEYWORD, #(GLOBAL PLANE WAVES), DIMENSION(=1), #(BANDS), SUPERWAVEFUNCTION
+        IF(THISTASK.EQ.1) THEN
+          KEY='PSI'
+          ILOGICAL=1
+          IF(.NOT.TSUPER)ILOGICAL=0
+!         KEY,NGG,NDIM,NB,TSUPER
+          WRITE(NFIL)KEY,NGG,NDIM,NB,ILOGICAL
+        ENDIF
+
+        ALLOCATE(IGVECG(3,NGG))
+        IF(TKGROUP) THEN
+          CALL PLANEWAVE$GETR8A('GBAS',9,GBAS)
+          CALL PLANEWAVE$GETR8A('XK',3,XKPT)
+          ALLOCATE(IGVECL(3,NGL))
+          CALL PLANEWAVE$GETI4A('IGVEC',3*NGL,IGVECL)
+          CALL PLANEWAVE$COLLECTI4(3,NGL,IGVECL,NGG,IGVECG)
+          DEALLOCATE(IGVECL)
+        ENDIF
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,XKPT)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,IGVECG)
+!       RELATIVE K-POINT COORDINATES AND INTEGER REPRESENTATION GLOBAL PLANE WAVES
+        IF(THISTASK.EQ.1) THEN
+!         XKPT(3),IGVECG(3,NGG)
+          WRITE(NFIL)XKPT,IGVECG
+        ENDIF
+        DEALLOCATE(IGVECG)
+!       ==================================================================
+!       == PLANE WAVE WAVE FUNCTIONS AND PROJECTIONS                    ==
+!       ==================================================================
+        ALLOCATE(PSIG(NGG,NDIM,NBH)) ! GLOBAL WAVE FUNCTION FOR IKPT & ISPIN
+        IF(TKGROUP) THEN
+          ALLOCATE(PSIL(NGL,NDIM,NBH))
+          ALLOCATE(PROJ(NDIM,NBH,NPRO))
+        ENDIF
         DO ISPIN=1,NSPIN
           IF(TKGROUP) THEN
-            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            CALL WAVES_SELECTWV(IKPTL,ISPIN)
             CALL PLANEWAVE$SELECT(GSET%ID)
-            IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
-              CALL ERROR$MSG('EIGENVALUES NOT PRESENT')
-              CALL ERROR$STOP('WAVES$WRITEXAS')
-            END IF
-            NB=THIS%NB
-            NBH=THIS%NBH
-            NGL=GSET%NGL
-            TINV=GSET%TINV
-!
-!           ====================================================================
-!           ==  CALCULATE PROJECTIONS                                         ==
-!           ====================================================================
-            ALLOCATE(PROJ(NDIM,NBH,NPRO))
-            CALL WAVES_PROJECTIONS(MAP,GSET,NAT,R,NGL,NDIM,NBH,NPRO &
-     &                             ,THIS%PSI0,PROJ)
-            CALL MPE$COMBINE('K','+',PROJ)
-          ENDIF
-          IF(KMAP(IKPTG).EQ.THISTASK) THEN
-            ALLOCATE(VECTOR1(NDIM,NPRO,NB))
-!
-!           ====================================================================
-!           == UNRAVEL SUPER WAVE FUNCTIONS                                   ==
-!           ====================================================================
-            IF(TINV) THEN
-              DO IBH=1,NBH
-                IB1=1+2*(IBH-1)
-                IB2=2+2*(IBH-1)
-                DO IPRO=1,NPRO
-                  DO IDIM=1,NDIM
-                    VECTOR1(IDIM,IPRO,IB1)=REAL(PROJ(IDIM,IBH,IPRO),KIND=8)
-                    VECTOR1(IDIM,IPRO,IB2)=AIMAG(PROJ(IDIM,IBH,IPRO))
-                  ENDDO
-                ENDDO
+            PSIL=(0.D0,0.D0)
+            PROJ=(0.D0,0.D0)
+!           TRANSFORM INTO EIGENSTATES
+! WARNING: CAN THIS TRANSFORM BE DONE BEFORE UNRAVELLING THE SUPER WAVE FUNCTIONS?
+            CALL WAVES_ADDPSI(NGL,NDIM,NBH,NB,PSIL,THIS%PSI0,THIS%EIGVEC)
+            CALL WAVES_ADDOPROJ(MAP%NPRO,NDIM,NBH,NB,PROJ,THIS%PROJ,THIS%EIGVEC)
+! WARNING: WHAT HAPPENS TO OCCUPATIONS?
+            DO IBH=1,NBH
+              DO IDIM=1,NDIM
+                CALL PLANEWAVE$COLLECTC8(1,NGL,PSIL(1,IDIM,IBH),NGG,PSIG(1,IDIM,IBH))
               ENDDO
-            ELSE
-              DO IB1=1,NB
-                DO IPRO=1,NPRO
-                  DO IDIM=1,NDIM
-                    VECTOR1(IDIM,IPRO,IB1)=PROJ(IDIM,IB1,IPRO)
-                  ENDDO
-                ENDDO
-              ENDDO
-            ENDIF
-!
-!           ====================================================================
-!           ==  TRANSFORM TO EIGENSTATES IF SAFEORTHO=.TRUE.                  ==
-!           ====================================================================
-            ALLOCATE(EIG(NB))
-            IF(TSAFEORTHO) THEN
-!           == CONSTRUCT EIGENSTATES ===========================================
-              ALLOCATE(VEC(NDIM,NPRO,NB))
-              VEC(:,:,:)=0.D0
-              DO IB1=1,NB
-                DO IB2=1,NB
-                  VEC(:,:,IB1)=VEC(:,:,IB1) &
-     &                        +VECTOR1(:,:,IB2)*THIS%EIGVEC(IB2,IB1)
-                ENDDO
-              ENDDO
-              VECTOR1(:,:,:)=VEC(:,:,:)
-              DEALLOCATE(VEC)
-              EIG(:)=THIS%EIGVAL(:)
-            ELSE
-              EIG(:)=THIS%EXPECTVAL(:)
-            END IF
-          END IF
-          IF(TKGROUP) DEALLOCATE(PROJ)
-!
-!         ======================================================================
-!         == COMMUNICATE RESULT TO FIRST NODE OF MONOMER                      ==
-!         == NB MAY IN FUTURE DEPEND ON THE K-POINT                           ==
-!         == NDIM AND NPRO ARE INDEPENDENT OF THE K-POINTS                    ==
-!         ======================================================================
-          IF(KMAP(IKPTG).NE.1) THEN  !ONLY COMMUNICATE WHEN NECESSARY
-            CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NB)
-            IF(THISTASK.EQ.1) THEN
-              ALLOCATE(EIG(NB))
-              ALLOCATE(VECTOR1(NDIM,NPRO,NB))
-            END IF
-            CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,EIG)
-            CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,VECTOR1)
-            IF(THISTASK.EQ.KMAP(IKPTG)) THEN
-              DEALLOCATE(EIG)
-              DEALLOCATE(VECTOR1)
-            END IF
-          END IF
-!
-!         ======================================================================
-!         == NOW THE DATA IS AVAILABLE ON TASK 1 OF MONOMER; NEXT WRITE       ==
-!         == TO FILE. ATTENTION: DATA ARE ONLY AVAILABLE ON TASK 1.           ==
-!         == THIS BLOCK CANNOT BE INTEGRATED INTO THE COMMUNICATION           ==
-!         == NBLOCK ABOVE, BECAUSE THERE IS NO COMMUNICATION IF THE DATA      ==
-!         == ARE ALREADY IN TASK 1.                                           ==
-!         ======================================================================
-          IF(THISTASK.EQ.1) THEN
-            WRITE(NFIL)XK(:,IKPTG),NB,WKPT(IKPTG)
-            DO IB1=1,NB
-              WRITE(NFIL)EIG(IB1)
-              WRITE(NFIL)OCC(IB1,IKPTG,ISPIN)
-              WRITE(NFIL)VECTOR1(:,:,IB1)
             ENDDO
-            DEALLOCATE(EIG)
-            DEALLOCATE(VECTOR1)
           ENDIF
-        ENDDO ! END LOOP OVER ISPIN
-      ENDDO ! END LOOP OVER IKPTG
-      DEALLOCATE(XK)
-      DEALLOCATE(WKPT)
-      DEALLOCATE(R)
-      DEALLOCATE(OCC)
+          CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,PSIG)
+! TODO: UNRAVELLING OF SUPER WAVE FUNCTIONS SHOULD MAYBE BE DONE IN PARALLEL
+          IF(THISTASK.EQ.1) THEN
+            ALLOCATE(VECTORPSIG(NGG,NDIM,NB))
+            ALLOCATE(VECTORPROJ(NDIM,NB,NPRO))
+            IF(TSUPER) THEN
+              DO IDIM=1,NDIM
+                DO IBH=1,NBH
+                  IB1=1+2*(IBH-1)
+                  IB2=2+2*(IBH-1)
+                  VECTORPSIG(:,IDIM,IB1)=REAL(PSIG(:,IDIM,IBH),KIND=8)
+                  VECTORPSIG(:,IDIM,IB2)=AIMAG(PSIG(:,IDIM,IBH))
+                  DO IPRO=1,NPRO
+                    VECTORPROJ(IDIM,IB1,IPRO)=REAL(PROJ(IDIM,IBH,IPRO),KIND=8)
+                    VECTORPROJ(IDIM,IB2,IPRO)=AIMAG(PROJ(IDIM,IBH,IPRO))
+                  ENDDO
+                ENDDO
+              ENDDO
+            ELSE ! NOT TSUPER > NBH=NB
+              VECTORPROJ(:,:,:)=PROJ(:,:,:) ! (NDIM,NB,NPRO)
+              VECTORPSIG(:,:,:)=PSIG(:,:,:) ! (NGG,NDIM,NB)
+            ENDIF
+!           PSIG(NGG,NDIM,NB)
+            WRITE(NFIL)VECTORPSIG
+!           PROJ(NDIM,NB,NPRO)
+            WRITE(NFIL)VECTORPROJ
+!           EIG(NB)
+            WRITE(NFIL)THIS%EIGVAL
+            DEALLOCATE(VECTORPSIG)
+            DEALLOCATE(VECTORPROJ)
+          ENDIF
+        ENDDO ! ISPIN
+        IF(TKGROUP) THEN
+          DEALLOCATE(PSIL)
+          DEALLOCATE(PROJ)
+        ENDIF
+        DEALLOCATE(PSIG)
+      ENDDO ! IKPTG
       IF(THISTASK.EQ.1) THEN
         FLUSH(NFIL)
         CALL FILEHANDLER$CLOSE('XAS')
