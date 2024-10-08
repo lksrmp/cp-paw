@@ -1351,6 +1351,7 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
 !      **        CONVERSION IS DONE IN THE INITIALIZATION             **
 !      **                                                             **
 !      *****************************************************************
+       USE MPE_MODULE
        IMPLICIT NONE
        INTEGER(4),INTENT(IN) :: NB
        COMPLEX(8),INTENT(IN) :: PHIPHI(NB,NB) !<PHI_I|O|PHI_J>
