@@ -15,7 +15,6 @@
 
       TYPE OVERLAP_TYPE
         COMPLEX(8), POINTER :: PW(:,:) ! (NB1,NB2) PLANE WAVE OVERLAP
-        REAL(8), POINTER    :: S(:,:) ! (NPRO1,NPRO2) ATOMIC OVERLAP
       END TYPE OVERLAP_TYPE
 
 !     GENERAL SETTINGS OF A SIMULATION 
@@ -56,8 +55,11 @@
       LOGICAL,SAVE :: SELECTED=.FALSE.
       TYPE(SIMULATION_TYPE), TARGET :: SIM(NSIM) ! (NSIM) ARRAY OF SIMULATIONS
       TYPE(SIMULATION_TYPE), POINTER :: THIS ! CURRENT SIMULATION
+
       TYPE(OVERLAP_TYPE), ALLOCATABLE, TARGET :: OVERLAPARR(:,:) ! (NKPT,NSPIN)
       TYPE(OVERLAP_TYPE), POINTER :: OVERLAP ! CURRENT OVERLAP
+
+      REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
       END MODULE XAS_MODULE
 
       MODULE XASCNTL_MODULE  ! MARK: XASCNTL_MODULE
@@ -121,6 +123,10 @@
 
       CALL DATACONSISTENCY
 
+      CALL XAS$ATOMOVERLAP
+
+      CALL XAS$REPORT
+
 
 !     REPORT UNUSED LINKEDLISTS
       CALL FILEHANDLER$UNIT('PROT',NFIL)
@@ -172,7 +178,6 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
 !     **************************************************************************
-                          CALL TRACE$PUSH('XAS$ISELECT')
       IF(I.GT.NSIM.OR.I.LT.0) THEN
         CALL ERROR$MSG('I NOT IN RANGE')
         CALL ERROR$I4VAL('I',I)
@@ -194,7 +199,6 @@
         THIS=>SIM(I)
         SELECTED=.TRUE.
       ENDIF
-                          CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$ISELECT
 
@@ -207,7 +211,6 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
 !     **************************************************************************
-                          CALL TRACE$PUSH('XAS$SELECT')
       IF(SELECTED) THEN
         CALL ERROR$MSG('ANOTHER SIMULATION IS ALREADY SELECTED')
         CALL ERROR$CHVAL('SELECTED ID',THIS%ID)
@@ -225,7 +228,6 @@
         CALL ERROR$MSG('ID MUST BE GROUNDSTATE OR EXCITESTATE')
         CALL ERROR$STOP('XAS$SELECT')
       END IF
-                          CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$SELECT
 
@@ -237,14 +239,12 @@
       USE XAS_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
 !     **************************************************************************
-                          CALL TRACE$PUSH('XAS$UNSELECT')
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('CANNOT UNSELECT A SIMULATION THAT IS NOT SELECTED')
         CALL ERROR$STOP('XAS$UNSELECT')
       END IF
       SELECTED=.FALSE.
       NULLIFY(THIS)
-                          CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$UNSELECT
 ! !
@@ -478,6 +478,14 @@
         CALL ERROR$MSG('RBAS INCONSISTENT BETWEEN SIMULATIONS')
         CALL ERROR$STOP('DATACONSISTENCY')
       END IF
+! TODO: IMPLEMENT VARIABLE ORDER OF ATOMS
+      DO I=1,THIS1%NAT
+        IF(SUM(ABS(THIS1%R(:,I)-THIS2%R(:,I))).GT.TOL) THEN
+          CALL ERROR$MSG('ATOMIC POSITIONS INCONSISTENT BETWEEN SIMULATIONS')
+          CALL ERROR$I4VAL('I',I)
+          CALL ERROR$STOP('DATACONSISTENCY')
+        END IF
+      ENDDO
 ! TODO: CHECK FOR ATOMIC POSITIONS
 ! TODO: CHECK FOR XK
                           CALL TRACE$POP
@@ -933,62 +941,172 @@
 !     **************************************************************************
 !     ** REPORT DATA FOR A SELECTED SIMULATION                                **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS, SELECTED
+      USE XAS_MODULE, ONLY: THIS, SELECTED, S
       IMPLICIT NONE
       INTEGER(4) :: NFIL
-      INTEGER(4) :: IAT,ISP,ISPIN,IKPT
+      INTEGER(4) :: IAT,ISP,ISPIN,IKPT,IPRO
       CHARACTER(256) :: FORMAT
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$REPORT')
-      IF(.NOT.SELECTED) THEN
-        CALL ERROR$MSG('NO SIMULATION SELECTED')
-        CALL ERROR$STOP('XAS$REPORT')
-      END IF
       CALL FILEHANDLER$UNIT('PROT',NFIL)
-      WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A14,A14)')'SIMULATION',THIS%ID
-      WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A10,A)')'FILE:',TRIM(THIS%FILE)
-      WRITE(NFIL,FMT='(A10,I10)')'NAT:',THIS%NAT
-      WRITE(NFIL,FMT='(A10,I10)')'NSP:',THIS%NSP
-      WRITE(NFIL,FMT='(A10,I10)')'NKPT:',THIS%NKPT
-      WRITE(NFIL,FMT='(A10,I10)')'NSPIN:',THIS%NSPIN
-      WRITE(NFIL,FMT='(A10,I10)')'NDIM:',THIS%NDIM
-      WRITE(NFIL,FMT='(A10,I10)')'NPRO:',THIS%NPRO
-      WRITE(NFIL,FMT='(A10,I10)')'LNXX:',THIS%LNXX
-      WRITE(NFIL,FMT='(A10,L10)')'TINV:',THIS%TINV
-      WRITE(NFIL,FMT='(A10,3I10)')'NKDIV:',THIS%NKDIV(:)
-      WRITE(NFIL,FMT='(A10,3I10)')'ISHIFT:',THIS%ISHIFT(:)
-      WRITE(NFIL,FMT='(A10,F10.4)')'RNTOT:',THIS%RNTOT
-      WRITE(NFIL,FMT='(A10,F10.4)')'NEL:',THIS%NEL
-      WRITE(NFIL,FMT='(A10,I10)')'SPACEGR.:',THIS%SPACEGROUP
-      WRITE(NFIL,FMT='(A10,L10)')'TSHIFT:',THIS%TSHIFT
-      WRITE(NFIL,FMT='(A10,3F10.4)')'RBAS:',THIS%RBAS(:,1)
-      DO IAT=2,3
-        WRITE(NFIL,FMT='(A10,3F10.4)')' ',THIS%RBAS(:,IAT)
-      ENDDO
-      WRITE(NFIL,FMT='(5A10)')'ATOM','X','Y','Z','SPECIES'
-      DO IAT=1,THIS%NAT
-        WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
-      ENDDO
-      WRITE(NFIL,FMT='(4A10)')'SETUP','GID','LNX','LOX'
-      DO ISP=1,THIS%NSP
-        IF(THIS%LNXX.GT.9) THEN
-          WRITE(FORMAT,'("(3I10,",I2,"I10)")')THIS%LNXX
-        ELSE
-          WRITE(FORMAT,'("(3I10,",I1,"I10)")')THIS%LNXX
-        END IF
-        WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%LNX(ISP),THIS%LOX(:,ISP)
-      ENDDO
-      CALL RADIAL$REPORT(NFIL)
-      WRITE(NFIL,FMT='(3A10)')'IKPT','ISPIN','NB'
-      DO IKPT=1,THIS%NKPT
-        DO ISPIN=1,THIS%NSPIN
-          WRITE(NFIL,FMT='(3I10)')IKPT,ISPIN,THIS%STATEARR(IKPT,ISPIN)%NB
+      IF(SELECTED) THEN
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A14,A14)')'SIMULATION',THIS%ID
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A10,A)')'FILE:',TRIM(THIS%FILE)
+        WRITE(NFIL,FMT='(A10,I10)')'NAT:',THIS%NAT
+        WRITE(NFIL,FMT='(A10,I10)')'NSP:',THIS%NSP
+        WRITE(NFIL,FMT='(A10,I10)')'NKPT:',THIS%NKPT
+        WRITE(NFIL,FMT='(A10,I10)')'NSPIN:',THIS%NSPIN
+        WRITE(NFIL,FMT='(A10,I10)')'NDIM:',THIS%NDIM
+        WRITE(NFIL,FMT='(A10,I10)')'NPRO:',THIS%NPRO
+        WRITE(NFIL,FMT='(A10,I10)')'LNXX:',THIS%LNXX
+        WRITE(NFIL,FMT='(A10,L10)')'TINV:',THIS%TINV
+        WRITE(NFIL,FMT='(A10,3I10)')'NKDIV:',THIS%NKDIV(:)
+        WRITE(NFIL,FMT='(A10,3I10)')'ISHIFT:',THIS%ISHIFT(:)
+        WRITE(NFIL,FMT='(A10,F10.4)')'RNTOT:',THIS%RNTOT
+        WRITE(NFIL,FMT='(A10,F10.4)')'NEL:',THIS%NEL
+        WRITE(NFIL,FMT='(A10,I10)')'SPACEGR.:',THIS%SPACEGROUP
+        WRITE(NFIL,FMT='(A10,L10)')'TSHIFT:',THIS%TSHIFT
+        WRITE(NFIL,FMT='(A10,3F10.4)')'RBAS:',THIS%RBAS(:,1)
+        DO IAT=2,3
+          WRITE(NFIL,FMT='(A10,3F10.4)')' ',THIS%RBAS(:,IAT)
         ENDDO
-      ENDDO
+        WRITE(NFIL,FMT='(5A10)')'ATOM','X','Y','Z','SPECIES'
+        DO IAT=1,THIS%NAT
+          WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
+        ENDDO
+        WRITE(NFIL,FMT='(4A10)')'SETUP','GID','LNX','LOX'
+        DO ISP=1,THIS%NSP
+          IF(THIS%LNXX.GT.9) THEN
+            WRITE(FORMAT,'("(3I10,",I2,"I10)")')THIS%LNXX
+          ELSE
+            WRITE(FORMAT,'("(3I10,",I1,"I10)")')THIS%LNXX
+          END IF
+          WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%LNX(ISP),THIS%LOX(:,ISP)
+        ENDDO
+        CALL RADIAL$REPORT(NFIL)
+        WRITE(NFIL,FMT='(3A10)')'IKPT','ISPIN','NB'
+        DO IKPT=1,THIS%NKPT
+          DO ISPIN=1,THIS%NSPIN
+            WRITE(NFIL,FMT='(3I10)')IKPT,ISPIN,THIS%STATEARR(IKPT,ISPIN)%NB
+          ENDDO
+        ENDDO
+      ELSE
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A19)')'GENERAL INFORMATION'
+        WRITE(NFIL,'(80("#"))')
+        CALL XAS$SELECT('EXCITESTATE')
+        IF(THIS%LNXX.GT.9) THEN
+          WRITE(FORMAT,'("(",I2,"F10.4)")')THIS%LNXX
+        ELSE
+          WRITE(FORMAT,'("(",I1,"F10.4)")')THIS%LNXX
+        END IF
+        CALL XAS$UNSELECT
+        CALL XAS$SELECT('GROUNDSTATE')  
+        WRITE(NFIL,FMT='(A)')'ATOMIC OVERLAP MATRIX S'
+        DO IAT=1,THIS%NAT
+          WRITE(NFIL,FMT='(A10,I10)')'ATOM',IAT
+          DO IPRO=1,THIS%LNXX
+            WRITE(NFIL,FMT=FORMAT)S(IAT,IPRO,:)
+          ENDDO
+        ENDDO
+        CALL XAS$UNSELECT
+      ENDIF
                           CALL TRACE$POP
       END SUBROUTINE XAS$REPORT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$ATOMOVERLAP  ! MARK: XAS$ATOMOVERLAP
+!     **************************************************************************
+!     ** CALCULATE ATOMIC OVERLAP MATRIX                                      **
+!     ** REAL SPHERICAL HARMONICS GIVE L1=L2 AND M1=M2                        **
+!     ** ONLY CALCULATE FOR ONE ARBITRARY M1=M2 AS RESULT IS THE SAME WITHIN  **
+!     ** THE SAME L-SHELL; M1=M2 MUST BE ENSURED ELSEWHERE                    **
+!     **************************************************************************
+! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
+      USE XAS_MODULE, ONLY: SIM,S
+      IMPLICIT NONE
+      INTEGER(4) :: IAT1,IAT2
+      INTEGER(4) :: ISP1,ISP2
+      INTEGER(4) :: LN1,LN2
+      INTEGER(4) :: L1,L2
+      REAL(8) :: SVAL
+      INTEGER(4),ALLOCATABLE :: IATMAP1(:),IATMAP2(:)
+      REAL(8), ALLOCATABLE :: PSPHI1(:),PSPHI2(:)
+      REAL(8), ALLOCATABLE :: AEPHI1(:),AEPHI2(:)
+      REAL(8), ALLOCATABLE :: AUX(:)
+      REAL(8), ALLOCATABLE :: R(:)
+      INTEGER(4) :: NR1,NR2
+      INTEGER(4) :: GID1,GID2
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$ATOMOVERLAP')
+      ALLOCATE(S(SIM(1)%NAT,SIM(1)%LNXX,SIM(2)%LNXX))
+      S=0.D0
+      DO IAT1=1,SIM(1)%NAT
+        ISP1=SIM(1)%ISPECIES(IAT1)
+        GID1=SIM(1)%SETUP(ISP1)%GID
+        CALL RADIAL$GETI4(GID1,'NR',NR1)
+        ALLOCATE(PSPHI1(NR1))
+        ALLOCATE(AEPHI1(NR1))
+        ALLOCATE(PSPHI2(NR1))
+        ALLOCATE(AEPHI2(NR1))
+        ALLOCATE(AUX(NR1))
+        ALLOCATE(R(NR1))
+        CALL RADIAL$R(GID1,NR1,R)
+
+        DO LN1=1,SIM(1)%LNX(ISP1)
+          L1=SIM(1)%LOX(LN1,ISP1)
+          IAT2=IAT1
+          ISP2=SIM(2)%ISPECIES(IAT2)
+          GID2=SIM(2)%SETUP(ISP2)%GID
+          CALL RADIAL$GETI4(GID2,'NR',NR2)
+
+          DO LN2=1,SIM(2)%LNX(ISP2)
+            L2=SIM(2)%LOX(LN2,ISP2)
+            IF(L1.NE.L2) CYCLE
+!           GET RADIAL FUNCTIONS
+            PSPHI1=SIM(1)%SETUP(ISP1)%PSPHI(:,LN1)
+            AEPHI1=SIM(1)%SETUP(ISP1)%AEPHI(:,LN1)  
+!           IF GRIDS ARE DIFFERENT, MAP ONTO FIRST GRID   
+            IF(GID1.NE.GID2) THEN
+              CALL RADIAL$CHANGEGRID(GID2,NR2,SIM(2)%SETUP(ISP2)%PSPHI(:,LN2), &
+     &                               GID1,NR1,PSPHI2)
+              CALL RADIAL$CHANGEGRID(GID2,NR2,SIM(2)%SETUP(ISP2)%AEPHI(:,LN2), &
+     &                               GID1,NR1,AEPHI2)
+            ELSE
+              PSPHI2=SIM(2)%SETUP(ISP2)%PSPHI(:,LN2)
+              AEPHI2=SIM(2)%SETUP(ISP2)%AEPHI(:,LN2)
+            END IF
+            AUX=R*R*PSPHI1*PSPHI2
+            CALL RADIAL$INTEGRAL(GID1,NR1,AUX,SVAL)
+            S(IAT1,LN1,LN2)=SVAL
+            AUX=R*R*AEPHI1*AEPHI2
+            CALL RADIAL$INTEGRAL(GID1,NR1,AUX,SVAL)
+            S(IAT1,LN1,LN2)=S(IAT1,LN1,LN2)+SVAL
+          ENDDO
+        ENDDO
+        DEALLOCATE(PSPHI1)
+        DEALLOCATE(AEPHI1)
+        DEALLOCATE(PSPHI2)
+        DEALLOCATE(AEPHI2)
+        DEALLOCATE(AUX)
+        DEALLOCATE(R)
+      ENDDO
+      ! IPRO=0
+      ! WRITE(*,FMT='(6A10)')'IAT','ISP','LN','L','M','IPRO'
+      ! DO IAT1=1,SIM(1)%NAT
+      !   ISP1=SIM(1)%ISPECIES(IAT1)
+      !   DO LN1=1,SIM(1)%LNX(ISP1)
+      !     L1=SIM(1)%LOX(LN1,ISP1)
+      !     DO M1=1,2*L1+1
+      !       IPRO=IPRO+1
+      !       WRITE(*,FMT='(6I10)')IAT1,ISP1,LN1,L1,M1,IPRO
+      !     ENDDO
+      !   ENDDO
+      ! ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$ATOMOVERLAP
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$GETCH(ID,VAL)  ! MARK: XAS$GETCH
