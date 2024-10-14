@@ -14,7 +14,9 @@
       END TYPE STATE_TYPE
 
       TYPE OVERLAP_TYPE
-        COMPLEX(8), POINTER :: PW(:,:) ! (NB1,NB2) PLANE WAVE OVERLAP
+        COMPLEX(8), ALLOCATABLE :: PW(:,:) ! (NB2,NB1) PLANE WAVE OVERLAP
+        COMPLEX(8), ALLOCATABLE :: AUG(:,:) ! (NB2,NB1) AUGMENTATION OVERLAP
+        COMPLEX(8), ALLOCATABLE :: OV(:,:) ! (NB2,NB1) OVERLAP
       END TYPE OVERLAP_TYPE
 
 !     GENERAL SETTINGS OF A SIMULATION 
@@ -31,6 +33,7 @@
         CHARACTER(6) :: FLAG
         INTEGER(4), ALLOCATABLE :: LNX(:) ! (NSP)
         INTEGER(4), ALLOCATABLE :: LOX(:,:) ! (LNXX,NSP)
+        INTEGER(4), ALLOCATABLE :: MAP(:,:) ! (NAT,LNXX) INDEX-1 OF ATOM AND LN
         LOGICAL(4) :: TINV ! INVERSION SYMMETRY
         INTEGER(4) :: NKDIV(3) ! K-POINT DIVISIONS
         INTEGER(4) :: ISHIFT(3) ! K-POINT SHIFTS
@@ -123,7 +126,7 @@
 
       CALL DATACONSISTENCY
 
-      CALL XAS$ATOMOVERLAP
+      CALL XAS$OVERLAP
 
       CALL XAS$REPORT
 
@@ -664,8 +667,14 @@
       REAL(8) :: DEX_
       REAL(8) :: R1
       REAL(8) :: R1_
+      REAL(8) :: V
       INTEGER(4) :: LNX
       INTEGER(4) :: IB
+      INTEGER(4) :: IAT
+      INTEGER(4) :: LN
+      INTEGER(4) :: L
+      INTEGER(4) :: M
+      INTEGER(4) :: IPRO
       INTEGER(4) :: IB1,IB2
       INTEGER(4) :: IKPT
       INTEGER(4) :: IG
@@ -727,6 +736,9 @@
         ALLOCATE(THIS%ISPECIES(THIS%NAT))
 !       RBAS(3,3),R(3,NAT),ATOMID(NAT),ISPECIES(NAT)
         READ(NFIL(IS))THIS%RBAS,THIS%R,THIS%ATOMID,THIS%ISPECIES
+        V=THIS%RBAS(1,1)*(THIS%RBAS(2,2)*THIS%RBAS(3,3)-THIS%RBAS(2,3)*THIS%RBAS(3,2)) &
+     &  +THIS%RBAS(2,1)*(THIS%RBAS(3,2)*THIS%RBAS(1,3)-THIS%RBAS(3,3)*THIS%RBAS(1,2)) &
+     &  +THIS%RBAS(3,1)*(THIS%RBAS(1,2)*THIS%RBAS(2,3)-THIS%RBAS(1,3)*THIS%RBAS(2,2)) 
 !       ==========================================================================
 !       == ELEMENT SPECIFIC QUANTITIES                                          ==
 !       ==========================================================================
@@ -787,6 +799,22 @@
           ENDDO
         ENDDO
         DEALLOCATE(OCC)
+!       ==================================================================
+!       == MAPPING OF PROJECTION INDICES                                ==
+!       ==================================================================
+        ALLOCATE(THIS%MAP(THIS%NAT,THIS%LNXX))
+        THIS%MAP(:,:)=0
+        IPRO=0
+        DO IAT=1,THIS%NAT
+          ISP=THIS%ISPECIES(IAT)
+          DO LN=1,THIS%LNX(ISP)
+            THIS%MAP(IAT,LN)=IPRO
+            L=THIS%LOX(LN,ISP)
+            DO M=1,2*L+1
+              IPRO=IPRO+1
+            ENDDO
+          ENDDO
+        ENDDO
         CALL XAS$UNSELECT
       ENDDO
 
@@ -810,6 +838,13 @@
           READ(NFIL(IS))KEY(IS),NGG(IS),NDIM(IS),NB(IS),ILOGICAL
           TSUPER(IS)=.FALSE.
           IF(ILOGICAL.EQ.1) TSUPER(IS)=.TRUE.
+          IF(KEY(IS).NE.'PSI') THEN
+            CALL ERROR$MSG('KEY NOT "PSI"')
+            CALL ERROR$MSG('FILE IS CORRUPTED')
+            CALL ERROR$CHVAL('KEY',KEY(IS))
+            CALL ERROR$I4VAL('IKPT',IKPT)
+            CALL ERROR$STOP('XAS$READ')
+          END IF
         ENDDO
 !       READ K POINT AND G VECTORS (PREVIOUSLY CHECKED IF #(NGG1,NGG2) SAME)
         ALLOCATE(IGVEC(NSIM,3,NGG(1)))
@@ -826,7 +861,6 @@
         DEALLOCATE(IGVEC)
 
 ! WARNING: REQUIRES SUPER WAVE FUNCTIONS TO BE UNRAVELED
-! TODO: STORAGE SOLUTION
         ALLOCATE(PSIK1(NGG(1),NDIM(1),NB(1)))
         ALLOCATE(PSIK2(NGG(2),NDIM(2),NB(2)))
         ALLOCATE(EIG1(NB(1)))
@@ -854,7 +888,7 @@
           OVERLAP=>OVERLAPARR(IKPT,ISPIN)
 ! WARNING: FIND OUT REQUIRED ORDER OF OVERLAP
 !         ALLOCATE STORAGE FOR OVERLAP
-          ALLOCATE(OVERLAP%PW(NB(1),NB(2)))
+          ALLOCATE(OVERLAP%PW(NB(2),NB(1)))
 
 !         READ PLANE WAVE BASIS
           READ(NFIL(1))PSIK1
@@ -866,13 +900,24 @@
           READ(NFIL(1))SIM(1)%STATE%EIG
           READ(NFIL(2))SIM(2)%STATE%EIG
 
-          DO IB1=1,NB(1) ! LOOP OVER BANDS
-            DO IB2=1,NB(2) ! LOOP OVER BANDS
+          DO IB2=1,NB(2) ! LOOP OVER BANDS
+            DO IB1=1,NB(1) ! LOOP OVER BANDS
 !             NO NDIM LOOP AS NDIM=1
-!             SUM OVER G VECTORS
-              OVERLAP%PW(IB1,IB2)=SUM(CONJG(PSIK1(:,1,IB1))*PSIK2(:,1,IB2))
+!             SCALARPRODUCT (SUM OVER G VECTORS)
+!             PW(I,J)=<PSI1(J)|PSI2(I)>
+              CALL LIB$SCALARPRODUCTC8(.FALSE.,NGG(1),1,PSIK1(:,1,IB1),1,PSIK2(:,1,IB2),OVERLAP%PW(IB2,IB1))
             ENDDO ! END LOOP OVER BANDS
           ENDDO ! END LOOP OVER BANDS
+          OVERLAP%PW=OVERLAP%PW*V
+!           DO IB1=1,NB(1) ! LOOP OVER BANDS
+!             DO IB2=1,NB(2) ! LOOP OVER BANDS
+! !             NO NDIM LOOP AS NDIM=1
+! !             SUM OVER G VECTORS
+! !             PW(I,J)=<PSI1(I)|PSI2(J)>
+!               OVERLAP%PW(IB1,IB2)=V*SUM(CONJG(PSIK1(:,1,IB1))*PSIK2(:,1,IB2))
+!             ENDDO ! END LOOP OVER BANDS
+!           ENDDO ! END LOOP OVER BANDS
+
         ENDDO ! END LOOP OVER SPIN
         DEALLOCATE(EIG2)
         DEALLOCATE(EIG1)
@@ -941,10 +986,14 @@
 !     **************************************************************************
 !     ** REPORT DATA FOR A SELECTED SIMULATION                                **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS, SELECTED, S
+      USE XAS_MODULE, ONLY: THIS,SELECTED,S,OVERLAP,OVERLAPARR
       IMPLICIT NONE
       INTEGER(4) :: NFIL
-      INTEGER(4) :: IAT,ISP,ISPIN,IKPT,IPRO
+! TODO: REMOVE HARDCODED OUTPUT
+      integer(4) :: nfilo=11
+      integer(4) :: nfilc=12
+      INTEGER(4) :: NB1,NB2
+      INTEGER(4) :: IAT,ISP,ISPIN,IKPT,IPRO,IB
       CHARACTER(256) :: FORMAT
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$REPORT')
@@ -977,13 +1026,23 @@
           WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
         ENDDO
         WRITE(NFIL,FMT='(4A10)')'SETUP','GID','LNX','LOX'
+        IF(THIS%LNXX.GT.9) THEN
+          WRITE(FORMAT,'("(3I10,",I2,"I10)")')THIS%LNXX
+        ELSE
+          WRITE(FORMAT,'("(3I10,",I1,"I10)")')THIS%LNXX
+        END IF
         DO ISP=1,THIS%NSP
-          IF(THIS%LNXX.GT.9) THEN
-            WRITE(FORMAT,'("(3I10,",I2,"I10)")')THIS%LNXX
-          ELSE
-            WRITE(FORMAT,'("(3I10,",I1,"I10)")')THIS%LNXX
-          END IF
           WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%LNX(ISP),THIS%LOX(:,ISP)
+        ENDDO
+        WRITE(NFIL,FMT='(A)')'MAPPING OF PROJECTIONS (INDEX-1)'
+        WRITE(NFIL,FMT='(A10,A10)')'ATOM','MAP'
+        IF(THIS%LNXX.GT.9) THEN
+          WRITE(FORMAT,'("(I10,",I2,"I10)")')THIS%LNXX
+        ELSE
+          WRITE(FORMAT,'("(I10,",I1,"I10)")')THIS%LNXX
+        END IF
+        DO IAT=1,THIS%NAT
+          WRITE(NFIL,FMT=FORMAT)IAT,THIS%MAP(IAT,:)
         ENDDO
         CALL RADIAL$REPORT(NFIL)
         WRITE(NFIL,FMT='(3A10)')'IKPT','ISPIN','NB'
@@ -997,13 +1056,15 @@
         WRITE(NFIL,FMT='(A19)')'GENERAL INFORMATION'
         WRITE(NFIL,'(80("#"))')
         CALL XAS$SELECT('EXCITESTATE')
+        NB2=THIS%STATE%NB
         IF(THIS%LNXX.GT.9) THEN
           WRITE(FORMAT,'("(",I2,"F10.4)")')THIS%LNXX
         ELSE
           WRITE(FORMAT,'("(",I1,"F10.4)")')THIS%LNXX
         END IF
         CALL XAS$UNSELECT
-        CALL XAS$SELECT('GROUNDSTATE')  
+        CALL XAS$SELECT('GROUNDSTATE')
+        NB1=THIS%STATE%NB
         WRITE(NFIL,FMT='(A)')'ATOMIC OVERLAP MATRIX S'
         DO IAT=1,THIS%NAT
           WRITE(NFIL,FMT='(A10,I10)')'ATOM',IAT
@@ -1011,13 +1072,178 @@
             WRITE(NFIL,FMT=FORMAT)S(IAT,IPRO,:)
           ENDDO
         ENDDO
+! TODO: PROPER OUTPUT FOR OVERLAP MATRIX
+        WRITE(NFIL,FMT='(A)')'OVERLAP MATRIX OF FIRST K POINT/SPIN'
+        OVERLAP=>OVERLAPARR(1,1)
+        IF(NB1.GT.99) THEN
+          WRITE(FORMAT,'("(",I3,"F10.6)")')NB1
+        ELSE IF(NB1.GT.9.AND.NB1.LT.100) THEN
+          WRITE(FORMAT,'("(",I2,"F10.6)")')NB1
+        ELSE
+          WRITE(FORMAT,'("(",I1,"F10.6)")')NB1
+        END IF
+        open(nfilo,file='ov.dat')
+        open(nfilc,file='ov_c.dat')
+        DO IB=1,NB2
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
+          WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
+          write(nfilc,*)OVERLAP%OV(IB,:)
+        ENDDO
+        close(nfilo)
+        close(nfilc)
+        open(nfilo,file='pw.dat')
+        open(nfilc,file='pw_c.dat')
+        WRITE(NFIL,FMT='(A)')'PLANE WAVE OVERLAP MATRIX OF FIRST K POINT/SPIN'
+        DO IB=1,NB2
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%PW(IB,:))
+          WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%PW(IB,:))
+          write(nfilc,*)OVERLAP%PW(IB,:)
+        ENDDO
+        close(nfilo)
+        close(nfilc)
+        open(nfilo,file='aug.dat')
+        open(nfilc,file='aug_c.dat')
+        WRITE(NFIL,FMT='(A)')'AUGMENTATION OVERLAP MATRIX OF FIRST K POINT/SPIN'
+        DO IB=1,NB2
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%AUG(IB,:))
+          WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%AUG(IB,:))
+          write(nfilc,*)OVERLAP%AUG(IB,:)
+        ENDDO
+        close(nfilo)
+        close(nfilc)
         CALL XAS$UNSELECT
       ENDIF
                           CALL TRACE$POP
       END SUBROUTINE XAS$REPORT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XAS$ATOMOVERLAP  ! MARK: XAS$ATOMOVERLAP
+      SUBROUTINE XAS$OVERLAP  ! MARK: XAS$OVERLAP
+!     **************************************************************************
+!     ** CALCULATE OVERLAP MATRIX                                             **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE
+      IMPLICIT NONE
+      LOGICAL(4), PARAMETER :: TTEST=.TRUE. ! TEST EIGENVALUES OF OVERLAP
+      TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
+      INTEGER(4) :: NKPT,NSPIN
+      INTEGER(4) :: IKPT,ISPIN
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$OVERLAP')
+      IF(ALLOCATED(S)) THEN
+        CALL ERROR$MSG('ATOMIC OVERLAP MATRIX ALREADY CALCULATED')
+        CALL ERROR$STOP('XAS$OVERLAP')
+      END IF
+      IF(.NOT.ALLOCATED(OVERLAPARR)) THEN
+        CALL ERROR$MSG('PLANE WAVE OVERLAP MATRIX NOT AVAILABLE')
+        CALL ERROR$MSG('SHOULD BE CALCULATED ON READ')
+        CALL ERROR$MSG('USE XAS$READ TO READ DATA')
+        CALL ERROR$STOP('XAS$OVERLAP')
+      END IF
+      CALL XAS$OVERLAPATOMMATRIX
+
+      CALL XAS$OVERLAPAUGMENTATION
+
+      NKPT=SIM(1)%NKPT
+      NSPIN=SIM(1)%NSPIN
+      DO IKPT=1,NKPT
+        DO ISPIN=1,NSPIN
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          ALLOCATE(OVERLAP%OV(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+          OVERLAP%OV(:,:)=OVERLAP%PW(:,:)+OVERLAP%AUG(:,:)
+        ENDDO
+      ENDDO      
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$OVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$OVERLAPAUGMENTATION  ! MARK: XAS$OVERLAPAUGMENTATION
+!     **************************************************************************
+!     ** OVERLAP CONTRIBUTION FROM PAW AUGMENTATION                           **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE
+      IMPLICIT NONE
+      TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
+      INTEGER(4) :: NKPT,NSPIN
+      INTEGER(4) :: IKPT,ISPIN
+      INTEGER(4) :: IB1,IB2
+      INTEGER(4) :: IPRO1,IPRO2
+      COMPLEX(8) :: CVAR
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$OVERLAPAUGMENTATION')
+      NKPT=SIM(1)%NKPT
+      NSPIN=SIM(1)%NSPIN
+  !   LOOP OVER K POINTS
+      DO IKPT=1,NKPT
+  !     LOOP OVER SPIN
+        DO ISPIN=1,NSPIN
+          STATE1=>SIM(1)%STATEARR(IKPT,ISPIN)
+          STATE2=>SIM(2)%STATEARR(IKPT,ISPIN)
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          ALLOCATE(OVERLAP%AUG(STATE2%NB,STATE1%NB))
+          OVERLAP%AUG(:,:)=(0.D0,0.D0)
+  !       LOOP OVER BANDS OF FIRST SIMULATION
+          DO IB2=1,STATE2%NB
+  !         LOOP OVER BANDS OF SECOND SIMULATION
+            DO IB1=1,STATE1%NB
+              CALL XAS$OVERLAPSTATE(STATE1,IB1,STATE2,IB2,CVAR)
+!             AUG(I,J)=<PSI1(J)|PSI2(I)>
+              OVERLAP%AUG(IB2,IB1)=CVAR
+            ENDDO ! END LOOP OVER BANDS OF SECOND SIMULATION
+          ENDDO ! END LOOP OVER BANDS OF FIRST SIMULATION
+        ENDDO ! END LOOP OVER SPIN
+      ENDDO ! END LOOP OVER K POINTS
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$OVERLAPAUGMENTATION
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$OVERLAPSTATE(STATE1,NB1,STATE2,NB2,OVLAP)  ! MARK: XAS$OVERLAPSTATE
+!     **************************************************************************
+!     ** CALCULATE ATOMIC OVERLAP BETWEEN TWO STATES                          **
+!     ** <STATE1|STATE2>                                                      **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: STATE_TYPE,S,SIM
+      IMPLICIT NONE
+      TYPE(STATE_TYPE), INTENT(IN) :: STATE1
+      INTEGER(4), INTENT(IN) :: NB1
+      TYPE(STATE_TYPE), INTENT(IN) :: STATE2
+      INTEGER(4), INTENT(IN) :: NB2
+      COMPLEX(8), INTENT(OUT) :: OVLAP
+      INTEGER(4) :: IAT
+      INTEGER(4) :: ISP1,ISP2
+      INTEGER(4) :: LN1,LN2
+      INTEGER(4) :: IPRO1,IPRO2
+      INTEGER(4) :: L1,L2
+      INTEGER(4) :: M1,M2
+      COMPLEX(8) :: CVAR
+!     **************************************************************************
+      OVLAP=(0.D0,0.D0)
+      DO IAT=1,SIM(1)%NAT
+        ISP1=SIM(1)%ISPECIES(IAT)
+! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
+        ISP2=SIM(2)%ISPECIES(IAT)
+        DO LN1=1,SIM(1)%LNX(ISP1)
+          DO LN2=1,SIM(2)%LNX(ISP2)
+            L1=SIM(1)%LOX(LN1,ISP1)
+            L2=SIM(2)%LOX(LN2,ISP2)
+            IF(L1.NE.L2) CYCLE
+            IPRO1=SIM(1)%MAP(IAT,LN1)
+            DO M1=1,2*L1+1
+              IPRO1=IPRO1+1
+              IPRO2=SIM(2)%MAP(IAT,LN2)
+              DO M2=1,2*L2+1
+                IPRO2=IPRO2+1
+                IF(M1.NE.M2) CYCLE
+                CVAR=CONJG(STATE1%PROJ(1,NB1,IPRO1))*STATE2%PROJ(1,NB2,IPRO2)
+                OVLAP=OVLAP+CVAR*S(IAT,LN1,LN2)
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO
+      END DO
+      END SUBROUTINE XAS$OVERLAPSTATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$OVERLAPATOMMATRIX  ! MARK: XAS$OVERLAPATOMMATRIX
 !     **************************************************************************
 !     ** CALCULATE ATOMIC OVERLAP MATRIX                                      **
 !     ** REAL SPHERICAL HARMONICS GIVE L1=L2 AND M1=M2                        **
@@ -1040,7 +1266,7 @@
       INTEGER(4) :: NR1,NR2
       INTEGER(4) :: GID1,GID2
 !     **************************************************************************
-                          CALL TRACE$PUSH('XAS$ATOMOVERLAP')
+                          CALL TRACE$PUSH('XAS$OVERLAPATOMMATRIX')
       ALLOCATE(S(SIM(1)%NAT,SIM(1)%LNXX,SIM(2)%LNXX))
       S=0.D0
       DO IAT1=1,SIM(1)%NAT
@@ -1078,12 +1304,12 @@
               PSPHI2=SIM(2)%SETUP(ISP2)%PSPHI(:,LN2)
               AEPHI2=SIM(2)%SETUP(ISP2)%AEPHI(:,LN2)
             END IF
-            AUX=R*R*PSPHI1*PSPHI2
+! TODO: CHECK IF ORDER IS CORRECT
+            AUX=AEPHI1*AEPHI2-PSPHI1*PSPHI2
+            AUX=AUX*R**2
+! TODO: CHECK IF AUX IS ZERO OUTSIDE OF R_AUG
             CALL RADIAL$INTEGRAL(GID1,NR1,AUX,SVAL)
             S(IAT1,LN1,LN2)=SVAL
-            AUX=R*R*AEPHI1*AEPHI2
-            CALL RADIAL$INTEGRAL(GID1,NR1,AUX,SVAL)
-            S(IAT1,LN1,LN2)=S(IAT1,LN1,LN2)+SVAL
           ENDDO
         ENDDO
         DEALLOCATE(PSPHI1)
@@ -1106,7 +1332,7 @@
       !   ENDDO
       ! ENDDO
                           CALL TRACE$POP
-      END SUBROUTINE XAS$ATOMOVERLAP
+      END SUBROUTINE XAS$OVERLAPATOMMATRIX
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$GETCH(ID,VAL)  ! MARK: XAS$GETCH
