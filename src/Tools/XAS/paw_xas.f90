@@ -21,6 +21,21 @@
         COMPLEX(8), ALLOCATABLE :: OV(:,:) ! (NB2,NB1) OVERLAP
       END TYPE OVERLAP_TYPE
 
+      TYPE SETTINGS_TYPE
+        INTEGER(4) :: NSPEC ! #(SPECTRA)
+        CHARACTER(256) :: ATOM ! ATOM ID WITH CORE HOLE
+        INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE
+        INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
+        INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
+      END TYPE SETTINGS_TYPE
+
+      TYPE SPECTRUM_TYPE
+        REAL(8) :: NORMAL(3) ! NORMAL VECTOR OF COORDINATES
+        REAL(8) :: KDIR(3) ! DIRECTION OF K-VECTOR
+        COMPLEX(8) :: POL(2) ! POLARIZATION VECTOR
+        COMPLEX(8) :: POLXYZ(3) ! POLARIZATION VECTOR IN CARTESIAN COORDINATES
+      END TYPE SPECTRUM_TYPE
+
 !     GENERAL SETTINGS OF A SIMULATION 
       TYPE SIMULATION_TYPE
         CHARACTER(11) :: ID ! SIMULATION IDENTIFIER (GROUNDSTATE,EXCITESTATE)
@@ -64,7 +79,17 @@
       TYPE(OVERLAP_TYPE), ALLOCATABLE, TARGET :: OVERLAPARR(:,:) ! (NKPT,NSPIN)
       TYPE(OVERLAP_TYPE), POINTER :: OVERLAP ! CURRENT OVERLAP
 
+      TYPE(SETTINGS_TYPE) :: SETTINGS
+
+      TYPE(SPECTRUM_TYPE), ALLOCATABLE, TARGET :: SPECTRUMARR(:) ! (NSPEC)
+      TYPE(SPECTRUM_TYPE), POINTER :: SPECTRUM ! CURRENT SPECTRUM
+
       REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
+
+      LOGICAL(4) :: TSIM=.FALSE.
+      LOGICAL(4) :: TOVERLAP=.FALSE.
+      LOGICAL(4) :: TSPECTRUM=.FALSE.
+      LOGICAL(4) :: TSETTINGS=.FALSE.
       END MODULE XAS_MODULE
 
       MODULE XASCNTL_MODULE  ! MARK: XASCNTL_MODULE
@@ -105,33 +130,42 @@
 
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       CALL CPPAW_WRITEVERSION(NFIL)
-!     READ XCNTL FILE
+!     ==========================================================================
+!     == READ XCNTL FILE                                                      ==
+!     ==========================================================================
       CALL FILEHANDLER$UNIT('XCNTL',NFIL)
       CALL XASCNTL$READ(NFIL)
-
+!     READ FILES FOR DFT CALCULATION DATA
       CALL XAS$SELECT('GROUNDSTATE')
       CALL XASCNTL$FILES('GROUNDSTATE')
       CALL XAS$UNSELECT
-
       CALL XAS$SELECT('EXCITESTATE')
       CALL XASCNTL$FILES('EXCITESTATE')
       CALL XAS$UNSELECT
-
+!     READ SETTINGS FOR SPECTRA
+      CALL XASCNTL$SPECTRUM
+!     CALCULATE POLARISATION IN CARTESIAN COORDINATES FROM NORMAL, K, AND POL
+      CALL XAS$POLARISATION
+!     READ DFT CALCULATION DATA
       CALL XAS$READ
-
+!     REPORT DFT CALCULATION DATA
       CALL XAS$SELECT('GROUNDSTATE')
-      CALL XAS$REPORT
+      CALL XAS$REPORTSIMULATION
       CALL XAS$UNSELECT
       CALL XAS$SELECT('EXCITESTATE')
-      CALL XAS$REPORT
+      CALL XAS$REPORTSIMULATION
       CALL XAS$UNSELECT
 
       CALL DATACONSISTENCY
 
+!     READ SETTINGS FOR CORE HOLE
+      CALL XASCNTL$COREHOLE
+
       CALL XAS$OVERLAP
 
-      CALL XAS$REPORT
+      CALL XAS$REPORTSIMULATION
 
+      CALL XAS$REPORTSETTINGS
 
 !     REPORT UNUSED LINKEDLISTS
       CALL FILEHANDLER$UNIT('PROT',NFIL)
@@ -563,6 +597,143 @@
       CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(FILENAME))
                           CALL TRACE$POP
       END SUBROUTINE XASCNTL$FILES
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASCNTL$SPECTRUM  ! MARK: XASCNTL$SPECTRUM
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE XASCNTL_MODULE, ONLY: LL_CNTL
+      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,TSPECTRUM,SETTINGS
+      USE LINKEDLIST_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      INTEGER(4) :: NSPEC
+      INTEGER(4) :: ISPEC
+      REAL(8) :: REALPOL(2)
+!     *************************************************************************
+! WARNING: READING OF COMPLEX POLARIZATION IS NOT IMPLEMENTED
+! TODO: IMPLEMENT READING OF COMPLEX POLARIZATION
+                          CALL TRACE$PUSH('XASCNTL$SPECTRUM')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+!     CHECK IF AT LEAST ONE SPECTRUM IS DEFINED
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'SPECTRUM',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('SPECTRUM NOT FOUND IN XCNTL')
+        CALL ERROR$STOP('XASCNTL$SPECTRUM')
+      END IF
+!     ALLOCATE CORRECT NUMBER OF SPECTRA
+      CALL LINKEDLIST$NLISTS(LL_CNTL,'SPECTRUM',NSPEC)
+      ALLOCATE(SPECTRUMARR(NSPEC))
+      SETTINGS%NSPEC=NSPEC
+!     LOOP OVER SPECTRA AND READ DATA
+      DO ISPEC=1,NSPEC
+        SPECTRUM=>SPECTRUMARR(ISPEC)
+        CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+        CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+        CALL LINKEDLIST$SELECT(LL_CNTL,'SPECTRUM',ISPEC)
+!       NORMAL OF THE SYSTEM
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'NORMAL',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('NORMAL NOT FOUND IN !SPECTRUM')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XASCNTL$SPECTRUM')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'NORMAL',1,SPECTRUM%NORMAL)
+!       DIRECTION OF THE K-VECTOR
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'KDIR',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('KDIR NOT FOUND IN !SPECTRUM')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XASCNTL$SPECTRUM')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'KDIR',1,SPECTRUM%KDIR)
+!       POLARIZATION OF THE LIGHT
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'POL',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('POL NOT FOUND IN !SPECTRUM')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XASCNTL$SPECTRUM')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'POL',1,REALPOL)
+        SPECTRUM%POL=CMPLX(REALPOL,KIND=8)
+      ENDDO
+      TSPECTRUM=.TRUE.
+                          CALL TRACE$POP
+      END SUBROUTINE XASCNTL$SPECTRUM
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASCNTL$COREHOLE  ! MARK: XASCNTL$COREHOLE
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE XASCNTL_MODULE, ONLY: LL_CNTL
+      USE XAS_MODULE, ONLY: SETTINGS,SIM,TSIM,TSETTINGS
+      USE LINKEDLIST_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      INTEGER(4) :: NCORE
+      INTEGER(4) :: LCORE
+      CHARACTER(256) :: ATOM
+      INTEGER(4) :: IAT
+                          CALL TRACE$PUSH('XASCNTL$COREHOLE')
+      IF(.NOT.TSIM) THEN
+        CALL ERROR$MSG('SIMULATION DATA NOT ALLOCATED')
+        CALL ERROR$MSG('MUST BE CALLED AFTER XAS$READ TO ACCESS ATOM NAMES')
+        CALL ERROR$STOP('XASCNTL$COREHOLE')
+      END IF
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'COREHOLE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!COREHOLE NOT FOUND IN !XCNTL')
+        CALL ERROR$STOP('XASCNTL$COREHOLE')
+      END IF
+      CALL LINKEDLIST$SELECT(LL_CNTL,'COREHOLE')
+
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'ATOM',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('ATOM NOT FOUND IN !COREHOLE')
+        CALL ERROR$STOP('XASCNTL$COREHOLE')
+      END IF
+      CALL LINKEDLIST$GET(LL_CNTL,'ATOM',1,ATOM)
+      SETTINGS%ATOM=TRIM(ATOM)
+      TCHK=.FALSE.
+      DO IAT=1,SIM(2)%NAT
+PRINT*, SIM(2)%ATOMID(IAT)
+        IF(TRIM(ATOM).EQ.TRIM(SIM(2)%ATOMID(IAT))) THEN
+          TCHK=.TRUE.
+          EXIT
+        END IF
+      ENDDO
+      IF(TCHK) THEN
+        SETTINGS%IATOM=IAT
+      ELSE
+        CALL ERROR$MSG('ATOM NOT FOUND IN EXCITESTATE')
+        CALL ERROR$CHVAL('ATOM',ATOM)
+        CALL ERROR$STOP('XASCNTL$COREHOLE')
+      END IF
+
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'NCORE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('NCORE NOT FOUND IN !COREHOLE')
+        CALL ERROR$STOP('XASCNTL$COREHOLE')
+      END IF
+      CALL LINKEDLIST$GET(LL_CNTL,'NCORE',1,NCORE)
+      SETTINGS%NCORE=NCORE
+
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'LCORE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('LCORE NOT FOUND IN !COREHOLE')
+        CALL ERROR$STOP('XASCNTL$COREHOLE')
+      END IF
+      CALL LINKEDLIST$GET(LL_CNTL,'LCORE',1,LCORE)
+      SETTINGS%LCORE=LCORE
+
+      TSETTINGS=.TRUE.
+                          CALL TRACE$POP
+      END SUBROUTINE XASCNTL$COREHOLE
 !      
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE INITIALIZEFILEHANDLER
@@ -649,7 +820,8 @@
 !     **************************************************************************
 !     **  READ FILE PRODUCED BY SIMULATION CODE                               **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS,SELECTED,SIMULATION_TYPE,SIM,OVERLAP,OVERLAPARR
+      USE XAS_MODULE, ONLY: THIS,SELECTED,SIMULATION_TYPE,SIM,TSIM, &
+     &                      OVERLAP,OVERLAPARR
       USE RADIAL_MODULE, ONLY: NGID
       IMPLICIT NONE
       INTEGER(4), PARAMETER :: NSIM=2
@@ -932,8 +1104,10 @@
         DEALLOCATE(PSIK1)
         DEALLOCATE(PSIK2)
       ENDDO ! END LOOP OVER K POINTS
+      TSIM=.TRUE.
                           CALL TRACE$POP
-      
+      RETURN
+
       CONTAINS
         SUBROUTINE TEST!(NSIM,KEY,NGG,NDIM,TSUPER,XK,IGVEC)
         ! INTEGER(4), INTENT(IN) :: NSIM
@@ -990,7 +1164,7 @@
       END SUBROUTINE XAS$READ
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XAS$REPORT  ! MARK: XAS$REPORT
+      SUBROUTINE XAS$REPORTSIMULATION  ! MARK: XAS$REPORTSIMULATION
 !     **************************************************************************
 !     ** REPORT DATA FOR A SELECTED SIMULATION                                **
 !     **************************************************************************
@@ -1004,7 +1178,7 @@
       INTEGER(4) :: IAT,ISP,ISPIN,IKPT,IPRO,IB
       CHARACTER(256) :: FORMAT
 !     **************************************************************************
-                          CALL TRACE$PUSH('XAS$REPORT')
+                          CALL TRACE$PUSH('XAS$REPORTSIMULATION')
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       IF(SELECTED) THEN
         WRITE(NFIL,'(80("#"))')
@@ -1122,14 +1296,45 @@
         CALL XAS$UNSELECT
       ENDIF
                           CALL TRACE$POP
-      END SUBROUTINE XAS$REPORT
+      END SUBROUTINE XAS$REPORTSIMULATION
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$REPORTSETTINGS  ! MARK: XAS$REPORTSETTINGS
+!     **************************************************************************
+!     ** REPORT SETTINGS FOR XAS CALCULATION                                  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SETTINGS,SPECTRUM,SPECTRUMARR
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: ISPEC
+
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A19)')'SETTINGS'
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A10,I10)')'NSPECTRA:',SETTINGS%NSPEC
+      WRITE(NFIL,FMT='(A10,A)')'HOLE ATOM:',TRIM(SETTINGS%ATOM)
+      WRITE(NFIL,FMT='(A10,I10)')'IND ATOM:',SETTINGS%IATOM
+      WRITE(NFIL,FMT='(A10,I10)')'NCORE:',SETTINGS%NCORE
+      WRITE(NFIL,FMT='(A10,I10)')'LCORE:',SETTINGS%LCORE
+      DO ISPEC=1,SETTINGS%NSPEC
+        SPECTRUM=>SPECTRUMARR(ISPEC)
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A10,I10)')'SPECTRUM:',ISPEC
+        WRITE(NFIL,FMT='(A10,3F10.4)')'NORMAL:',SPECTRUM%NORMAL(:)
+        WRITE(NFIL,FMT='(A10,3F10.4)')'KDIR:',SPECTRUM%KDIR(:)
+        WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL:',SPECTRUM%POL(:)
+        WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZ:',SPECTRUM%POLXYZ(:)
+      ENDDO
+      END SUBROUTINE XAS$REPORTSETTINGS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$OVERLAP  ! MARK: XAS$OVERLAP
 !     **************************************************************************
 !     ** CALCULATE OVERLAP MATRIX                                             **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE
+      USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE,TOVERLAP
       IMPLICIT NONE
       LOGICAL(4), PARAMETER :: TTEST=.TRUE. ! TEST EIGENVALUES OF OVERLAP
       TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
@@ -1159,7 +1364,8 @@
           ALLOCATE(OVERLAP%OV(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
           OVERLAP%OV(:,:)=OVERLAP%PW(:,:)+OVERLAP%AUG(:,:)
         ENDDO
-      ENDDO      
+      ENDDO    
+      TOVERLAP=.TRUE.  
                           CALL TRACE$POP
       END SUBROUTINE XAS$OVERLAP
 !
@@ -1343,6 +1549,49 @@
       END SUBROUTINE XAS$OVERLAPATOMMATRIX
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$POLARISATION  ! MARK: XAS$POLARISATION
+!     **************************************************************************
+!     **  CALCULATE POLARISATION FROM K VECTOR, SURFACE NORMAL,               **
+!     **  AND POLARISATION OF INCIDENT LIGHT                                  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SETTINGS
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: TOL=1.D-10
+      INTEGER(4) :: ISPEC
+      REAL(8) :: KVEC(3)
+      REAL(8) :: WORK(3)
+      REAL(8) :: WORK2(3)
+      REAL(8) :: SVAR
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$POLARISATION')
+      IF(.NOT.ALLOCATED(SPECTRUMARR)) THEN
+        CALL ERROR$MSG('NO SPECTRUM AVAILABLE')
+        CALL ERROR$STOP('XAS$POLARISATION')
+      END IF
+!     LOOP OVER SPECTRA
+      DO ISPEC=1,SETTINGS%NSPEC
+        SPECTRUM=>SPECTRUMARR(ISPEC)
+        KVEC=SPECTRUM%KDIR
+        CALL CROSS_PROD(KVEC,SPECTRUM%NORMAL,WORK)
+        SVAR=NORM2(WORK)
+        IF(SVAR.LT.TOL) THEN
+          CALL ERROR$MSG('K VECTOR AND SURFACE NORMAL ARE PARALLEL')
+          CALL ERROR$MSG('POLARISATION VECTOR SET TO ARBITRARY ORTHOGONAL VECTOR')
+          CALL VEC_ORTHO(KVEC,WORK)
+          SVAR=NORM2(WORK)
+        END IF
+        WORK=WORK/SVAR
+        CALL CROSS_PROD(WORK,KVEC,WORK2)
+        WORK2=WORK2/NORM2(WORK2)
+        SPECTRUM%POLXYZ=SPECTRUM%POL(1)*WORK+ &
+      &                 SPECTRUM%POL(2)*WORK2
+        SVAR=SQRT(SUM(ABS(SPECTRUM%POLXYZ)**2))
+        SPECTRUM%POLXYZ=SPECTRUM%POLXYZ/SVAR
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$POLARISATION
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$GETCH(ID,VAL)  ! MARK: XAS$GETCH
 !     **************************************************************************
 !     ** GET CHARACTER IN XAS MODULE                                          **
@@ -1432,5 +1681,36 @@
       DEALLOCATE(PSI)
       DEALLOCATE(R)
       END SUBROUTINE XAS$WRITEPHI
-
-
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE CROSS_PROD(A,B,C)  ! MARK: CROSS_PROD
+!     **************************************************************************
+!     ** CALCULATE CROSS PRODUCT OF TWO VECTORS                               **
+!     **************************************************************************
+      REAL(8), INTENT(IN) :: A(3)
+      REAL(8), INTENT(IN) :: B(3)
+      REAL(8), INTENT(OUT) :: C(3)
+!     **************************************************************************
+      C(1)=A(2)*B(3)-A(3)*B(2)
+      C(2)=A(3)*B(1)-A(1)*B(3)
+      C(3)=A(1)*B(2)-A(2)*B(1)
+      RETURN
+      END SUBROUTINE CROSS_PROD
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE VEC_ORTHO(A,B)  ! MARK: VEC_ORTHO
+!     **************************************************************************
+!     ** CALCULATE ORTHOGONAL VECTOR TO A                                      **
+!     **************************************************************************
+! TODO: UNDERSTAND
+      IMPLICIT NONE
+      REAL(8), INTENT(IN) :: A(3)
+      REAL(8), INTENT(OUT) :: B(3)
+      REAL(8) :: VECVAR(3)
+!     **************************************************************************
+      VECVAR = (/1.D0,0.D0,0.D0/)
+      IF(DOT_PRODUCT(A,VECVAR).EQ.NORM2(A)) THEN
+        VECVAR = (/0.D0,1.D0,0.D0/)
+      ENDIF
+      CALL CROSS_PROD(A,VECVAR,B)
+      END SUBROUTINE VEC_ORTHO
