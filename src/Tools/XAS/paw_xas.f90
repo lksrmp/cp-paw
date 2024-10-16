@@ -25,7 +25,9 @@
 !       IT IS CHECKED THAT NOCC1=NOCC2
         COMPLEX(8), ALLOCATABLE :: OVOCC(:,:) ! (NOCC2,NOCC1) OCCUPIED OVERLAP
         COMPLEX(8), ALLOCATABLE :: OVEMP(:,:) ! (NB2-NOCC2,NOCC1) EMPTY OVERLAP
+        COMPLEX(8), ALLOCATABLE :: KMAT(:,:) ! (NB2-NOCC2,NOCC1) K MATRIX ELEMENTS
         COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:) ! (3,NB2) DIPOLE MATRIX ELEMENTS
+        COMPLEX(8) :: ADET ! DETERMINANT OF OCCUPIED OVERLAP
        END TYPE OVERLAP_TYPE
 
       TYPE SETTINGS_TYPE
@@ -171,6 +173,9 @@
       CALL XAS$OVERLAP
 
       CALL XAS$DIPOLEMATRIX
+
+      CALL XAS$ADET
+      CALL XAS$KMAT
 
       CALL XAS$REPORTSIMULATION
 
@@ -1324,9 +1329,13 @@
         DO IB=1,THIS%STATEARR(1,1)%NOCC
           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OVOCC(IB,:))
         ENDDO
-        WRITE(NFIL,FMT='(A)')'OCCUPIED OVERLAP OF FIRST K POINT/SPIN'
+        WRITE(NFIL,FMT='(A)')'EMPTY OVERLAP OF FIRST K POINT/SPIN'
         DO IB=1,NB2-THIS%STATEARR(1,1)%NOCC
           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OVEMP(IB,:))
+        ENDDO
+        WRITE(NFIL,FMT='(A)')'KMAT OF FIRST K POINT/SPIN'
+        DO IB=1,NB2-THIS%STATEARR(1,1)%NOCC
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%KMAT(IB,:))
         ENDDO
 ! TODO: OUTPUT FOR DIPOLE ELEMENTS
         CALL XAS$UNSELECT
@@ -1344,7 +1353,8 @@
       IMPLICIT NONE
       INTEGER(4) :: NFIL
       INTEGER(4) :: ISPEC
-
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$REPORTSETTINGS')
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       WRITE(NFIL,'(80("#"))')
       WRITE(NFIL,FMT='(A19)')'SETTINGS'
@@ -1363,6 +1373,7 @@
         WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL:',SPECTRUM%POL(:)
         WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZ:',SPECTRUM%POLXYZ(:)
       ENDDO
+                          CALL TRACE$POP
       END SUBROUTINE XAS$REPORTSETTINGS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -1759,7 +1770,60 @@
       DEALLOCATE(RADINT)
                           CALL TRACE$POP
       END SUBROUTINE XAS$DIPOLEMATRIX
-      
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$ADET ! MARK: XAS$ADET
+!     **************************************************************************
+!     ** CALCULATE DETERMINANT ADET FOR OCCUPIED OVERLAP MATRIX               **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: OVERLAP,OVERLAPARR,SIM
+      IMPLICIT NONE
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$ADET')
+      DO IKPT=1,SIM(1)%NKPT
+        DO ISPIN=1,SIM(1)%NSPIN
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          SIM(1)%STATE=>SIM(1)%STATEARR(IKPT,ISPIN)
+          CALL LIB$DETC8(SIM(1)%STATE%NOCC,OVERLAP%OVOCC,OVERLAP%ADET)
+          WRITE(*,*)'ADET:',OVERLAP%ADET
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$ADET
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$KMAT  ! MARK: XAS$KMAT
+!     **************************************************************************
+!     ** CALCULATE K MATRIX FOR XAS CALCULATION                               **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: OVERLAP,OVERLAPARR,SIM
+      IMPLICIT NONE
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: NOCC
+      INTEGER(4) :: NB1,NB2
+      COMPLEX(8), ALLOCATABLE :: WORK(:,:)
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$KMAT')
+      DO IKPT=1,SIM(1)%NKPT
+        DO ISPIN=1,SIM(1)%NSPIN
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          SIM(1)%STATE=>SIM(1)%STATEARR(IKPT,ISPIN)
+          SIM(2)%STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
+          NOCC=SIM(1)%STATE%NOCC
+          NB1=SIM(1)%STATE%NB
+          NB2=SIM(2)%STATE%NB
+          ALLOCATE(OVERLAP%KMAT(NB2-NOCC,NB1))
+          ALLOCATE(WORK(NOCC,NOCC))
+          CALL LIB$INVERTC8(NOCC,OVERLAP%OVOCC,WORK)
+          CALL LIB$MATMULC8(NB2-NOCC,NOCC,NOCC,OVERLAP%OVEMP,WORK,OVERLAP%KMAT)
+          DEALLOCATE(WORK)
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$KMAT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$GETCH(ID,VAL)  ! MARK: XAS$GETCH
