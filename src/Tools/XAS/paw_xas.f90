@@ -20,7 +20,8 @@
         COMPLEX(8), ALLOCATABLE :: PW(:,:) ! (NB2,NB1) PLANE WAVE OVERLAP
         COMPLEX(8), ALLOCATABLE :: AUG(:,:) ! (NB2,NB1) AUGMENTATION OVERLAP
         COMPLEX(8), ALLOCATABLE :: OV(:,:) ! (NB2,NB1) OVERLAP
-      END TYPE OVERLAP_TYPE
+        COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:) ! (3,NB2) DIPOLE MATRIX ELEMENTS
+       END TYPE OVERLAP_TYPE
 
       TYPE SETTINGS_TYPE
         INTEGER(4) :: NSPEC ! #(SPECTRA)
@@ -163,6 +164,8 @@
       CALL XASCNTL$COREHOLE
 
       CALL XAS$OVERLAP
+
+      CALL XAS$DIPOLEMATRIX
 
       CALL XAS$REPORTSIMULATION
 
@@ -1301,6 +1304,7 @@
         ENDDO
         close(nfilo)
         close(nfilc)
+! TODO: OUTPUT FOR DIPOLE ELEMENTS
         CALL XAS$UNSELECT
       ENDIF
                           CALL TRACE$POP
@@ -1600,6 +1604,122 @@
       END SUBROUTINE XAS$POLARISATION
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$DIPOLEMATRIX ! MARK: XAS$DIPOLEMATRIX
+!     **************************************************************************
+!     ** CALCULATE DIPOLE MATRIX ELEMENTS IN EXCITED ORBITAL BASIS            **
+!     ** SIMULATION 2 IS THE EXCITED STATE, SIMULATION 1 IS THE GROUND STATE  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SETTINGS,SIM,SETUP_TYPE,STATE_TYPE,OVERLAP,OVERLAPARR
+      IMPLICIT NONE
+      LOGICAL(4), PARAMETER :: TTEST=.FALSE.
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: IATOM ! ATOM WITH CORE HOLE
+      INTEGER(4) :: ISP   ! SETUP INDEX OF ATOM WITH CORE HOLE
+      TYPE(SETUP_TYPE), POINTER :: STP ! POINTER TO SETUP
+      TYPE(STATE_TYPE), POINTER :: STATE
+      INTEGER(4) :: N
+      INTEGER(4) :: IB
+      INTEGER(4) :: LN
+      INTEGER(4) :: NR
+      REAL(8), ALLOCATABLE :: AEPSI(:) ! (NR) ATOMIC RADIAL PART
+      REAL(8) :: GAUNT(3)
+      INTEGER(4) :: LLCORE ! LL OF CORE HOLE
+      INTEGER(4) :: LLVAL ! LL OF VALENCE ORBITAL
+      INTEGER(4) :: L
+      INTEGER(4) :: M
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: IPRO
+      REAL(8), ALLOCATABLE :: RADINT(:) ! (LNX(ISP)) RADIAL INTEGRAL VALUES
+      REAL(8), ALLOCATABLE :: R(:)
+      REAL(8), ALLOCATABLE :: WORK(:)
+      COMPLEX(8) :: CVAR(3)
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$DIPOLEMATRIX')
+      IF(TTEST) THEN
+        CALL FILEHANDLER$UNIT('PROT',NFIL)
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A)')'DIPOLE MATRIX CALCULATION'
+        WRITE(NFIL,'(80("#"))')
+      ENDIF
+      IATOM=SETTINGS%IATOM
+      ISP=SIM(2)%ISPECIES(IATOM)
+      STP=>SIM(2)%SETUP(ISP)
+      CALL RADIAL$GETI4(STP%GID,'NR',NR)
+      ALLOCATE(AEPSI(NR))
+      ALLOCATE(R(NR))
+      CALL RADIAL$R(STP%GID,NR,R)
+      ALLOCATE(WORK(NR))
+!     ==========================================================================
+!     == SELECT CORRECT RADIAL PART FOR CORE ORBITAL                          ==
+!     == NOTE: THIS ASSUME THE FOLLOWING STRUCTURE                            ==
+!     ==       |IB | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |10 |                  ==
+!     ==       |---|---|---|---|---|---|---|---|---|---|---|                  ==
+!     ==       | N | 1 | 2 | 2 | 3 | 3 | 3 | 4 | 4 | 4 | 4 |                  ==
+!     ==       | L | 0 | 0 | 1 | 0 | 1 | 2 | 0 | 1 | 2 | 3 |                  ==
+!     ==========================================================================
+      N=0
+      DO IB=1,STP%NBATOM
+        IF(STP%LATOM(IB).EQ.0) N=N+1
+        IF(N.EQ.SETTINGS%NCORE.AND.STP%LATOM(IB).EQ.SETTINGS%LCORE) THEN
+          AEPSI(:)=STP%AEPSI(:,IB)
+          IF(TTEST) WRITE(NFIL,FMT='(A10,I10)')'INDEX RAD:',IB
+        ENDIF
+      ENDDO
+! WARING: THIS ASSUMES THAT THE CORE ORBITAL IS AN S ORBITAL
+! TODO: GENERALISE TO ARBITRARY ORBITALS
+      CALL LLOFLM(SETTINGS%LCORE,0,LLCORE)
+      IF(TTEST) WRITE(NFIL,FMT='(A10,I10)')'LLCORE:',LLCORE
+!     PRE-CALCULATE RADIAL INTEGRALS
+      ALLOCATE(RADINT(SIM(2)%LNX(ISP)))
+      DO LN=1,SIM(2)%LNX(ISP)
+        WORK=STP%AEPHI(:,LN)*R**3*AEPSI
+        CALL RADIAL$INTEGRAL(STP%GID,NR,WORK,RADINT(LN))
+      ENDDO
+!     LOOP OVER K POINTS
+      DO IKPT=1,SIM(2)%NKPT
+!       LOOP OVER SPIN
+        DO ISPIN=1,SIM(2)%NSPIN
+          STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          ALLOCATE(OVERLAP%DIPOLE(3,STATE%NB))
+          IF(TTEST) WRITE(NFIL,FMT='(A10,I10,A10,I10)')'IKPT:',IKPT,'ISPIN:',ISPIN
+!         LOOP OVER BANDS
+          DO IB=1,STATE%NB
+            IF(TTEST) WRITE(NFIL,FMT='(A10,I10)')'BAND:',IB
+            CVAR=(0.D0,0.D0)
+            DO LN=1,SIM(2)%LNX(ISP)
+              L=SIM(2)%LOX(LN,ISP)
+              IPRO=SIM(2)%MAP(IATOM,LN)
+              DO M=-L,L
+                IPRO=IPRO+1
+                CALL LLOFLM(L,M,LLVAL)
+!               CALCULATE GAUNT COEFFICIENT VECTOR
+!               X COMPONENT
+                CALL SPHERICAL$GAUNT(LLVAL,2,LLCORE,GAUNT(1))
+!               Y COMPONENT
+                CALL SPHERICAL$GAUNT(LLVAL,4,LLCORE,GAUNT(2))
+!               Z COMPONENT
+                CALL SPHERICAL$GAUNT(LLVAL,3,LLCORE,GAUNT(3))
+                CVAR=CVAR+CONJG(STATE%PROJ(1,IB,IPRO))*RADINT(LN)*GAUNT
+              ENDDO
+            ENDDO
+            CVAR=SQRT(4.D0*PI/3.D0)*CVAR
+            IF(TTEST) WRITE(NFIL,FMT='(A10,3(F8.5,SP,F8.5,"I ",S))')'DIPOLE:',CVAR(:)
+            OVERLAP%DIPOLE(:,IB)=CVAR
+          ENDDO ! END LOOP OVER BANDS
+        ENDDO ! END LOOP OVER SPINS
+      ENDDO ! END LOOP OVER K POINTS          
+      DEALLOCATE(AEPSI)
+      DEALLOCATE(R)
+      DEALLOCATE(WORK)
+      DEALLOCATE(RADINT)
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$DIPOLEMATRIX
+      
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$GETCH(ID,VAL)  ! MARK: XAS$GETCH
 !     **************************************************************************
 !     ** GET CHARACTER IN XAS MODULE                                          **
@@ -1689,6 +1809,19 @@
       DEALLOCATE(PSI)
       DEALLOCATE(R)
       END SUBROUTINE XAS$WRITEPHI
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LLOFLM(L,M,LL) ! MARK: LLOFLM
+!     **************************************************************************
+!     ** CALCULATE LL=L*L+L-M+1                                               **
+!     **************************************************************************
+      INTEGER(4), INTENT(IN) :: L
+      INTEGER(4), INTENT(IN) :: M
+      INTEGER(4), INTENT(OUT) :: LL
+!     **************************************************************************
+      LL=L*L+L-M+1
+      RETURN
+      END SUBROUTINE LLOFLM
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE CROSS_PROD(A,B,C)  ! MARK: CROSS_PROD
