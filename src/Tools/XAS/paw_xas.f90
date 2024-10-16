@@ -10,9 +10,11 @@
       END TYPE SETUP_TYPE
 
       TYPE STATE_TYPE
+        REAL(8) :: OCCTOL=1.D-3 ! OCCUPATION > OCCTOL IS OCCUPIED
         INTEGER(4)          :: NB ! #(STATES)
         REAL(8), POINTER    :: EIG(:) ! (NB) EIGENVALUES
-        REAL(8), POINTER    :: OCC(:)
+        REAL(8), POINTER    :: OCC(:) ! (NB) OCCUPATIONS
+        INTEGER(4)          :: NOCC ! #(OCCUPIED STATES)
         COMPLEX(8), POINTER :: PROJ(:,:,:) ! (NDIM,NB,NPRO) PROJECTIONS
       END TYPE STATE_TYPE
 
@@ -20,6 +22,9 @@
         COMPLEX(8), ALLOCATABLE :: PW(:,:) ! (NB2,NB1) PLANE WAVE OVERLAP
         COMPLEX(8), ALLOCATABLE :: AUG(:,:) ! (NB2,NB1) AUGMENTATION OVERLAP
         COMPLEX(8), ALLOCATABLE :: OV(:,:) ! (NB2,NB1) OVERLAP
+!       IT IS CHECKED THAT NOCC1=NOCC2
+        COMPLEX(8), ALLOCATABLE :: OVOCC(:,:) ! (NOCC2,NOCC1) OCCUPIED OVERLAP
+        COMPLEX(8), ALLOCATABLE :: OVEMP(:,:) ! (NB2-NOCC2,NOCC1) EMPTY OVERLAP
         COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:) ! (3,NB2) DIPOLE MATRIX ELEMENTS
        END TYPE OVERLAP_TYPE
 
@@ -987,6 +992,17 @@
             THIS%STATE%NB=NB_
             ALLOCATE(THIS%STATE%OCC(NB_))
             THIS%STATE%OCC(:)=OCC(:,IKPT,ISPIN)
+!           COUNT NUMBER OF OCCUPIED STATES
+            THIS%STATE%NOCC=-1
+            DO IB=1,NB_
+              IF(THIS%STATE%OCC(IB).LT.THIS%STATE%OCCTOL) THEN
+                THIS%STATE%NOCC=IB-1
+                EXIT
+              ENDIF
+            ENDDO
+            IF(THIS%STATE%NOCC.EQ.-1) THEN
+              THIS%STATE%NOCC=NB_
+            END IF
           ENDDO
         ENDDO
         DEALLOCATE(OCC)
@@ -1266,7 +1282,6 @@
           ENDDO
         ENDDO
 ! TODO: PROPER OUTPUT FOR OVERLAP MATRIX
-        WRITE(NFIL,FMT='(A)')'OVERLAP MATRIX OF FIRST K POINT/SPIN'
         OVERLAP=>OVERLAPARR(1,1)
         IF(NB1.GT.99) THEN
           WRITE(FORMAT,'("(",I3,"F10.6)")')NB1
@@ -1275,15 +1290,6 @@
         ELSE
           WRITE(FORMAT,'("(",I1,"F10.6)")')NB1
         END IF
-        open(nfilo,file='ov.dat')
-        open(nfilc,file='ov_c.dat')
-        DO IB=1,NB2
-          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
-          WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
-          write(nfilc,*)OVERLAP%OV(IB,:)
-        ENDDO
-        close(nfilo)
-        close(nfilc)
         open(nfilo,file='pw.dat')
         open(nfilc,file='pw_c.dat')
         WRITE(NFIL,FMT='(A)')'PLANE WAVE OVERLAP MATRIX OF FIRST K POINT/SPIN'
@@ -1304,6 +1310,24 @@
         ENDDO
         close(nfilo)
         close(nfilc)
+        WRITE(NFIL,FMT='(A)')'OVERLAP MATRIX OF FIRST K POINT/SPIN'
+        open(nfilo,file='ov.dat')
+        open(nfilc,file='ov_c.dat')
+        DO IB=1,NB2
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
+          WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
+          write(nfilc,*)OVERLAP%OV(IB,:)
+        ENDDO
+        close(nfilo)
+        close(nfilc)
+        WRITE(NFIL,FMT='(A)')'OCCUPIED OVERLAP OF FIRST K POINT/SPIN'
+        DO IB=1,THIS%STATEARR(1,1)%NOCC
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OVOCC(IB,:))
+        ENDDO
+        WRITE(NFIL,FMT='(A)')'OCCUPIED OVERLAP OF FIRST K POINT/SPIN'
+        DO IB=1,NB2-THIS%STATEARR(1,1)%NOCC
+          WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OVEMP(IB,:))
+        ENDDO
 ! TODO: OUTPUT FOR DIPOLE ELEMENTS
         CALL XAS$UNSELECT
       ENDIF
@@ -1352,6 +1376,7 @@
       TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
       INTEGER(4) :: NKPT,NSPIN
       INTEGER(4) :: IKPT,ISPIN
+      INTEGER(4) :: NOCC
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAP')
       IF(ALLOCATED(S)) THEN
@@ -1373,10 +1398,27 @@
       DO IKPT=1,NKPT
         DO ISPIN=1,NSPIN
           OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          ALLOCATE(OVERLAP%OV(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+          STATE1=>SIM(1)%STATEARR(IKPT,ISPIN)
+          STATE2=>SIM(2)%STATEARR(IKPT,ISPIN)
+          ALLOCATE(OVERLAP%OV(STATE2%NB,STATE1%NB))
           OVERLAP%OV(:,:)=OVERLAP%PW(:,:)+OVERLAP%AUG(:,:)
+!         CHECK OF NUMBER OF OCCUPIED STATES IS THE SAME TO PRODUCE SQUARE MATRIX
+          IF(STATE1%NOCC.NE.STATE2%NOCC) THEN
+            CALL ERROR$MSG('NUMBER OF OCCUPIED STATES NOT THE SAME')
+            CALL ERROR$MSG('HAS NUMBER OF ELECTRONS CHANGED OR VARIABLE OCCUPATIONS?')
+            CALL ERROR$I4VAL('NOCC1',STATE1%NOCC)
+            CALL ERROR$I4VAL('NOCC2',STATE2%NOCC)
+            CALL ERROR$I4VAL('IKPT',IKPT)
+            CALL ERROR$I4VAL('ISPIN',ISPIN)
+            CALL ERROR$STOP('XAS$OVERLAP')
+          END IF
+          NOCC=STATE1%NOCC
+          ALLOCATE(OVERLAP%OVOCC(NOCC,NOCC))
+          ALLOCATE(OVERLAP%OVEMP(STATE2%NB-NOCC,NOCC))
+          OVERLAP%OVOCC(:,:)=OVERLAP%OV(1:NOCC,1:NOCC)
+          OVERLAP%OVEMP(:,:)=OVERLAP%OV(NOCC+1:STATE2%NB,1:NOCC)
         ENDDO
-      ENDDO    
+      ENDDO  
       TOVERLAP=.TRUE.  
                           CALL TRACE$POP
       END SUBROUTINE XAS$OVERLAP
