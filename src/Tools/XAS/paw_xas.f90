@@ -1394,6 +1394,94 @@
       END SUBROUTINE XAS$REPORTSETTINGS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$AMPLITUDE(IKPT,ISPIN,F,POLXYZ,AMPL)  ! MARK: XAS$AMPLITUDE
+!     **************************************************************************
+!     ** CALCULATE TRANSITION AMPLITUDE FOR A GIVEN FINAL STATE (IKPT,ISPIN,F)**
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SIM,STATE_TYPE,OVERLAP,OVERLAPARR
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: IKPT ! K POINT INDEX
+      INTEGER(4), INTENT(IN) :: ISPIN ! SPIN INDEX
+      INTEGER(4), INTENT(IN) :: F ! FINAL STATE ORBITAL INDEX
+      COMPLEX(8), INTENT(IN) :: POLXYZ(3) ! POLARIZATION VECTOR
+      COMPLEX(8), INTENT(OUT) :: AMPL ! TRANSITION AMPLITUDE
+      TYPE(STATE_TYPE), POINTER :: STATE
+      INTEGER(4) :: IB
+      INTEGER(4) :: FEMP ! FINAL STATE EMPTY ORBITAL INDEX IN EMPTY PART
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$AMPLITUDE')
+      STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
+      OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+!     CHECK IF FINAL STATE ORBITAL INDEX IS VALID
+      IF(F.GT.STATE%NB) THEN
+        CALL ERROR$MSG('FINAL STATE ORBITAL INDEX OUT OF BOUNDS')
+        CALL ERROR$I4VAL('F',F)
+        CALL ERROR$I4VAL('NB',STATE%NB)
+        CALL ERROR$STOP('XAS$AMPLITUDE')
+      ENDIF
+      IF(F.LE.STATE%NOCC) THEN
+        CALL ERROR$MSG('FINAL STATE ORBITAL INDEX OCCUPIED')
+        CALL ERROR$I4VAL('F',F)
+        CALL ERROR$I4VAL('NOCC',STATE%NOCC)
+        CALL ERROR$STOP('XAS$AMPLITUDE')
+      ENDIF
+      FEMP=F-STATE%NOCC
+      AMPL=(0.D0,0.D0)
+      DO IB=1,STATE%NOCC
+        AMPL=AMPL+CONJG(OVERLAP%KMAT(FEMP,IB))*SUM(POLXYZ(:)*OVERLAP%DIPOLE(:,IB))
+      ENDDO
+      AMPL=SUM(POLXYZ(:)*OVERLAP%DIPOLE(:,FEMP))-AMPL
+      AMPL=(-1.D0)**STATE%NOCC*AMPL*CONJG(OVERLAP%ADET)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XAS$AMPLITUDE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$CROSSSECTION  ! MARK: XAS$CROSSSECTION
+!     **************************************************************************
+!     ** CALCULATE XAS CROSS SECTION                                          **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SETTINGS,SIM,STATE_TYPE
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: IFINAL
+      TYPE(STATE_TYPE), POINTER :: STATE
+      COMPLEX(8) :: AMPL
+      REAL(8), ALLOCATABLE :: ENERGY(:,:) ! (ISPEC,NB2-NOCC)
+      REAL(8), ALLOCATABLE :: SIGMA(:,:) ! (ISPEC,NB2-NOCC)
+      REAL(8) :: EGS,EFI
+      REAL(8) :: EV
+!     **************************************************************************
+                          CALL TRACE$PUSH('XAS$CROSSSECTION')
+      CALL CONSTANTS('EV',EV)
+      EGS=SIM(1)%ETOT
+      EFI=SIM(2)%ETOT
+! TODO: METHOD FOR PROPER ENERGY ALIGNMENT
+! TODO: SAVING OF CROSS SECTION
+! TODO: MAPPING ONTO ENERGY GRID
+! TODO: BROADENING OF CROSS SECTION
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+WRITE(NFIL,FMT='(4A10,2A14)')'ISPEC','IKPT','ISPIN','IFINAL','ENERGY','SIGMA'
+      DO ISPEC=1,SETTINGS%NSPEC
+        SPECTRUM=>SPECTRUMARR(ISPEC)
+        DO IKPT=1,SIM(1)%NKPT
+          DO ISPIN=1,SIM(1)%NSPIN
+            STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
+            DO IFINAL=STATE%NOCC+1,STATE%NB
+! WARNING: WEIGHT OF K POINT AND INVERSION SYMMETRY
+              CALL XAS$AMPLITUDE(IKPT,ISPIN,IFINAL,SPECTRUM%POLXYZ,AMPL)
+WRITE(NFIL,FMT='(4I10,2F14.8)')ISPEC,IKPT,ISPIN,IFINAL,(EFI+STATE%EIG(IFINAL)-EGS)/EV,REAL(CONJG(AMPL)*AMPL,KIND=8)
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$CROSSSECTION
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$OVERLAP  ! MARK: XAS$OVERLAP
 !     **************************************************************************
 !     ** CALCULATE OVERLAP MATRIX                                             **
