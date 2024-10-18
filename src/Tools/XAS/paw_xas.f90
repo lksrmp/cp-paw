@@ -2093,6 +2093,34 @@ WRITE(NFIL,FMT='(4I10,2F14.8)')ISPEC,IKPT,ISPIN,IFINAL,(EFI+STATE%EIG(IFINAL)-EG
       END SUBROUTINE XAS$WRITEPHI
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$MAPGRID(X,Y,N,GRID,XMIN,XMAX,DE)  ! MARK: XAS$MAPGRID
+!     **************************************************************************
+!     ** MAP VALUE Y AT POSITION X ONTO GRID                                  **
+!     ** SPLIT BETWEEN THE TWO NEIGHBORING POINTS DEPENDING ON DISTANCE       **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), INTENT(IN) :: X
+      REAL(8), INTENT(IN) :: Y
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(INOUT) :: GRID(N)
+      REAL(8), INTENT(IN) :: XMIN
+      REAL(8), INTENT(IN) :: XMAX
+      REAL(8), INTENT(IN) :: DE
+      INTEGER(4) :: I1,I2
+      REAL(8) :: X0
+      REAL(8) :: W1,W2
+!     **************************************************************************
+      X0=(X-XMIN)/DE+1.D0
+      I1=INT(X0)
+      I2=I1+1
+      W2=(X0-REAL(I1,KIND=8))
+      W1=1.D0-W2
+      IF(I1.GT.0.AND.I1.LE.N) GRID(I1)=GRID(I1)+Y*W1
+      IF(I2.GT.0.AND.I2.LE.N) GRID(I2)=GRID(I2)+Y*W2
+      RETURN
+      END SUBROUTINE XAS$MAPGRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE LLOFLM(L,M,LL) ! MARK: LLOFLM
 !     **************************************************************************
 !     ** CALCULATE LL=L*L+L-M+1                                               **
@@ -2104,6 +2132,34 @@ WRITE(NFIL,FMT='(4I10,2F14.8)')ISPEC,IKPT,ISPIN,IFINAL,(EFI+STATE%EIG(IFINAL)-EG
       LL=L*L+L-M+1
       RETURN
       END SUBROUTINE LLOFLM
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LORENTZCONV(N,X,Y,GAMMA,CONV)  ! MARK: LORENTZCONV
+!     **************************************************************************
+!     ** CALCULATE CONVOLUTION WITH LORENTZIAN FUNCTION                       **
+!     ** L(X,X0,GAMMA)=(Y/2)/(PI*((X-X0)**2+(GAMMA/2)**2))                    **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(IN) :: X(N)
+      REAL(8), INTENT(IN) :: Y(N)
+      REAL(8), INTENT(IN) :: GAMMA
+      REAL(8), INTENT(OUT) :: CONV(N)
+      INTEGER(4) :: I,J
+      REAL(8) :: GAMMA2
+      REAL(8) :: SVAR
+!     **************************************************************************
+      DO I=1,N
+        CONV(I)=0.D0
+        GAMMA2=0.25D0*GAMMA*GAMMA
+        DO J=1,N
+          SVAR=GAMMA/(2.D0*PI*((X(I)-X(J))**2+GAMMA2))
+          CONV(I)=CONV(I)+Y(J)*SVAR
+        ENDDO
+      ENDDO
+      RETURN
+      END SUBROUTINE LORENTZCONV
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE CROSS_PROD(A,B,C)  ! MARK: CROSS_PROD
