@@ -36,6 +36,12 @@
         INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE
         INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
         INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
+!       ENERGY GRID PARAMETER
+        REAL(8) :: EMIN ! MINIMUM ENERGY
+        REAL(8) :: EMAX ! MAXIMUM ENERGY
+        REAL(8) :: DE ! ENERGY STEP SIZE
+        INTEGER(4) :: NE ! #(ENERGY POINTS)
+        REAL(8) :: GAMMA ! LIFETIME BROADENING FROM LORENTZIAN
       END TYPE SETTINGS_TYPE
 
       TYPE SPECTRUM_TYPE
@@ -157,6 +163,8 @@
       CALL XASCNTL$SPECTRUM
 !     CALCULATE POLARISATION IN CARTESIAN COORDINATES FROM NORMAL, K, AND POL
       CALL XAS$POLARISATION
+!     READ GRID SETTINGS
+      CALL XASCNTL$GRID
 !     READ DFT CALCULATION DATA
       CALL XAS$READ
 !     REPORT DFT CALCULATION DATA
@@ -613,6 +621,67 @@
       CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(FILENAME))
                           CALL TRACE$POP
       END SUBROUTINE XASCNTL$FILES
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASCNTL$GRID  ! MARK: XASCNTL$GRID
+!     **************************************************************************
+!     ** READ SETTINGS FOR THE ENERGY GRID                                    **
+!     **************************************************************************
+      USE XASCNTL_MODULE, ONLY: LL_CNTL
+      USE XAS_MODULE, ONLY: SETTINGS
+      USE LINKEDLIST_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      REAL(8) :: EV
+      REAL(8) :: KB
+      REAL(8) :: SVAR
+!     **************************************************************************
+                          CALL TRACE$PUSH('XASCNTL$GRID')
+      CALL CONSTANTS('EV',EV)
+      CALL CONSTANTS('KB',KB)
+!     == DEFAULT VALUES ========================================================
+      SETTINGS%GAMMA=0.3D0*EV
+      SETTINGS%DE=1.D-2*EV
+!     == READ GRID BLOCK =======================================================
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'GRID',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        RETURN
+      ENDIF
+      CALL LINKEDLIST$SELECT(LL_CNTL,'GRID')
+!     == READ ENERGY SPACING (OPTIONAL) ========================================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'DE[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'DE[EV]',1,SVAR)
+        SETTINGS%DE=SVAR*EV
+      ENDIF
+!     == READ LIFETIME (OPTIONAL) ============================================
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'GAMMA[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'GAMMA[EV]',1,SVAR)
+        SETTINGS%GAMMA=SVAR*EV
+      ENDIF
+!     == READ ENERGY RANGE (MANDATORY) =========================================
+! TODO: IMPLEMENT OVERWRITING AUTOMATIC ENERGY RANGE DETECTION
+!       CALL LINKEDLIST$EXISTD(LL_CNTL,'EMIN',1,TCHK)
+!       IF(.NOT.TCHK) THEN
+!         CALL ERROR$MSG('EMIN NOT FOUND IN !GRID')
+!         CALL ERROR$STOP('XASCNTL$GRID')
+!       ENDIF
+!       CALL LINKEDLIST$GET(LL_CNTL,'EMIN',1,SVAR)
+!       SETTINGS%EMIN=SVAR*EV
+!       CALL LINKEDLIST$EXISTD(LL_CNTL,'EMAX',1,TCHK)
+!       IF(.NOT.TCHK) THEN
+!         CALL ERROR$MSG('EMAX NOT FOUND IN !GRID')
+!         CALL ERROR$STOP('XASCNTL$GRID')
+!       ENDIF
+!       CALL LINKEDLIST$GET(LL_CNTL,'EMAX',1,SVAR)
+!       SETTINGS%EMAX=SVAR*EV
+!       SETTINGS%NE=INT((EMAX-EMIN)/DE)+1
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASCNTL$GRID
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XASCNTL$SPECTRUM  ! MARK: XASCNTL$SPECTRUM
