@@ -3,6 +3,7 @@
       MODULE XAS_MODULE
       TYPE SETUP_TYPE
         INTEGER(4) :: GID ! GRID ID FOR RADIAL MESH
+        REAL(8) :: ETOT ! TOTAL ENERGY OF ATOMIC CALCULATION
         REAL(8), ALLOCATABLE :: PSPHI(:,:) ! PSEUDO PARTIAL WAVE
         REAL(8), ALLOCATABLE :: AEPHI(:,:) ! AE PARTIAL WAVE
         INTEGER(4) :: NBATOM ! #(ATOMIC WAVE FUNCTIONS)
@@ -1196,6 +1197,8 @@
             CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'DEX',DEX)
             CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'R1',R1)
           ENDIF
+!         AESCFETOT
+          READ(NFIL(IS))THIS%SETUP(ISP)%ETOT
 !         ALLOCATE AND READ (AUXILIARY) PARTIAL WAVES
           LNX=THIS%LNX(ISP)
           ALLOCATE(THIS%SETUP(ISP)%PSPHI(NR,LNX))
@@ -1476,14 +1479,15 @@
         DO IAT=1,THIS%NAT
           WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
         ENDDO
-        WRITE(NFIL,FMT='(4A10)')'SETUP','GID','LNX','LOX'
+        WRITE(NFIL,FMT='(5A10)')'SETUP','GID','ETOT[H]','LNX','LOX'
         IF(THIS%LNXX.GT.9) THEN
-          WRITE(FORMAT,'("(3I10,",I2,"I10)")')THIS%LNXX
+          WRITE(FORMAT,'("(2I10,F10.4,I10,",I2,"I10)")')THIS%LNXX
         ELSE
-          WRITE(FORMAT,'("(3I10,",I1,"I10)")')THIS%LNXX
+          WRITE(FORMAT,'("(2I10,F10.4,I10,",I1,"I10)")')THIS%LNXX
         END IF
         DO ISP=1,THIS%NSP
-          WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%LNX(ISP),THIS%LOX(:,ISP)
+          WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%SETUP(ISP)%ETOT, &
+     &                          THIS%LNX(ISP),THIS%LOX(:,ISP)
         ENDDO
         WRITE(NFIL,FMT='(A)')'MAPPING OF PROJECTIONS (INDEX-1)'
         WRITE(NFIL,FMT='(A10,A10)')'ATOM','MAP'
@@ -1691,7 +1695,9 @@
       COMPLEX(8) :: AMPL(3)
       COMPLEX(8) :: CVAR
       REAL(8) :: SIGMA
-      REAL(8) :: EGS,EFI
+      REAL(8) :: EGROUND,EEXCITE  ! TOTAL ENERGY OF CALCULATION
+      REAL(8) :: EF
+      REAL(8) :: DEATOM  ! ENERGY DIFFERENCE OF SUM OF ISOLATED ATOMS
       REAL(8) :: EV
       REAL(8) :: EMIN,EMAX
       REAL(8) :: E
@@ -1705,14 +1711,16 @@
       EMIN=HUGE(EMIN)
       EMAX=-HUGE(EMAX)
       CALL CONSTANTS('EV',EV)
-      EGS=SIM(1)%ETOT
-      EFI=SIM(2)%ETOT
+      EGROUND=SIM(1)%ETOT
+      EEXCITE=SIM(2)%ETOT
+      CALL XAS_ATOMENERGYDIFF(DEATOM)
 !     AUTOMATICALLY FIND ENERGY RANGE
       DO IKPT=1,SIM(1)%NKPT
         DO ISPIN=1,SIM(1)%NSPIN
           STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
           DO IFINAL=1,STATE%NB-STATE%NOCC
-            E=EFI+STATE%EIG(IFINAL+STATE%NOCC)-EGS
+            EF=EEXCITE+STATE%EIG(IFINAL+STATE%NOCC)
+            E=EF-EGROUND+DEATOM
             IF(E.LT.EMIN) EMIN=E
             IF(E.GT.EMAX) EMAX=E
           ENDDO
@@ -1744,7 +1752,8 @@
           DO IFINAL=1,STATE%NB-STATE%NOCC
 ! WARNING: WEIGHT OF K POINT AND INVERSION SYMMETRY
             CALL XAS$AMPL(IKPT,ISPIN,IFINAL,AMPL)
-            E=EFI+STATE%EIG(IFINAL+STATE%NOCC)-EGS
+            EF=EEXCITE+STATE%EIG(IFINAL+STATE%NOCC)
+            E=EF-EGROUND+DEATOM
 !           LOOP OVER SPECTRA
             DO ISPEC=1,SETTINGS%NSPEC
               SPECTRUM=>SPECTRUMARR(ISPEC)
@@ -2443,6 +2452,32 @@
         CALL ERROR$STOP('XAS$FILEHANDLER')
       ENDIF
       END SUBROUTINE XAS$FILEHANDLER
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS_ATOMENERGYDIFF(DIFF)  ! MARK: ATOMENERGYDIFF
+!     **************************************************************************
+!     ** CALCULATE ENERGY DIFFERENCE BETWEEN ISOLATED ATOMS                   **
+!     ** IN SIMULATION 1 AND 2                                                **
+!     ** DIFF=SUM(E1)-SUM(E2)                                                 **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SIM
+      IMPLICIT NONE
+      REAL(8), INTENT(OUT) :: DIFF
+      INTEGER(4) :: IAT
+      INTEGER(4) :: ISP1,ISP2
+      INTEGER(4) :: I
+      REAL(8) :: E1,E2
+!     **************************************************************************
+      DIFF=0.D0
+! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
+      DO IAT=1,SIM(1)%NAT
+        ISP1=SIM(1)%ISPECIES(IAT)
+        ISP2=SIM(2)%ISPECIES(IAT)
+        DIFF=DIFF+SIM(1)%SETUP(ISP1)%ETOT-SIM(2)%SETUP(ISP2)%ETOT
+      ENDDO
+      RETURN
+      END SUBROUTINE XAS_ATOMENERGYDIFF
+        
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE LLOFLM(L,M,LL) ! MARK: LLOFLM
