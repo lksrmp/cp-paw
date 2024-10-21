@@ -1242,6 +1242,10 @@
               ENDIF
             ENDDO
             IF(THIS%STATE%NOCC.EQ.-1) THEN
+              IF(THIS%ID.EQ.'EXCITESTATE') THEN
+                CALL ERROR$MSG('NO UNOCCUPIED STATES FOUND FOR EXCITESTATE')
+                CALL ERROR$STOP('XAS$READ')
+              END IF
               THIS%STATE%NOCC=NB_
             END IF
           ENDDO
@@ -1501,11 +1505,11 @@
         ENDDO
         WRITE(NFIL,FMT='(A)')'RADIAL REPORT'
         CALL RADIAL$REPORT(NFIL)
-        WRITE(NFIL,FMT='(3A10)')'IKPT','ISPIN','NB','NOCC'
+        WRITE(NFIL,FMT='(4A10)')'IKPT','ISPIN','NB','NOCC'
         DO IKPT=1,THIS%NKPT
           DO ISPIN=1,THIS%NSPIN
             THIS%STATE=>THIS%STATEARR(IKPT,ISPIN)
-            WRITE(NFIL,FMT='(3I10)')IKPT,ISPIN,THIS%STATE%NB,THIS%STATE%NOCC
+            WRITE(NFIL,FMT='(4I10)')IKPT,ISPIN,THIS%STATE%NB,THIS%STATE%NOCC
           ENDDO
         ENDDO
       ELSE
@@ -1730,6 +1734,8 @@
       EMIN=EMIN-2.D0*EV
       EMAX=EMAX+2.D0*EV
       NE=INT((EMAX-EMIN)/SETTINGS%DE)+1
+      SETTINGS%EMIN=EMIN
+      SETTINGS%EMAX=EMAX
       SETTINGS%NE=NE
       DO ISPEC=1,SETTINGS%NSPEC
         SPECTRUM=>SPECTRUMARR(ISPEC)
@@ -2580,3 +2586,31 @@
       ENDIF
       CALL CROSS_PROD(A,VECVAR,B)
       END SUBROUTINE VEC_ORTHO
+
+      
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WRITEMATC8(N,M,A,FLAG,IKPT,ISPIN)  ! MARK: WRITEMATC8
+!     **************************************************************************
+!     ** WRITE COMPLEX MATRIX TO FILE                                         **
+!     **************************************************************************
+      INTEGER(4), INTENT(IN) :: N
+      INTEGER(4), INTENT(IN) :: M
+      COMPLEX(8), INTENT(IN) :: A(N,M)
+      CHARACTER(*), INTENT(IN) :: FLAG
+      INTEGER(4), INTENT(IN) :: IKPT
+      INTEGER(4), INTENT(IN) :: ISPIN
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: I,J
+      CHARACTER(256) :: FORMAT
+!     **************************************************************************
+      CALL FILEHANDLER$UNIT(TRIM(ADJUSTL(FLAG)),NFIL)
+      WRITE(FORMAT,*)M
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F14.8,",",F14.8,") "))'
+      WRITE(*,*)FLAG,FORMAT
+      WRITE(NFIL,FMT='(A,I5,A,I3)')'# KPOINT:',IKPT,' SPIN:',ISPIN
+      DO I=1,N
+        WRITE(NFIL,FMT=FORMAT)A(I,:)
+      ENDDO
+      RETURN
+      END SUBROUTINE WRITEMATC8
