@@ -92,6 +92,7 @@ TYPE ATOMWAVES_TYPE
   REAL(8)   ,ALLOCATABLE :: AEPSISM(:,:)
   REAL(8)   ,ALLOCATABLE :: AEPOT(:)
   REAL(8)                :: ETOT  ! TOTAL ENERGY OF ATOM FROM ATOMLIB$AESCF
+  LOGICAL(4)             :: THOLE  ! ADDS A HOLE IN THE 1S ORBITAL
 END TYPE ATOMWAVES_TYPE
 TYPE SETTING_TYPE
   LOGICAL  :: TREL ! RELATIVISTIC OR NON-RELATIVISTIC
@@ -1131,6 +1132,7 @@ END MODULE SETUP_MODULE
       REAL(8)                 :: ZV      ! #(VALENCE ELECTRONS)
       CHARACTER(64)           :: COREID  ! IDENTIFIER FOR THE FROZEN CORE
       LOGICAL(4)              :: TSO     ! SPIN-ORBIT SWITCH
+      LOGICAL(4)              :: THOLE   ! SWITCH FOR 1S CORE HOLE
       REAL(8)                 :: RBOX
       CHARACTER(32)           :: TYPE    ! SETUP TYPE
       CHARACTER(32)           :: SPNAME  ! SPECIES NAME
@@ -1235,7 +1237,7 @@ END MODULE SETUP_MODULE
 !       ========================================================================
 !       == IDENTIFY SETUP ID                                                  ==
 !       ========================================================================
-        CALL SETUP_LOOKUPSETUP(LL_STRC,ID,AEZ,ZV,COREID,TSO,RBOX,LX &
+        CALL SETUP_LOOKUPSETUP(LL_STRC,ID,AEZ,ZV,COREID,TSO,THOLE,RBOX,LX &
      &                             ,TYPE,RCL,LAMBDA &
      &                             ,RCSM,POW_POT,RC_POT,TVAL0_POT,VAL0_POT &
      &                             ,POW_CORE,RC_CORE,TVAL0_CORE,VAL0_CORE &
@@ -1247,6 +1249,7 @@ END MODULE SETUP_MODULE
         THIS%ZV=ZV          ! #(VALENCE ELECTRONS)
         THIS%COREID=COREID  ! IDENTIFIER OF THE FROZEN CORE
         THIS%SETTING%SO=TSO ! SPIN-ORBIT SWITCH
+        THIS%ATOM%THOLE=THOLE ! SWITCH FOR 1S CORE HOLE
 !       __ PARTIAL WAVES________________________________________________________
         THIS%PARMS%TYPE     =TYPE         ! PARTIAL WAVE PSEUDIZATION METHOD
         ALLOCATE(THIS%PARMS%RCL(LX+1))    
@@ -2079,6 +2082,7 @@ RCL=RCOV
       REAL(8)     ,PARAMETER  :: PI=4.D0*ATAN(1.D0)
       REAL(8)     ,PARAMETER  :: Y0=1.D0/SQRT(4.D0*PI)
       TYPE(LL_TYPE)           :: LL_STP
+      LOGICAL(4)              :: THOLE
       LOGICAL(4)              :: TCHK
       CHARACTER(128)          :: ID
       REAL(8)                 :: RCOV
@@ -2095,7 +2099,7 @@ RCL=RCOV
 !     ==========================================================================
 !     == IDENTIFY ATOM                                                        ==
 !     ==========================================================================
-      CALL SETUP_LOOKUP_GENERIC(LL_STP_,ID,AEZ,ZV,RCSM,COREID,TSO)
+      CALL SETUP_LOOKUP_GENERIC(LL_STP_,ID,AEZ,ZV,RCSM,COREID,TSO,THOLE)
       CALL PERIODICTABLE$GET(AEZ,'R(COV)',RCOV)
 !
 !     ==========================================================================
@@ -2143,7 +2147,7 @@ RCL=RCOV
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE SETUP_LOOKUPSETUP(LL_STP_,ID,AEZ,ZV,COREID,TSO &
+      SUBROUTINE SETUP_LOOKUPSETUP(LL_STP_,ID,AEZ,ZV,COREID,TSO,THOLE &
      &                              ,RBOX,LX,TYPE,RCL,LAMBDA &
      &                              ,RCSM,POW_POT,RC_POT,TVAL0_POT,VAL0_POT &
      &                              ,POW_CORE,RC_CORE,TVAL0_CORE,VAL0_CORE &
@@ -2161,6 +2165,7 @@ RCL=RCOV
       REAL(8)      ,INTENT(OUT):: ZV
       CHARACTER(*) ,INTENT(OUT):: COREID
       LOGICAL(4)   ,INTENT(OUT):: TSO      ! SWITCH FOR SPIN-ORBIT COUPLING
+      LOGICAL(4)   ,INTENT(OUT):: THOLE    ! SWITCH FOR 1S CORE HOLE
       REAL(8)      ,INTENT(OUT):: RBOX
       CHARACTER(32),INTENT(OUT):: TYPE
       REAL(8)      ,INTENT(OUT):: RCL(LX+1)
@@ -2202,7 +2207,7 @@ RCL=RCOV
 !     ==========================================================================
 !     == IDENTIFY ATOM                                                        ==
 !     ==========================================================================
-      CALL SETUP_LOOKUP_GENERIC(LL_STP,ID,AEZ,ZV,RCSM,COREID,TSO)
+      CALL SETUP_LOOKUP_GENERIC(LL_STP,ID,AEZ,ZV,RCSM,COREID,TSO,THOLE)
       CALL PERIODICTABLE$GET(AEZ,'R(COV)',RCOV)
 !
 !     ==========================================================================
@@ -2254,7 +2259,7 @@ RCL=RCOV
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE SETUP_LOOKUP_GENERIC(LL_STP_,ID,AEZ,ZV,RCSM,COREID,TSO)
+      SUBROUTINE SETUP_LOOKUP_GENERIC(LL_STP_,ID,AEZ,ZV,RCSM,COREID,TSO,THOLE)
 !     **************************************************************************
 !     **  COLLECT INFORMATION ON CORE PSEUDIZATION FROM CORE BLOCK            **
 !     **  LINKED LIST (LL_STP_) MUST BE POSITIONED IN THE PARENT OF THE       **
@@ -2273,6 +2278,7 @@ RCL=RCOV
       REAL(8)      ,INTENT(OUT) :: RCSM     ! SMALL GAUSSIAN DECAY FOR COMP.CH. 
       CHARACTER(*) ,INTENT(OUT) :: COREID   ! IDENTIFIER FOR THE FROZEN CORE
       LOGICAL(4)   ,INTENT(OUT) :: TSO      ! SWITCH FOR SPIN-ORBIT COUPLING
+      LOGICAL(4)   ,INTENT(OUT) :: THOLE    ! SWITCH FOR 1S CORE HOLE
       TYPE(LL_TYPE)             :: LL_STP
       LOGICAL(4)                :: TCHK,TCHK1,TCHK2
       CHARACTER(2)              :: EL
@@ -2396,6 +2402,11 @@ RCL=RCOV
       TSO=.FALSE.
       CALL LINKEDLIST$EXISTD(LL_STP,'SO',1,TCHK)
       IF(TCHK)CALL LINKEDLIST$GET(LL_STP,'SO',1,TSO)
+!
+!     == SWITCH FOR 1S CORE HOLE ==============================================
+      THOLE=.FALSE.
+      CALL LINKEDLIST$EXISTD(LL_STP,'COREHOLE',1,TCHK)
+      IF(TCHK)CALL LINKEDLIST$GET(LL_STP,'COREHOLE',1,THOLE)
 
       RETURN
       END
@@ -2938,8 +2949,14 @@ PRINT*,'THIS%SETTING%SO=',THIS%SETTING%SO
       NNOFI=-1111
 !
 !     == PERFORM ALL-ELECTRON SELF-CONSISTENT CALCULATION OF THE ATOM
-      CALL ATOMLIB$AESCF(GID,NR,KEY,ROUT,AEZ,NBX,NB,LOFI,SOFI,FOFI,NNOFI &
-    &                   ,ETOT,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
+      IF(THIS%ATOM%THOLE) THEN
+        CALL ATOMLIB$AESCFHOLE(GID,NR,KEY,ROUT,AEZ,NBX,NB,LOFI,SOFI,FOFI,NNOFI &
+    &                         ,ETOT,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
+      ELSE
+        CALL ATOMLIB$AESCF(GID,NR,KEY,ROUT,AEZ,NBX,NB,LOFI,SOFI,FOFI,NNOFI &
+      &                   ,ETOT,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
+      ENDIF
+
       CALL TIMING$CLOCKOFF('SCF-ATOM')
       CALL TRACE$PASS('AFTER SCF-ATOM')
 !     
