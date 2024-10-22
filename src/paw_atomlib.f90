@@ -1282,7 +1282,7 @@ END IF
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE ATOMLIB$AESCFHOLE(GID,NR,KEY,RBOX,AEZ,NX,NB,LOFI,SOFI,FOFI,NNOFI &
+      SUBROUTINE ATOMLIB$AESCFHOLE(GID,NR,KEY,RBOX,AEZIN,NX,NB,LOFI,SOFI,FOFI,NNOFI &
      &                        ,ETOT,POT,VFOCK,EOFI,PHI,SPHI)
 !     **************************************************************************
 !     ** MAKES A SELF-CONSISTENT CALCULATION OF AN ATOM IN A BOX WITH         **
@@ -1298,7 +1298,7 @@ USE PERIODICTABLE_MODULE
       INTEGER(4) ,INTENT(IN)     :: NR          ! #(GRID POINTS)
       CHARACTER(*),INTENT(IN)    :: KEY     
       REAL(8)    ,INTENT(IN)     :: RBOX        ! BOX RADIUS     
-      REAL(8)    ,INTENT(IN)     :: AEZ         ! ATOMIC NUMBER
+      REAL(8)    ,INTENT(IN)     :: AEZIN       ! ATOMIC NUMBER
       INTEGER(4) ,INTENT(IN)     :: NX          ! X#(STATES)
       INTEGER(4) ,INTENT(OUT)    :: NB          ! #(STATES)
       INTEGER(4) ,INTENT(INOUT)  :: LOFI(NX)    ! ANGULAR MOMENTUM
@@ -1321,6 +1321,7 @@ USE PERIODICTABLE_MODULE
       REAL(8)   ,PARAMETER       :: PI=4.D0*ATAN(1.D0)
       REAL(8)   ,PARAMETER       :: Y0=1.D0/SQRT(4.D0*PI) !SPH. HARM. L=0
       REAL(8)   ,PARAMETER       :: C0LL=Y0               !GAUNT COEFF
+      REAL(8)                    :: AEZ
       REAL(8)                    :: R(NR)
       REAL(8)                    :: RHO(NR)
       REAL(8)                    :: AUX(NR),AUX1(NR)   !AUXILIARY ARRAY
@@ -1378,6 +1379,7 @@ USE PERIODICTABLE_MODULE
       TFOCK=.FALSE.
       TSTART=.FALSE.
       SCALE=0.D0
+      AEZ=AEZIN
 !
       STRING=KEY
       IPOS=1
@@ -1457,7 +1459,11 @@ USE PERIODICTABLE_MODULE
             LOFI(IB)=L
             FOFI(IB)=2.D0*REAL(2*L+1,KIND=8)
 !           REMOVE ONE ELECTRON FROM 1S SHELL
-            IF(I.EQ.1.AND.L.EQ.0) FOFI(IB)=FOFI(IB)-1.0
+            IF(IB.EQ.1) THEN
+              WRITE(*,FMT='(A,I2,A,I2)')'CHANGE OCCUPATION OF 1S SHELL FROM', &
+     &                             FOFI(IB),' TO ',FOFI(IB)-1.0
+              FOFI(IB)=FOFI(IB)-1.0
+            END IF
             SOFI(IB)=0
             IF(TSO) THEN
               IF(L.NE.0) THEN
@@ -1514,6 +1520,10 @@ USE PERIODICTABLE_MODULE
 !       == OCCUPATIONS ARE FIRST FILLED ACCORDING TO NINT(AEZ). ================
 !       == THIS POSSIBILY IS USED FOR DUMMY HYDROGEN ATOMS, THAT CARRY ONLY ====
 !       == A FRACTIONAL NUCLEAR AND ELECTRONIC CHARGE ==========================
+! WARNING: AEZ IS LOWERED FOR CONSISTENCY CHECKS AND INCREASED AGAIN AFTERWARDS
+! TODO: CHECK IF THAT INFLUENCES THE CALCULATION IN AN UNEXPECTED WAY
+        AEZ=AEZIN-1.D0
+        WRITE(*,FMT='("LOWER AEZ ",F10.5," TO ",F10.5," FOR TESTS")')AEZIN,AEZ
         FTOT=SUM(FOFI(:NB))   ! =NINT(AEZ)
         SVAR=AEZ-FTOT         ! =AEZ-NINT(AEZ)
 !
@@ -1560,6 +1570,8 @@ USE PERIODICTABLE_MODULE
           CALL ERROR$R8VAL('#(ELECTRONS)-AEZ ',FTOT-AEZ)
           CALL ERROR$STOP('ATOMLIB$AESCF')
         END IF
+        AEZ=AEZIN
+        WRITE(*,FMT='("RESET AEZ TO ",F10.5)')AEZ
 !
         CALL RADIAL$NUCPOT(GID,NR,AEZ,POT)
 !       == USE "HARD SPHERE BOUNDARY CONDITION" FOR THE POISSON EQUATION =======
