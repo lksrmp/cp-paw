@@ -1458,7 +1458,7 @@ USE PERIODICTABLE_MODULE
             FOFI(IB)=2.D0*REAL(2*L+1,KIND=8)
 !           REMOVE ONE ELECTRON FROM 1S SHELL
             IF(IB.EQ.1) THEN
-              WRITE(*,FMT='(A,I2,A,I2)')'CHANGE OCCUPATION OF 1S SHELL FROM', &
+              WRITE(*,FMT='(A,F8.5,A,F8.5)')'CHANGE OCCUPATION OF 1S SHELL FROM', &
      &                             FOFI(IB),' TO ',FOFI(IB)-1.0
               FOFI(IB)=FOFI(IB)-1.0
             END IF
