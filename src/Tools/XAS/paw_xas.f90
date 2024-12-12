@@ -1533,11 +1533,13 @@
         ENDDO
         WRITE(NFIL,FMT='(A)')'RADIAL REPORT'
         CALL RADIAL$REPORT(NFIL)
-        WRITE(NFIL,FMT='(4A10)')'IKPT','ISPIN','NB','NOCC'
+        WRITE(NFIL,FMT='(8A10)')'IKPT','ISPIN','XK1','XK2','XK3', &
+&                               'WKPT','NB','NOCC'
         DO IKPT=1,THIS%NKPT
           DO ISPIN=1,THIS%NSPIN
             THIS%STATE=>THIS%STATEARR(IKPT,ISPIN)
-            WRITE(NFIL,FMT='(4I10)')IKPT,ISPIN,THIS%STATE%NB,THIS%STATE%NOCC
+            WRITE(NFIL,FMT='(2I10,4F10.6,2I10)')IKPT,ISPIN,THIS%XK(:,IKPT), &
+&                                  THIS%WKPT(IKPT),THIS%STATE%NB,THIS%STATE%NOCC
           ENDDO
         ENDDO
       ELSE
