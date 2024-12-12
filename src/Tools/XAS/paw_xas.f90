@@ -1307,9 +1307,11 @@
 !     ==================================================================
 !     == WAVE FUNCTIONS AND PROJECTIONS                               ==
 !     ==================================================================
+      CALL TRACE$PASS('READING WAVE FUNCTIONS AND CALCULATING OVERLAP')
       NKPT=SIM(1)%NKPT
 !     LOOP OVER K POINTS
       DO IKPT=1,NKPT
+        CALL TRACE$I4VAL('IKPT',IKPT)
 !       READ GENERAL INFORMATION ABOUT K POINT
         DO IS=1,NSIM
 !         KEY,NGG,NDIM,NB,NBH,TSUPER
@@ -1787,9 +1789,10 @@
 
 ! TODO: METHOD FOR PROPER ENERGY ALIGNMENT
 ! TODO: CLEANUP
-
+      CALL TRACE$PASS('XAS$CROSSSECTION LOOP')
 !     LOOP OVER K POINTS
       DO IKPT=1,SIM(1)%NKPT
+        CALL TRACE$I4VAL('IKPT',IKPT)
 !       LOOP OVER SPIN
         DO ISPIN=1,SIM(1)%NSPIN
           STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
