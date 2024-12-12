@@ -155,15 +155,19 @@
       ! USE XASPDOS_MODULE, ONLY: NPD,PD
       USE XASCNTL_MODULE, ONLY: LL_CNTL
       USE LINKEDLIST_MODULE
+      USE CLOCK_MODULE
       IMPLICIT NONE
       INTEGER(4) :: NFIL
+      CHARACTER(32) :: DATIME
       INTEGER(4) :: IPD
       INTEGER(4) :: I
       INTEGER(4) :: NUM_ARGS
 !     **************************************************************************
                           CALL TRACE$PUSH('MAIN')
       CALL MPE$INIT
-
+! TODO: COMMAND LINE HANDLING AND HELP MESSAGE
+                          CALL TIMING$START
+                          CALL TIMING$CLOCKON('TOTAL')
       ! CALL TEST$INVERSE
       ! STOP
 
@@ -172,9 +176,14 @@
 
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       CALL CPPAW_WRITEVERSION(NFIL)
+      CALL CLOCK$NOW(DATIME)        
+      WRITE(NFIL,FMT='(80("="))')
+      WRITE(NFIL,FMT='(80("="),T15,"  PROGRAM STARTED ",A32,"  ")')DATIME
+      WRITE(NFIL,FMT='(80("="))')
 !     ==========================================================================
 !     == READ XCNTL FILE                                                      ==
 !     ==========================================================================
+                          CALL TIMING$CLOCKON('XCNTL')
       CALL FILEHANDLER$UNIT('XCNTL',NFIL)
       CALL XASCNTL$READ(NFIL)
 !     READ FILES FOR DFT CALCULATION DATA
@@ -192,6 +201,7 @@
       CALL XASCNTL$GRID
 !     READ OUTPUT SELECTION
       CALL XASCNTL$OUTPUT
+                          CALL TIMING$CLOCKOFF('XCNTL')
 !     READ DFT CALCULATION DATA
       CALL XAS$READ
 !     REPORT DFT CALCULATION DATA
@@ -201,7 +211,6 @@
       CALL XAS$SELECT('EXCITESTATE')
       CALL XAS$REPORTSIMULATION
       CALL XAS$UNSELECT
-
       CALL DATACONSISTENCY
 
 !     READ SETTINGS FOR CORE HOLE
@@ -258,8 +267,12 @@
       ! CALL XAS$WRITEPHI(NFIL,2,'AEPHI')
       ! CLOSE(NFIL)
       ! CALL XAS$UNSELECT
-
-      CALL FILEHANDLER$CLOSEALL
+                          CALL TIMING$CLOCKOFF('TOTAL')
+                          CALL TIMING$PRINT('~',NFIL)
+      CALL CLOCK$NOW(DATIME)        
+      WRITE(NFIL,FMT='(80("="))')
+      WRITE(NFIL,FMT='(80("="),T15,"  PROGRAM FINISHED ",A32,"  ")')DATIME
+      WRITE(NFIL,FMT='(80("="))')
                           CALL TRACE$POP
       CALL ERROR$NORMALSTOP
       STOP
@@ -1153,6 +1166,7 @@
       COMPLEX(8), ALLOCATABLE :: OVLAP(:,:) ! (NB,NB)
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$READ')
+                          CALL TIMING$CLOCKON('XAS$READ')
 !     ==========================================================================
 !     == LOOP OVER BOTH SIMULATIONS                                           ==
 !     == REQUIRED TO CALCULATE OVERLAP ON READ AND NOT STORE PLANE WAVE BASIS ==
@@ -1379,7 +1393,7 @@
 !         READ EIGENVALUES
           READ(NFIL(1))SIM(1)%STATE%EIG
           READ(NFIL(2))SIM(2)%STATE%EIG
-
+                          CALL TIMING$CLOCKON('XAS$READ_SCALARPRODUCT')
           DO IB2=1,NB(2) ! LOOP OVER BANDS
             DO IB1=1,NB(1) ! LOOP OVER BANDS
 !             NO NDIM LOOP AS NDIM=1
@@ -1391,6 +1405,7 @@
               CALL LIB$SCALARPRODUCTC8(.FALSE.,NGG(1),1,PSIK1(:,1,IB1),1,PSIK2(:,1,IB2),OVERLAP%PW(IB2,IB1))
             ENDDO ! END LOOP OVER BANDS
           ENDDO ! END LOOP OVER BANDS
+                          CALL TIMING$CLOCKOFF('XAS$READ_SCALARPRODUCT')
           OVERLAP%PW=OVERLAP%PW*V
 !           DO IB1=1,NB(1) ! LOOP OVER BANDS
 !             DO IB2=1,NB(2) ! LOOP OVER BANDS
@@ -1408,6 +1423,7 @@
         DEALLOCATE(PSIK2)
       ENDDO ! END LOOP OVER K POINTS
       TSIM=.TRUE.
+                          CALL TIMING$CLOCKOFF('XAS$READ')
                           CALL TRACE$POP
       RETURN
 
@@ -1745,6 +1761,7 @@
       REAL(8), ALLOCATABLE :: YCONV(:)
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$CROSSSECTION')
+                          CALL TIMING$CLOCKON('XAS$CROSSSECTION')
       EMIN=HUGE(EMIN)
       EMAX=-HUGE(EMAX)
       CALL CONSTANTS('EV',EV)
@@ -1824,6 +1841,7 @@
           ENDDO
         ENDDO
       ENDDO
+                          CALL TIMING$CLOCKOFF('XAS$CROSSSECTION')
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$CROSSSECTION
@@ -1842,6 +1860,7 @@
       INTEGER(4) :: NOCC
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAP')
+                          CALL TIMING$CLOCKON('XAS$OVERLAP')
       IF(ALLOCATED(S)) THEN
         CALL ERROR$MSG('ATOMIC OVERLAP MATRIX ALREADY CALCULATED')
         CALL ERROR$STOP('XAS$OVERLAP')
@@ -1883,6 +1902,7 @@
         ENDDO
       ENDDO  
       TOVERLAP=.TRUE.  
+                          CALL TIMING$CLOCKOFF('XAS$OVERLAP')
                           CALL TRACE$POP
       END SUBROUTINE XAS$OVERLAP
 !
@@ -2144,6 +2164,7 @@
       COMPLEX(8) :: CVAR(3)
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$DIPOLEMATRIX')
+                          CALL TIMING$CLOCKON('XAS$DIPOLEMATRIX')
       IF(TTEST) THEN
         CALL FILEHANDLER$UNIT('PROT',NFIL)
         WRITE(NFIL,'(80("#"))')
@@ -2223,6 +2244,7 @@
       DEALLOCATE(R)
       DEALLOCATE(WORK)
       DEALLOCATE(RADINT)
+                          CALL TIMING$CLOCKOFF('XAS$DIPOLEMATRIX')
                           CALL TRACE$POP
       END SUBROUTINE XAS$DIPOLEMATRIX
 !
@@ -2237,6 +2259,7 @@
       INTEGER(4) :: ISPIN
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$ADET')
+                          CALL TIMING$CLOCKON('XAS$ADET')
       DO IKPT=1,SIM(1)%NKPT
         DO ISPIN=1,SIM(1)%NSPIN
           OVERLAP=>OVERLAPARR(IKPT,ISPIN)
@@ -2245,6 +2268,7 @@
           WRITE(*,*)'ADET:',OVERLAP%ADET
         ENDDO
       ENDDO
+                          CALL TIMING$CLOCKOFF('XAS$ADET')
                           CALL TRACE$POP
       END SUBROUTINE XAS$ADET
 !
@@ -2262,6 +2286,7 @@
       COMPLEX(8), ALLOCATABLE :: WORK(:,:)
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$KMAT')
+                          CALL TIMING$CLOCKON('XAS$KMAT')
       DO IKPT=1,SIM(1)%NKPT
         DO ISPIN=1,SIM(1)%NSPIN
           OVERLAP=>OVERLAPARR(IKPT,ISPIN)
@@ -2277,6 +2302,7 @@
           DEALLOCATE(WORK)
         ENDDO
       ENDDO
+                          CALL TIMING$CLOCKOFF('XAS$KMAT')
                           CALL TRACE$POP
       END SUBROUTINE XAS$KMAT
 !
