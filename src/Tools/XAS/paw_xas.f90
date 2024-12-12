@@ -1962,6 +1962,7 @@
 !     ** OVERLAP CONTRIBUTION FROM PAW AUGMENTATION                           **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE
+      USE MPE_MODULE
       IMPLICIT NONE
       TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
       INTEGER(4) :: NKPT,NSPIN
@@ -1969,9 +1970,12 @@
       INTEGER(4) :: IB1,IB2
       INTEGER(4) :: IPRO1,IPRO2
       COMPLEX(8) :: CVAR
+      INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: ICOUNT
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAPAUGMENTATION')
                           CALL TIMING$CLOCKON('XAS$OVERLAPAUGMENTATION')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
       NKPT=SIM(1)%NKPT
       NSPIN=SIM(1)%NSPIN
   !   LOOP OVER K POINTS
@@ -1983,15 +1987,19 @@
           OVERLAP=>OVERLAPARR(IKPT,ISPIN)
           ALLOCATE(OVERLAP%AUG(STATE2%NB,STATE1%NB))
           OVERLAP%AUG(:,:)=(0.D0,0.D0)
+          ICOUNT=0
   !       LOOP OVER BANDS OF FIRST SIMULATION
           DO IB2=1,STATE2%NB
   !         LOOP OVER BANDS OF SECOND SIMULATION
             DO IB1=1,STATE1%NB
+              ICOUNT=ICOUNT+1
+              IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
               CALL XAS$OVERLAPSTATE(STATE1,IB1,STATE2,IB2,CVAR)
 !             AUG(I,J)=<PSI1(J)|PSI2(I)>
               OVERLAP%AUG(IB2,IB1)=CVAR
             ENDDO ! END LOOP OVER BANDS OF SECOND SIMULATION
           ENDDO ! END LOOP OVER BANDS OF FIRST SIMULATION
+          CALL MPE$COMBINE('~','+',OVERLAP%AUG)
         ENDDO ! END LOOP OVER SPIN
       ENDDO ! END LOOP OVER K POINTS
                           CALL TIMING$CLOCKOFF('XAS$OVERLAPAUGMENTATION')
