@@ -162,24 +162,28 @@
       INTEGER(4) :: IPD
       INTEGER(4) :: I
       INTEGER(4) :: NUM_ARGS
+      INTEGER(4) :: NTASKS
+      INTEGER(4) :: THISTASK
 !     **************************************************************************
-                          CALL TRACE$PUSH('MAIN')
       CALL MPE$INIT
+                          CALL TRACE$PUSH('MAIN')
 ! TODO: COMMAND LINE HANDLING AND HELP MESSAGE
                           CALL TIMING$START
                           CALL TIMING$CLOCKON('TOTAL')
       ! CALL TEST$INVERSE
       ! STOP
-
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
 !     INITIALIZE FILES
       CALL INITIALIZEFILEHANDLER
-
       CALL FILEHANDLER$UNIT('PROT',NFIL)
-      CALL CPPAW_WRITEVERSION(NFIL)
-      CALL CLOCK$NOW(DATIME)        
-      WRITE(NFIL,FMT='(80("="))')
-      WRITE(NFIL,FMT='(80("="),T15,"  PROGRAM STARTED ",A32,"  ")')DATIME
-      WRITE(NFIL,FMT='(80("="))')
+      IF(THISTASK.EQ.1) THEN
+        CALL CPPAW_WRITEVERSION(NFIL)
+        CALL CLOCK$NOW(DATIME)        
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(80("="),T15,"  PROGRAM STARTED ",A32,"  ")')DATIME
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(A,I3)')'NUMBER OF TASKS: ',NTASKS
+      ENDIF
 !     ==========================================================================
 !     == READ XCNTL FILE                                                      ==
 !     ==========================================================================
@@ -234,7 +238,9 @@
 !     REPORT UNUSED LINKEDLISTS
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
-      CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFIL)
+      IF(THISTASK.EQ.1) THEN
+        CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFIL)
+      ENDIF
 
 
      
@@ -269,10 +275,14 @@
       ! CALL XAS$UNSELECT
                           CALL TIMING$CLOCKOFF('TOTAL')
                           CALL TIMING$PRINT('~',NFIL)
-      CALL CLOCK$NOW(DATIME)        
-      WRITE(NFIL,FMT='(80("="))')
-      WRITE(NFIL,FMT='(80("="),T15,"  PROGRAM FINISHED ",A32,"  ")')DATIME
-      WRITE(NFIL,FMT='(80("="))')
+      CALL MPE$CLOCKREPORT(NFIL)
+
+      IF(THISTASK.EQ.1) THEN
+        CALL CLOCK$NOW(DATIME)        
+        WRITE(NFIL,FMT='(80("="))')
+        WRITE(NFIL,FMT='(80("="),T15,"  PROGRAM FINISHED ",A32,"  ")')DATIME
+        WRITE(NFIL,FMT='(80("="))')
+      ENDIF
                           CALL TRACE$POP
       CALL ERROR$NORMALSTOP
       STOP
@@ -1110,6 +1120,7 @@
 !     **************************************************************************
 !     **  READ FILE PRODUCED BY SIMULATION CODE                               **
 !     **************************************************************************
+      USE MPE_MODULE
       USE XAS_MODULE, ONLY: THIS,SELECTED,SIMULATION_TYPE,SIM,TSIM, &
      &                      OVERLAP,OVERLAPARR
       USE RADIAL_MODULE, ONLY: NGID
@@ -1164,9 +1175,13 @@
       REAL(8), ALLOCATABLE :: EIG1(:) ! (NB)
       REAL(8), ALLOCATABLE :: EIG2(:) ! (NB)
       COMPLEX(8), ALLOCATABLE :: OVLAP(:,:) ! (NB,NB)
+      INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: ICOUNT
+      INTEGER(4) :: ITASK
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$READ')
                           CALL TIMING$CLOCKON('XAS$READ')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
 !     ==========================================================================
 !     == LOOP OVER BOTH SIMULATIONS                                           ==
 !     == REQUIRED TO CALCULATE OVERLAP ON READ AND NOT STORE PLANE WAVE BASIS ==
@@ -1383,7 +1398,19 @@
 ! WARNING: FIND OUT REQUIRED ORDER OF OVERLAP
 !         ALLOCATE STORAGE FOR OVERLAP
           ALLOCATE(OVERLAP%PW(NB(2),NB(1)))
-
+          OVERLAP%PW=(0.D0,0.D0)
+          ! IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) THEN
+          !   ! SKIP PSIK
+          !   READ(NFIL(1))
+          !   READ(NFIL(2))
+          !   ! SKIP PROJ
+          !   READ(NFIL(1))
+          !   READ(NFIL(2))
+          !   ! SKIP EIG
+          !   READ(NFIL(1))
+          !   READ(NFIL(2))
+          !   CYCLE
+          ! ENDIF
 !         READ PLANE WAVE BASIS
           READ(NFIL(1))PSIK1
           READ(NFIL(2))PSIK2
@@ -1394,8 +1421,11 @@
           READ(NFIL(1))SIM(1)%STATE%EIG
           READ(NFIL(2))SIM(2)%STATE%EIG
                           CALL TIMING$CLOCKON('XAS$READ_SCALARPRODUCT')
+          ICOUNT=0
           DO IB2=1,NB(2) ! LOOP OVER BANDS
             DO IB1=1,NB(1) ! LOOP OVER BANDS
+              ICOUNT=ICOUNT+1
+              IF(MOD(ICOUNT-1,NTASKS).NE.THISTASK-1) CYCLE
 !             NO NDIM LOOP AS NDIM=1
 !             SCALARPRODUCT (SUM OVER G VECTORS)
 !             PW(I,J)=<PSI1(J)|PSI2(I)>
@@ -1406,6 +1436,7 @@
             ENDDO ! END LOOP OVER BANDS
           ENDDO ! END LOOP OVER BANDS
                           CALL TIMING$CLOCKOFF('XAS$READ_SCALARPRODUCT')
+          CALL MPE$COMBINE('~','+',OVERLAP%PW)
           OVERLAP%PW=OVERLAP%PW*V
 !           DO IB1=1,NB(1) ! LOOP OVER BANDS
 !             DO IB2=1,NB(2) ! LOOP OVER BANDS
@@ -1422,6 +1453,19 @@
         DEALLOCATE(PSIK1)
         DEALLOCATE(PSIK2)
       ENDDO ! END LOOP OVER K POINTS
+
+! FOLLOWING DID NOT WORK
+    ! BROADCAST OVERLAP TO ALL TASKS
+      ! ICOUNT=0
+      ! DO IKPT=1,NKPT
+      !   DO ISPIN=1,SIM(1)%NSPIN
+      !     ICOUNT=ICOUNT+1
+      !     ITASK=MOD(ICOUNT-1,NTASKS)+1
+      !     OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+      !     CALL MPE$BROADCAST('~',ITASK,OVERLAP%PW)
+      !   ENDDO
+      ! ENDDO
+
       TSIM=.TRUE.
                           CALL TIMING$CLOCKOFF('XAS$READ')
                           CALL TRACE$POP
@@ -1497,7 +1541,10 @@
       INTEGER(4) :: IAT,ISP,ISPIN,IKPT,IPRO,IB
       CHARACTER(256) :: FORMAT
       REAL(8) :: EV
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
                           CALL TRACE$PUSH('XAS$REPORTSIMULATION')
       CALL CONSTANTS('EV',EV)
       CALL FILEHANDLER$UNIT('PROT',NFIL)
@@ -1650,7 +1697,10 @@
       INTEGER(4) :: NFIL
       INTEGER(4) :: ISPEC
       REAL(8) :: EV
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
                           CALL TRACE$PUSH('XAS$REPORTSETTINGS')
       CALL CONSTANTS('EV',EV)
       CALL FILEHANDLER$UNIT('PROT',NFIL)
@@ -1921,6 +1971,7 @@
       COMPLEX(8) :: CVAR
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAPAUGMENTATION')
+                          CALL TIMING$CLOCKON('XAS$OVERLAPAUGMENTATION')
       NKPT=SIM(1)%NKPT
       NSPIN=SIM(1)%NSPIN
   !   LOOP OVER K POINTS
@@ -1943,6 +1994,7 @@
           ENDDO ! END LOOP OVER BANDS OF FIRST SIMULATION
         ENDDO ! END LOOP OVER SPIN
       ENDDO ! END LOOP OVER K POINTS
+                          CALL TIMING$CLOCKOFF('XAS$OVERLAPAUGMENTATION')
                           CALL TRACE$POP
       END SUBROUTINE XAS$OVERLAPAUGMENTATION
 !
@@ -2324,7 +2376,10 @@
       INTEGER(4) :: NB1,NB2,NOCC
       REAL(8), ALLOCATABLE :: ISUM(:) ! SUM OF SPECTRUM OVER K POINTS AND SPINS
       TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
                           CALL TRACE$PUSH('XAS$OUTPUT')
       CALL CONSTANTS('EV',EV)
       ALLOCATE(ISUM(SETTINGS%NE))
@@ -2495,7 +2550,10 @@
       INTEGER(4) :: IR
       REAL(8), ALLOCATABLE :: R(:) ! (NR)
       REAL(8), ALLOCATABLE :: PSI(:,:) ! (NR,LNX)
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
       CALL RADIAL$GETI4(THIS%SETUP(ISP)%GID,'NR',NR)
       ALLOCATE(R(NR))
       ALLOCATE(PSI(NR,THIS%LNX(ISP)))
@@ -2730,13 +2788,15 @@
       INTEGER(4) :: I,J
       INTEGER(4) :: MLIM,NLIM
       CHARACTER(256) :: FORMAT
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
       CALL FILEHANDLER$UNIT(TRIM(ADJUSTL(FLAG)),NFIL)
       MLIM=MIN(LIMIT,M)
       NLIM=MIN(LIMIT,N)
       WRITE(FORMAT,*)MLIM
       FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F14.8,",",F14.8,") "))'
-      WRITE(*,*)FLAG,FORMAT
       WRITE(NFIL,FMT='(A,I5,A,I3)')'# KPOINT:',IKPT,' SPIN:',ISPIN
       DO I=1,NLIM
         WRITE(NFIL,FMT=FORMAT)A(I,1:MLIM)
@@ -2760,7 +2820,10 @@
       INTEGER(4) :: I,J
       INTEGER(4) :: MLIM,NLIM
       CHARACTER(256) :: FORMAT
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
       CALL FILEHANDLER$UNIT(TRIM(ADJUSTL(FLAG)),NFIL)
       WRITE(NFIL,FMT='(A,I5,A,I3)')'# KPOINT:',IKPT,' SPIN:',ISPIN
       MLIM=MIN(LIMIT,M)
@@ -2797,7 +2860,10 @@
       COMPLEX(8), ALLOCATABLE :: KMAT(:,:) ! (M2-NOCC,NOCC) K MATRIX
       COMPLEX(8) :: DET
       INTEGER(4) :: COUNT
+      INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
       NOCC=4
       M1=4
       M2=8
