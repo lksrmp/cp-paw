@@ -1406,14 +1406,14 @@
 !     ==================================================================
 !     == WAVE FUNCTIONS AND PROJECTIONS                               ==
 !     ==================================================================
-      CALL TRACE$PASS('READING WAVE FUNCTIONS AND CALCULATING OVERLAP')
       NKPT=SIM(1)%NKPT
 !     LOOP OVER K POINTS
       DO IKPT=1,NKPT
         ITASK=MOD(IKPT-1,NWTASKS)+1
         TOTASK=WTASK(ITASK)
-        IF(THISTASK.EQ.TOTASK) CALL TRACE$I4VAL(' IKPT',IKPT)
+        IF(THISTASK.EQ.TOTASK) CALL TRACE$I4VAL(' CALCULATING IKPT',IKPT)
         IF(THISTASK.EQ.RTASK) THEN
+          CALL TRACE$PASS('READING AND SENDING K POINT')
 !         READ GENERAL INFORMATION ABOUT K POINT
           DO IS=1,NSIM
 !           KEY,NGG,NDIM,NB,NBH,TSUPER
@@ -1437,8 +1437,7 @@
 !         ==================================================================
 !         == DATA CHECKS                                                  ==
 !         ==================================================================
-! NOTE: DATA CHECKS USE VARIABLES FROM THIS SUBROUTINE, POSITION OF CALL MATTERS 
-          CALL TRACE$PASS('DATA CHECKS')       
+! NOTE: DATA CHECKS USE VARIABLES FROM THIS SUBROUTINE, POSITION OF CALL MATTERS     
           CALL TEST
           DEALLOCATE(IGVEC)
         ENDIF
