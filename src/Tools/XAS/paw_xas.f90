@@ -34,7 +34,7 @@
       TYPE SETTINGS_TYPE
         INTEGER(4) :: NSPEC ! #(SPECTRA)
         CHARACTER(256) :: ATOM ! ATOM ID WITH CORE HOLE
-        INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE
+        INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE IN SIM1 (FOR SIM2 USE ATOMMAP)
         INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
         INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
 !       ENERGY GRID PARAMETER
@@ -120,6 +120,7 @@
       TYPE(SPECTRUM_TYPE), POINTER :: SPECTRUM ! CURRENT SPECTRUM
 
       REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
+      INTEGER(4), ALLOCATABLE :: ATOMMAP(:) ! (NAT) ATOM INDEX MAP SIM1->SIM2
 
       TYPE(OUTPUT_TYPE) :: OUTPUT
 
@@ -543,10 +544,10 @@
 ! TODO: IMPLEMENT THIS SUBROUTINE FURTHER, TEST THE CHECKS, ADD ADDITIONAL CHECKS
 ! TODO: COMBINE WITH TEST SUBROUTINE IN XAS$READ
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS,SIMULATION_TYPE
+      USE XAS_MODULE, ONLY: THIS,SIMULATION_TYPE,ATOMMAP
       IMPLICIT NONE
       TYPE(SIMULATION_TYPE), POINTER :: THIS1,THIS2
-      INTEGER(4) :: I
+      INTEGER(4) :: IAT1,IAT2
       REAL(8),PARAMETER :: TOL=1.D-8
 !     **************************************************************************
                           CALL TRACE$PUSH('DATACONSISTENCY')
@@ -606,17 +607,19 @@
         CALL ERROR$MSG('RBAS INCONSISTENT BETWEEN SIMULATIONS')
         CALL ERROR$STOP('DATACONSISTENCY')
       END IF
-! TODO: IMPLEMENT VARIABLE ORDER OF ATOMS
-      DO I=1,THIS1%NAT
-        IF(SUM(ABS(THIS1%R(:,I)-THIS2%R(:,I))).GT.TOL) THEN
+      DO IAT1=1,THIS1%NAT
+        IAT2=ATOMMAP(IAT1)
+        IF(SUM(ABS(THIS1%R(:,IAT1)-THIS2%R(:,IAT2))).GT.TOL) THEN
           CALL ERROR$MSG('ATOMIC POSITIONS INCONSISTENT BETWEEN SIMULATIONS')
-          CALL ERROR$I4VAL('I',I)
-          CALL ERROR$R8VAL('R1X',THIS1%R(1,I))
-          CALL ERROR$R8VAL('R1Y',THIS1%R(2,I))
-          CALL ERROR$R8VAL('R1Z',THIS1%R(3,I))
-          CALL ERROR$R8VAL('R2X',THIS2%R(1,I))
-          CALL ERROR$R8VAL('R2Y',THIS2%R(2,I))
-          CALL ERROR$R8VAL('R2Z',THIS2%R(3,I))
+          CALL ERROR$I4VAL('IAT1',IAT1)
+          CALL ERROR$I4VAL('IAT2',IAT2)
+          CALL ERROR$CHVAL('ATOMID1',THIS1%ATOMID(IAT1))
+          CALL ERROR$R8VAL('R1X',THIS1%R(1,IAT1))
+          CALL ERROR$R8VAL('R1Y',THIS1%R(2,IAT1))
+          CALL ERROR$R8VAL('R1Z',THIS1%R(3,IAT1))
+          CALL ERROR$R8VAL('R2X',THIS2%R(1,IAT2))
+          CALL ERROR$R8VAL('R2Y',THIS2%R(2,IAT2))
+          CALL ERROR$R8VAL('R2Z',THIS2%R(3,IAT2))
           CALL ERROR$STOP('DATACONSISTENCY')
         END IF
       ENDDO
@@ -931,8 +934,8 @@
       CALL LINKEDLIST$GET(LL_CNTL,'ATOM',1,ATOM)
       SETTINGS%ATOM=TRIM(ATOM)
       TCHK=.FALSE.
-      DO IAT=1,SIM(2)%NAT
-        IF(TRIM(ATOM).EQ.TRIM(SIM(2)%ATOMID(IAT))) THEN
+      DO IAT=1,SIM(1)%NAT
+        IF(TRIM(ATOM).EQ.TRIM(SIM(1)%ATOMID(IAT))) THEN
           TCHK=.TRUE.
           EXIT
         END IF
@@ -940,7 +943,7 @@
       IF(TCHK) THEN
         SETTINGS%IATOM=IAT
       ELSE
-        CALL ERROR$MSG('ATOM NOT FOUND IN EXCITESTATE')
+        CALL ERROR$MSG('ATOM NOT FOUND IN SIMULATION')
         CALL ERROR$CHVAL('ATOM',ATOM)
         CALL ERROR$STOP('XASCNTL$COREHOLE')
       END IF
@@ -1477,7 +1480,8 @@
         ENDDO ! END IAT
         CALL XAS$UNSELECT
       ENDDO ! END IS (NSIM)
-
+!     MAP ATOM INDICES BASED ON NAMES
+      CALL ATOMMAPPING
 !     ==================================================================
 !     == DATA CONSISTENCY CHECKS BETWEEN BOTH SIMULATIONS             ==
 !     ==================================================================
@@ -1864,7 +1868,7 @@
 !     DATA NOT AVAILABLE FROM RESTART FILE
       IF(.NOT.TRSTRT) THEN
         WRITE(NFIL,FMT='(A10,A)')'HOLE ATOM:',TRIM(SETTINGS%ATOM)
-        WRITE(NFIL,FMT='(A10,I10)')'IND ATOM:',SETTINGS%IATOM
+        WRITE(NFIL,FMT='(A10,I10)')'IND1 ATOM:',SETTINGS%IATOM
         WRITE(NFIL,FMT='(A10,I10)')'NCORE:',SETTINGS%NCORE
         WRITE(NFIL,FMT='(A10,I10)')'LCORE:',SETTINGS%LCORE
       ENDIF
@@ -2201,14 +2205,14 @@
 !     ** CALCULATE ATOMIC OVERLAP BETWEEN TWO STATES                          **
 !     ** <STATE1|STATE2>                                                      **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: STATE_TYPE,S,SIM
+      USE XAS_MODULE, ONLY: STATE_TYPE,S,SIM,ATOMMAP
       IMPLICIT NONE
       TYPE(STATE_TYPE), INTENT(IN) :: STATE1
       INTEGER(4), INTENT(IN) :: NB1
       TYPE(STATE_TYPE), INTENT(IN) :: STATE2
       INTEGER(4), INTENT(IN) :: NB2
       COMPLEX(8), INTENT(OUT) :: OVLAP
-      INTEGER(4) :: IAT
+      INTEGER(4) :: IAT1,IAT2
       INTEGER(4) :: ISP1,ISP2
       INTEGER(4) :: LN1,LN2
       INTEGER(4) :: IPRO1,IPRO2
@@ -2217,24 +2221,24 @@
       COMPLEX(8) :: CVAR
 !     **************************************************************************
       OVLAP=(0.D0,0.D0)
-      DO IAT=1,SIM(1)%NAT
-        ISP1=SIM(1)%ISPECIES(IAT)
-! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
-        ISP2=SIM(2)%ISPECIES(IAT)
+      DO IAT1=1,SIM(1)%NAT
+        ISP1=SIM(1)%ISPECIES(IAT1)
+        IAT2=ATOMMAP(IAT1)
+        ISP2=SIM(2)%ISPECIES(IAT2)
         DO LN1=1,SIM(1)%LNX(ISP1)
           DO LN2=1,SIM(2)%LNX(ISP2)
             L1=SIM(1)%LOX(LN1,ISP1)
             L2=SIM(2)%LOX(LN2,ISP2)
             IF(L1.NE.L2) CYCLE
-            IPRO1=SIM(1)%MAP(IAT,LN1)
+            IPRO1=SIM(1)%MAP(IAT1,LN1)
             DO M1=1,2*L1+1
               IPRO1=IPRO1+1
-              IPRO2=SIM(2)%MAP(IAT,LN2)
+              IPRO2=SIM(2)%MAP(IAT2,LN2)
               DO M2=1,2*L2+1
                 IPRO2=IPRO2+1
                 IF(M1.NE.M2) CYCLE
                 CVAR=CONJG(STATE1%PROJ(1,NB1,IPRO1))*STATE2%PROJ(1,NB2,IPRO2)
-                OVLAP=OVLAP+CVAR*S(IAT,LN1,LN2)
+                OVLAP=OVLAP+CVAR*S(IAT1,LN1,LN2)
               ENDDO
             ENDDO
           ENDDO
@@ -2250,8 +2254,7 @@
 !     ** ONLY CALCULATE FOR ONE ARBITRARY M1=M2 AS RESULT IS THE SAME WITHIN  **
 !     ** THE SAME L-SHELL; M1=M2 MUST BE ENSURED ELSEWHERE                    **
 !     **************************************************************************
-! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
-      USE XAS_MODULE, ONLY: SIM,S
+      USE XAS_MODULE, ONLY: SIM,S,ATOMMAP
       IMPLICIT NONE
       INTEGER(4) :: IAT1,IAT2
       INTEGER(4) :: ISP1,ISP2
@@ -2283,7 +2286,7 @@
 
         DO LN1=1,SIM(1)%LNX(ISP1)
           L1=SIM(1)%LOX(LN1,ISP1)
-          IAT2=IAT1
+          IAT2=ATOMMAP(IAT1)
           ISP2=SIM(2)%ISPECIES(IAT2)
           GID2=SIM(2)%SETUP(ISP2)%GID
           CALL RADIAL$GETI4(GID2,'NR',NR2)
@@ -2385,7 +2388,7 @@
 !     ** CALCULATE DIPOLE MATRIX ELEMENTS IN EXCITED ORBITAL BASIS            **
 !     ** SIMULATION 2 IS THE EXCITED STATE, SIMULATION 1 IS THE GROUND STATE  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SETTINGS,SIM,SETUP_TYPE,STATE_TYPE,OVERLAP,OVERLAPARR,TRSTRT
+      USE XAS_MODULE, ONLY: SETTINGS,SIM,SETUP_TYPE,STATE_TYPE,OVERLAP,OVERLAPARR,TRSTRT,ATOMMAP
       IMPLICIT NONE
       LOGICAL(4), PARAMETER :: TTEST=.FALSE.
       REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
@@ -2422,7 +2425,7 @@
         WRITE(NFIL,FMT='(A)')'DIPOLE MATRIX CALCULATION'
         WRITE(NFIL,'(80("#"))')
       ENDIF
-      IATOM=SETTINGS%IATOM
+      IATOM=ATOMMAP(SETTINGS%IATOM)
       ISP=SIM(2)%ISPECIES(IATOM)
       STP=>SIM(2)%SETUP(ISP)
       CALL RADIAL$GETI4(STP%GID,'NR',NR)
@@ -2847,19 +2850,20 @@
 !     ** IN SIMULATION 1 AND 2                                                **
 !     ** DIFF=SUM(E1)-SUM(E2)                                                 **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SIM
+      USE XAS_MODULE, ONLY: SIM,ATOMMAP
       IMPLICIT NONE
       REAL(8), INTENT(OUT) :: DIFF
-      INTEGER(4) :: IAT
+      INTEGER(4) :: IAT1,IAT2
       INTEGER(4) :: ISP1,ISP2
       INTEGER(4) :: I
       REAL(8) :: E1,E2
 !     **************************************************************************
       DIFF=0.D0
 ! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
-      DO IAT=1,SIM(1)%NAT
-        ISP1=SIM(1)%ISPECIES(IAT)
-        ISP2=SIM(2)%ISPECIES(IAT)
+      DO IAT1=1,SIM(1)%NAT
+        ISP1=SIM(1)%ISPECIES(IAT1)
+        IAT2=ATOMMAP(IAT1)
+        ISP2=SIM(2)%ISPECIES(IAT2)
         DIFF=DIFF+SIM(1)%SETUP(ISP1)%ETOT-SIM(2)%SETUP(ISP2)%ETOT
       ENDDO
       RETURN
@@ -3035,7 +3039,6 @@
       ENDDO
       RETURN
       END SUBROUTINE WRITEMATC8ABS
-
 ! WARNING: THIS TESTS ONLY CHANGE OF SIGN AND NOT A POTENTIAL RANDOM PHASE CHANGE
 !          COULD THIS HAPPEN IN A SIMULATION?
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -3176,7 +3179,8 @@
         RETURN
         END SUBROUTINE REPORT
       END SUBROUTINE TEST$INVERSE
-
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$WRITERESTART
 !     **************************************************************************
 !     ** WRITE RESTART DATA TO FILE                                           **
@@ -3223,8 +3227,8 @@
       CALL FILEHANDLER$CLOSE('RSTRT_OUT')
                           CALL TRACE$POP
       END SUBROUTINE XAS$WRITERESTART
-
-
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$READRESTART
 !     **************************************************************************
 !     ** READ RESTART DATA TO FILE                                            **
@@ -3329,3 +3333,37 @@
       ENDIF
                           CALL TRACE$POP
       END SUBROUTINE XAS$READRESTART
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE ATOMMAPPING
+!     **************************************************************************
+!     ** MAP INDICES ATOMS FROM SIMULATION 1 TO SIMULATION 2                  **
+!     ** MAPPING BASED ON ATOM NAMES                                          **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: ATOMMAP,SIM
+      IMPLICIT NONE
+      INTEGER(4) :: IAT1
+      INTEGER(4) :: IAT2
+      INTEGER(4) :: I
+      LOGICAL(4) :: FOUND
+!     **************************************************************************
+                          CALL TRACE$PUSH('ATOMMAPPING')
+      ALLOCATE(ATOMMAP(SIM(1)%NAT))
+      DO IAT1=1,SIM(1)%NAT
+        FOUND=.FALSE.
+        DO IAT2=1,SIM(2)%NAT
+          IF(SIM(1)%ATOMID(IAT1).EQ.SIM(2)%ATOMID(IAT2)) THEN
+            ATOMMAP(IAT1)=IAT2
+            FOUND=.TRUE.
+            EXIT
+          ENDIF
+        ENDDO
+        IF(.NOT.FOUND) THEN
+          CALL ERROR$MSG('ATOM NOT FOUND IN SIMULATION 2')
+          CALL ERROR$I4VAL('IAT1',IAT1)
+          CALL ERROR$CHVAL('ATOMID',SIM(1)%ATOMID(IAT1))
+          CALL ERROR$STOP('ATOMMAPPING')
+        ENDIF
+      ENDDO
+                          CALL TRACE$POP
+      END SUBROUTINE ATOMMAPPING
