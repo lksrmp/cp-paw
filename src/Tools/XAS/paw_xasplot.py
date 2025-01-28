@@ -1,5 +1,6 @@
 import argparse
 import sys
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -45,6 +46,7 @@ class XASData:
 def main():
     parser = argparse.ArgumentParser(description='Visualize overlap matrix')
     parser.add_argument('filename', nargs='?', help='the file to process')
+    parser.add_argument('--output-dir', help='directory to save the plots')
     args = parser.parse_args()
 
     if args.filename:
@@ -55,8 +57,11 @@ def main():
 
     for ikpt in range(XASData.nkpt):
         for ispin in range(XASData.nspin):
-            plot_matrix(XASData, ikpt, ispin)
-    plt.show()
+            plot_matrix(XASData, ikpt, ispin, args.output_dir)
+    if(args.output_dir):
+        print(f'Plots saved to {args.output_dir}')
+    else:
+        plt.show()
     # np.set_printoptions(precision=4, suppress=True, linewidth=np.inf)
     # print("Matrix (first 6x6 block):\n", matrix[0:6, 0:6])
     
@@ -89,21 +94,25 @@ def read_data(filename):
                 XAS.add_matrix(ikpt, ispin, matrix)
     return XAS
 
-def plot_matrix(XASData, k_point, spin):
+def plot_matrix(XASData, k_point, spin, output_dir=None):
     matrix = XASData.get_matrix(k_point, spin)
     nocc = XASData.get_nocc(k_point, spin)
     if matrix is not None:
-        plt.figure()
+        plt.figure(dpi=150)
         plt.imshow(np.abs(matrix), cmap='Blues', interpolation='none', vmin=0)
         plt.colorbar(label='abs. val.')
-        plt.title(f'Overlap Matrix for k-point {k_point}, spin {spin}')
+        plt.title(f'Overlap Matrix for k-point {k_point+1}, spin {spin+1}')
         plt.xlabel('Column index')
         plt.ylabel('Row index')
         # Draw a red border around the square sub matrix of size NOCC
         rect = plt.Rectangle((-0.5, -0.5), nocc, nocc, edgecolor='red', facecolor='none', linewidth=2)
         plt.gca().add_patch(rect)
+        if output_dir:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            plt.savefig(os.path.join(output_dir, f'overlap_matrix_k{k_point+1}_s{spin+1}.png'))
     else:
-        print(f'No data available for k_point {k_point}, spin {spin}')
+        print(f'No data available for k_point {k_point+1}, spin {spin+1}')
 
 if __name__ == '__main__':
     main()
