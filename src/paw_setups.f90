@@ -91,8 +91,6 @@ TYPE ATOMWAVES_TYPE
   REAL(8)   ,ALLOCATABLE :: AEPSI(:,:)
   REAL(8)   ,ALLOCATABLE :: AEPSISM(:,:)
   REAL(8)   ,ALLOCATABLE :: AEPOT(:)
-  REAL(8)                :: ETOT  ! TOTAL ENERGY OF ATOM FROM ATOMLIB$AESCF
-  LOGICAL(4)             :: THOLE  ! ADDS A HOLE IN THE 1S ORBITAL
 END TYPE ATOMWAVES_TYPE
 TYPE SETTING_TYPE
   LOGICAL  :: TREL ! RELATIVISTIC OR NON-RELATIVISTIC
@@ -157,6 +155,9 @@ REAL(8)   ,ALLOCATABLE :: LOCORBBMAT(:,:) ! |PSI>=|CHI>BMAT<PTILDE|PSITILDE>
 REAL(8)                :: M
 REAL(8)                :: ZV
 CHARACTER(64)          :: COREID
+REAL(8)                :: EAESCF  ! TOTAL ENERGY OF ATOM FROM ATOMLIB$AESCF
+LOGICAL(4)             :: THOLE  ! ADDS A HOLE IN THE 1S ORBITAL
+REAL(8)                :: ECORE  ! CORE ENERGY
 REAL(8)                :: PSG2
 REAL(8)                :: PSG4
 CHARACTER(32)          :: SOFTCORETYPE
@@ -662,8 +663,10 @@ END MODULE SETUP_MODULE
         VAL=THIS%RBOX  ! USED IN PAW_OPTEELS.F90
       ELSE IF(ID.EQ.'RAD') THEN
         VAL=THIS%RAD  ! ATOM-RADIUS FOR PDOS ETC.
-      ELSE IF(ID.EQ.'AESCFETOT') THEN
-        VAL=THIS%ATOM%ETOT
+      ELSE IF(ID.EQ.'EAESCF') THEN
+        VAL=THIS%EAESCF
+      ELSE IF(ID.EQ.'ECORE') THEN
+        VAL=THIS%ECORE
       ELSE
         CALL ERROR$MSG('ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID',ID)
@@ -1249,7 +1252,7 @@ END MODULE SETUP_MODULE
         THIS%ZV=ZV          ! #(VALENCE ELECTRONS)
         THIS%COREID=COREID  ! IDENTIFIER OF THE FROZEN CORE
         THIS%SETTING%SO=TSO ! SPIN-ORBIT SWITCH
-        THIS%ATOM%THOLE=THOLE ! SWITCH FOR 1S CORE HOLE
+        THIS%THOLE=THOLE ! SWITCH FOR 1S CORE HOLE
 !       __ PARTIAL WAVES________________________________________________________
         THIS%PARMS%TYPE     =TYPE         ! PARTIAL WAVE PSEUDIZATION METHOD
         ALLOCATE(THIS%PARMS%RCL(LX+1))    
@@ -2827,7 +2830,8 @@ RCL=RCOV
       REAL(8)               :: ROUT
       REAL(8)               :: AEZ        !ATOMIC NUMBER
       REAL(8)               :: ZV         ! #(VALENCE ELECTRONS)
-      REAL(8)               :: ETOT
+      REAL(8)               :: EAESCF
+      REAL(8)               :: ECORE
       CHARACTER(64)         :: KEY
       REAL(8)   ,ALLOCATABLE:: PSI(:,:)
       REAL(8)   ,ALLOCATABLE:: PSISM(:,:)  !SMALL COMPONENT
@@ -2949,13 +2953,13 @@ PRINT*,'THIS%SETTING%SO=',THIS%SETTING%SO
       NNOFI=-1111
 !
 !     == PERFORM ALL-ELECTRON SELF-CONSISTENT CALCULATION OF THE ATOM
-      IF(THIS%ATOM%THOLE) THEN
+      IF(THIS%THOLE) THEN
         WRITE(*,'(A)')'CORE HOLE SELECTED AND ATOMLIB$AESCFHOLE CALLED'
         CALL ATOMLIB$AESCFHOLE(GID,NR,KEY,ROUT,AEZ,NBX,NB,LOFI,SOFI,FOFI,NNOFI &
-    &                         ,ETOT,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
+    &                         ,EAESCF,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
       ELSE
         CALL ATOMLIB$AESCF(GID,NR,KEY,ROUT,AEZ,NBX,NB,LOFI,SOFI,FOFI,NNOFI &
-      &                   ,ETOT,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
+      &                   ,EAESCF,THIS%ATOM%AEPOT,VFOCK,EOFI,PSI,PSISM)
       ENDIF
 
       CALL TIMING$CLOCKOFF('SCF-ATOM')
@@ -2976,7 +2980,7 @@ PRINT*,'THIS%SETTING%SO=',THIS%SETTING%SO
         IF(TC(IB))NC=NC+1
       ENDDO
       THIS%ATOM%NC=NC
-      THIS%ATOM%ETOT=ETOT
+      THIS%EAESCF=EAESCF
 !     == MAP ATOMIC DATA ON GRID ===============================================
       THIS%ATOM%NB=NB
       ALLOCATE(THIS%ATOM%LOFI(NB))
@@ -3017,12 +3021,11 @@ PRINT*,'THIS%SETTING%SO=',THIS%SETTING%SO
       NNOFI(:NB)=THIS%ATOM%NNOFI
       EOFI(:NB) =THIS%ATOM%EOFI
       PSI(:,:NB)=THIS%ATOM%AEPSI
-      PSISM(:,:NB)=THIS%ATOM%AEPSISM
-      DEALLOCATE(TC)
+      PSISM(:,:NB)=THIS%ATOM%AEPSISM    
 !
 !     == ZV IS OVERWRITTEN BY INFORMATION FROM COREID ==========================
       ZV=AEZ-SUM(THIS%ATOM%FOFI(:NC))  
-      IF(THIS%ATOM%THOLE) THEN
+      IF(THIS%THOLE) THEN
         ZV=ZV-1.D0
         WRITE(*,'(A)')'#(VALENCE ELECTRONS) DECREASED BY 1'
       END IF
@@ -3049,6 +3052,16 @@ PRINT*,'THIS%SETTING%SO=',THIS%SETTING%SO
         THIS%ATOM%AEPSISM(:,IB)=PSISM(:,IB)
       ENDDO
       DEALLOCATE(AUX)
+!     ==========================================================================
+!     == CALCULATE CORE ENERGY                                                ==
+!     ==========================================================================
+      WRITE(6,FMT='(56("="))')
+      WRITE(6,FMT='(56("="),T10," CORE ENERGY CALCULATION ")')
+      WRITE(6,FMT='(56("="))')
+      CALL SETUP_ECORE(GID,NR,NB,TC,FOFI,EOFI,PSI,PSISM,ROUT,ECORE)
+      WRITE(6,FMT='("CORE ENERGY=",F25.7)')ECORE
+      THIS%ECORE=ECORE
+      DEALLOCATE(TC)
 !     
 !     ==========================================================================
 !     == REPORT ENERGIES                                                      ==
@@ -3056,7 +3069,7 @@ PRINT*,'THIS%SETTING%SO=',THIS%SETTING%SO
       WRITE(6,FMT='(56("="))')
       WRITE(6,FMT='(56("="),T10," ALL-ELECTRON ATOM CALCULATION ")')
       WRITE(6,FMT='(56("="))')
-      WRITE(6,FMT='("TOTAL ENERGY=",F25.7)')ETOT
+      WRITE(6,FMT='("TOTAL ENERGY=",F25.7)')EAESCF
       WRITE(6,FMT='(4A4,A20,2A10)')"IB","N","L","SO","E","F","#(REM. EL.)"
       SVAR=0.D0
       DO IB=1,NB
@@ -10154,7 +10167,101 @@ PRINT*,'EOFPHI ',EOFPHI
       ENDDO
       RETURN
       END
-
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETUP_ECORE(GID,NR,NB,TC,FOFI,EOFI,PSI,PSIM,ROUT,ECORE)
+!     **************************************************************************
+!     **  CALCULATE CORE ENERGY                                               **
+!     **************************************************************************
+      USE SETUP_MODULE, ONLY: THIS
+      IMPLICIT NONE
+      INTEGER(4), PARAMETER :: NBX=40
+      REAL(8)   ,PARAMETER  :: PI=4.D0*ATAN(1.D0)
+      REAL(8)   ,PARAMETER  :: Y0=1.D0/SQRT(4.D0*PI)
+      REAL(8)   ,PARAMETER  :: FOURPI=4.D0*PI
+      REAL(8)   ,PARAMETER  :: C0LL=1.D0/SQRT(FOURPI)
+      INTEGER(4), INTENT(IN) :: GID
+      INTEGER(4), INTENT(IN) :: NR
+      INTEGER(4), INTENT(IN) :: NB
+      LOGICAL(4), INTENT(IN) :: TC(NB)
+      REAL(8), INTENT(IN) :: FOFI(NBX)
+      REAL(8), INTENT(IN) :: EOFI(NBX)
+      REAL(8), INTENT(IN) :: PSI(NR,NBX)
+      REAL(8), INTENT(IN) :: PSIM(NR,NBX)
+      REAL(8), INTENT(IN) :: ROUT
+      REAL(8), INTENT(OUT) :: ECORE
+      REAL(8), ALLOCATABLE :: RHOC(:)
+      REAL(8), ALLOCATABLE :: GRHO(:)
+      REAL(8), ALLOCATABLE :: R(:)
+      REAL(8), ALLOCATABLE :: AUX(:)
+      REAL(8), ALLOCATABLE :: VAL(:)
+      REAL(8), ALLOCATABLE :: POT(:)
+      REAL(8), ALLOCATABLE :: EDEN(:)
+      INTEGER(4) :: IB
+      INTEGER(4) :: IR
+      REAL(8) :: SVAR
+      REAL(8) :: RH
+      REAL(8) :: GRHO2
+      REAL(8) :: EXC1,VXC,DUMMY1,VGXC,DUMMY2,DUMMY3
+!     **************************************************************************
+                          CALL TRACE$PUSH('SETUP_ECORE')
+      ECORE=0.D0
+      ALLOCATE(RHOC(NR))
+      RHOC(:)=0.D0
+!     SUM_NCORE F_N*E_N^AT
+      DO IB=1,NB
+        IF(.NOT.TC(IB)) CYCLE ! SELECT ONLY CORE STATES
+        ECORE=ECORE+FOFI(IB)*EOFI(IB) ! SUM ENERGIES
+        RHOC=RHOC+FOFI(IB)*(PSI(:,IB)**2+PSIM(:,IB)**2)*C0LL ! CORE DENSITY
+      ENDDO
+      ! WRITE(*,*)'SUM_NCORE F_N*E_N^AT FN*EN=',ECORE
+      ALLOCATE(R(NR))
+      CALL RADIAL$R(GID,NR,R)
+      ALLOCATE(AUX(NR))
+      ALLOCATE(VAL(NR))
+!     INT D^3R N_C V_EFF^AT
+      AUX(:)=R(:)**2*RHOC*THIS%ATOM%AEPOT
+      CALL RADIAL$INTEGRATE(GID,NR,AUX,VAL)
+      CALL RADIAL$VALUE(GID,NR,VAL,ROUT,SVAR)
+      ECORE=ECORE-SVAR
+      WRITE(*,*)'INT D^3R N_C V_EFF^AT=',SVAR
+      ALLOCATE(POT(NR))
+!     COULOMB ENERGY INT D^3R N_C INT D^3R' (N_C'/2+Z) / |R-R'|
+      CALL RADIAL$NUCPOT(GID,NR,THIS%AEZ,POT)
+      CALL RADIAL$POISSON(GID,NR,0,RHOC,AUX)
+      POT=POT+0.5D0*AUX
+      AUX(:)=R(:)**2*RHOC*POT
+      CALL RADIAL$INTEGRATE(GID,NR,AUX,VAL)
+      CALL RADIAL$VALUE(GID,NR,VAL,ROUT,SVAR)
+      ECORE=ECORE+SVAR
+      WRITE(*,*)'COULOMB ENERGY=',SVAR
+      DEALLOCATE(POT)
+      DEALLOCATE(VAL)
+      ALLOCATE(GRHO(NR))
+      ALLOCATE(EDEN(NR))
+!     EXCHANGE ENERGY
+      CALL RADIAL$DERIVE(GID,NR,RHOC,GRHO)
+      DO IR=1,NR
+        RH=RHOC(IR)*Y0
+        GRHO2=(Y0*GRHO(IR))**2
+        CALL DFT(RH,0.D0,GRHO2,0.D0,0.D0,EXC1,VXC,DUMMY1,VGXC,DUMMY2,DUMMY3)
+        EDEN(IR)=4.D0*PI*EXC1   ! ANGULAR INTEGRATION ALREADY INCLUDED
+      ENDDO
+      EDEN(:)=EDEN(:)*R(:)**2
+      CALL RADIAL$INTEGRATE(GID,NR,EDEN,AUX)
+      CALL RADIAL$VALUE(GID,NR,AUX,ROUT,SVAR)
+      ! WRITE(*,*)'EXCHANGE ENERGY=',SVAR
+      ! ECORE FOR THIS ATOM
+      ECORE=ECORE+SVAR ! GRHO,RHOC,EDEN,R,AUX
+      ! WRITE(*,*)'CORE ENERGY=',ECORE
+      DEALLOCATE(RHOC)
+      DEALLOCATE(AUX)
+      DEALLOCATE(R)
+      DEALLOCATE(GRHO)
+      DEALLOCATE(EDEN)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE SETUP_ECORE
 !!$POSITION OF THE MAXIMUM RAD(Z)=EXP[A+B*LN(Z)]  0.1<Y<5.
 !!$ N=1  ---     ---     0.072414   -1.0164
 !!$ N=2 1.4027 -1.1004   2.3212     -1.2082

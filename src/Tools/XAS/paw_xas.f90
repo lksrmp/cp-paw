@@ -2,7 +2,7 @@
       MODULE XAS_MODULE
       TYPE SETUP_TYPE
         INTEGER(4) :: GID ! GRID ID FOR RADIAL MESH
-        REAL(8) :: ETOT ! TOTAL ENERGY OF ATOMIC CALCULATION
+        REAL(8) :: ECORE ! CORE ENERGY
         REAL(8), ALLOCATABLE :: PSPHI(:,:) ! PSEUDO PARTIAL WAVE
         REAL(8), ALLOCATABLE :: AEPHI(:,:) ! AE PARTIAL WAVE
         INTEGER(4) :: NBATOM ! #(ATOMIC WAVE FUNCTIONS)
@@ -90,7 +90,9 @@
         INTEGER(4) :: ISHIFT(3) ! K-POINT SHIFTS
         REAL(8) :: RNTOT
         REAL(8) :: NEL
-        REAL(8) :: ETOT
+        REAL(8) :: ETOT  ! TOTAL ENERGY
+        REAL(8) :: EDFT  ! TOTAL DFT ENERGY
+        REAL(8) :: ECORE  ! TOTAL CORE ENERGY
         INTEGER(4) :: SPACEGROUP
         LOGICAL(4) :: TSHIFT
         REAL(8) :: RBAS(3,3) ! BASIS VECTORS
@@ -1315,7 +1317,7 @@
           READ(NFIL(IS))THIS%LNX,THIS%LOX
 !         NKDIV(3),ISHIFT(3),RNTOT,NEL,TINV
           READ(NFIL(IS))THIS%NKDIV,THIS%ISHIFT,THIS%RNTOT,THIS%NEL, &
-&                       THIS%ETOT,ILOGICAL
+&                       THIS%EDFT,ILOGICAL
           THIS%TINV=.FALSE.
           IF(ILOGICAL.EQ.1) THIS%TINV=.TRUE.
 !         SPACEGROUP,TSHIFT
@@ -1329,7 +1331,7 @@
         CALL MPE$BROADCAST('~',RTASK,THIS%ISHIFT)
         CALL MPE$BROADCAST('~',RTASK,THIS%RNTOT)
         CALL MPE$BROADCAST('~',RTASK,THIS%NEL)
-        CALL MPE$BROADCAST('~',RTASK,THIS%ETOT)
+        CALL MPE$BROADCAST('~',RTASK,THIS%EDFT)
         CALL MPE$BROADCAST('~',RTASK,THIS%TINV)
         CALL MPE$BROADCAST('~',RTASK,THIS%SPACEGROUP)
         CALL MPE$BROADCAST('~',RTASK,THIS%TSHIFT)
@@ -1390,9 +1392,9 @@
             CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'DEX',DEX)
             CALL RADIAL$SETR8(THIS%SETUP(ISP)%GID,'R1',R1)
           ENDIF
-!         AESCFETOT
-          IF(THISTASK.EQ.RTASK) READ(NFIL(IS))THIS%SETUP(ISP)%ETOT
-          CALL MPE$BROADCAST('~',RTASK,THIS%SETUP(ISP)%ETOT)
+!         ECORE
+          IF(THISTASK.EQ.RTASK) READ(NFIL(IS))THIS%SETUP(ISP)%ECORE
+          CALL MPE$BROADCAST('~',RTASK,THIS%SETUP(ISP)%ECORE)
 !         ALLOCATE AND READ (AUXILIARY) PARTIAL WAVES
           LNX=THIS%LNX(ISP)
           ALLOCATE(THIS%SETUP(ISP)%PSPHI(NR,LNX))
@@ -1482,6 +1484,11 @@
       ENDDO ! END IS (NSIM)
 !     MAP ATOM INDICES BASED ON NAMES
       CALL ATOMMAPPING
+!     CALCULATE TOTAL CORE ENERGY
+      CALL XAS_COREENERGY
+!     ADD TOGETHER FOR TOTAL ENERGY
+      SIM(1)%ETOT=SIM(1)%EDFT+SIM(1)%ECORE
+      SIM(2)%ETOT=SIM(2)%EDFT+SIM(2)%ECORE
 !     ==================================================================
 !     == DATA CONSISTENCY CHECKS BETWEEN BOTH SIMULATIONS             ==
 !     ==================================================================
@@ -1723,6 +1730,8 @@
         WRITE(NFIL,FMT='(A10,F10.4)')'RNTOT:',THIS%RNTOT
         WRITE(NFIL,FMT='(A10,F10.4)')'NEL:',THIS%NEL
         WRITE(NFIL,FMT='(A10,F10.4)')'ETOT [EV]:',THIS%ETOT/EV
+        WRITE(NFIL,FMT='(A10,F10.4)')'EDFT [EV]:',THIS%EDFT/EV
+        WRITE(NFIL,FMT='(A10,F10.4)')'ECORE [EV]:',THIS%ECORE/EV
         WRITE(NFIL,FMT='(A10,I10)')'SPACEGR.:',THIS%SPACEGROUP
         WRITE(NFIL,FMT='(A10,L10)')'TSHIFT:',THIS%TSHIFT
         WRITE(NFIL,FMT='(A10,3F10.4)')'RBAS:',THIS%RBAS(:,1)
@@ -1733,14 +1742,14 @@
         DO IAT=1,THIS%NAT
           WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
         ENDDO
-        WRITE(NFIL,FMT='(5A10)')'SETUP','GID','ETOT[H]','LNX','LOX'
+        WRITE(NFIL,FMT='(5A10)')'SETUP','GID','ECORE[H]','LNX','LOX'
         IF(THIS%LNXX.GT.9) THEN
           WRITE(FORMAT,'("(2I10,F10.4,I10,",I2,"I10)")')THIS%LNXX
         ELSE
           WRITE(FORMAT,'("(2I10,F10.4,I10,",I1,"I10)")')THIS%LNXX
         END IF
         DO ISP=1,THIS%NSP
-          WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%SETUP(ISP)%ETOT, &
+          WRITE(NFIL,FMT=FORMAT)ISP,THIS%SETUP(ISP)%GID,THIS%SETUP(ISP)%ECORE, &
      &                          THIS%LNX(ISP),THIS%LOX(:,ISP)
         ENDDO
         WRITE(NFIL,FMT='(A)')'MAPPING OF PROJECTIONS (INDEX-1)'
@@ -2844,30 +2853,32 @@
       END SUBROUTINE XAS$FILEHANDLER
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XAS_ATOMENERGYDIFF(DIFF)  ! MARK: ATOMENERGYDIFF
+      SUBROUTINE XAS_COREENERGY  ! MARK: XAS_COREENERGY
 !     **************************************************************************
-!     ** CALCULATE ENERGY DIFFERENCE BETWEEN ISOLATED ATOMS                   **
-!     ** IN SIMULATION 1 AND 2                                                **
-!     ** DIFF=SUM(E1)-SUM(E2)                                                 **
+!     ** CALCULATE CORE ENERGY FOR BOTH SIMULATIONS                           **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: SIM,ATOMMAP
       IMPLICIT NONE
-      REAL(8), INTENT(OUT) :: DIFF
+      REAL(8) :: GSCORE
+      REAL(8) :: EXCORE
       INTEGER(4) :: IAT1,IAT2
       INTEGER(4) :: ISP1,ISP2
       INTEGER(4) :: I
       REAL(8) :: E1,E2
 !     **************************************************************************
-      DIFF=0.D0
-! WARNING: REQUIRES THE SAME ORDER OF ATOMS IN BOTH SIMULATIONS
+      GSCORE=0.D0
+      EXCORE=0.D0
       DO IAT1=1,SIM(1)%NAT
         ISP1=SIM(1)%ISPECIES(IAT1)
         IAT2=ATOMMAP(IAT1)
         ISP2=SIM(2)%ISPECIES(IAT2)
-        DIFF=DIFF+SIM(1)%SETUP(ISP1)%ETOT-SIM(2)%SETUP(ISP2)%ETOT
+        GSCORE=GSCORE+SIM(1)%SETUP(ISP1)%ECORE
+        EXCORE=EXCORE+SIM(2)%SETUP(ISP2)%ECORE
       ENDDO
+      SIM(1)%ECORE=GSCORE
+      SIM(2)%ECORE=EXCORE
       RETURN
-      END SUBROUTINE XAS_ATOMENERGYDIFF
+      END SUBROUTINE XAS_COREENERGY
         
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
