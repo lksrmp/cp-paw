@@ -114,7 +114,7 @@ def plot_matrix(XASData, k_point, spin, output_dir=None, row_interval=slice(None
     if matrix is not None:
         submatrix = matrix[row_interval, col_interval]
         plt.figure(dpi=150)
-        plt.imshow(np.abs(submatrix), cmap='Blues', interpolation='none', vmin=0)
+        plt.imshow(np.abs(submatrix), cmap='Blues', interpolation='none', vmin=0, extent=[col_interval.start or 0, col_interval.stop or matrix.shape[1], row_interval.stop or matrix.shape[0], row_interval.start or 0])
         plt.colorbar(label='abs. val.')
         plt.title(f'Overlap Matrix for k-point {k_point+1}, spin {spin+1}')
         plt.xlabel('Column index')
@@ -122,7 +122,15 @@ def plot_matrix(XASData, k_point, spin, output_dir=None, row_interval=slice(None
         plt.gca().xaxis.set_major_locator(plt.MaxNLocator(integer=True))
         plt.gca().yaxis.set_major_locator(plt.MaxNLocator(integer=True))
         # Draw a red border around the square sub matrix of size NOCC
-        rect = plt.Rectangle((-0.5, -0.5), nocc, nocc, edgecolor='red', facecolor='none', linewidth=2)
+        if row_interval.start:
+            lenrow = nocc - row_interval.start
+        else:
+            lenrow = nocc+0.5
+        if col_interval.start:
+            lencol = nocc - col_interval.start
+        else:
+            lencol = nocc+0.5
+        rect = plt.Rectangle((col_interval.start or 0 - 0.5, row_interval.start or 0 - 0.5), lencol, lenrow, edgecolor='red', facecolor='none', linewidth=2)
         plt.gca().add_patch(rect)
         if output_dir:
             if not os.path.exists(output_dir):
