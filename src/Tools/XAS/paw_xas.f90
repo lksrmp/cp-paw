@@ -2685,6 +2685,9 @@
           ENDIF
         ENDDO
       ENDDO
+      IF(OUTPUT%TOVL) THEN
+        CALL OVERLAPMATOUT
+      ENDIF
 
                           CALL TRACE$POP
       RETURN
@@ -3378,3 +3381,45 @@
       ENDDO
                           CALL TRACE$POP
       END SUBROUTINE ATOMMAPPING
+
+      SUBROUTINE OVERLAPMATOUT
+!     **************************************************************************
+!     ** WRITE OVERLAP MATRIX TO BINARY FILE                                  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: OVERLAPARR,OVERLAP,SIM
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: IKPT,ISPIN
+      INTEGER(4) :: NB1,NB2,NOCC
+      INTEGER(4) :: THISTASK,NTASKS
+!     **************************************************************************
+                          CALL TRACE$PUSH('OVERLAPMATOUT')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
+
+      CALL FILEHANDLER$SETFILE('OVLBIN',.TRUE.,-'.OVLBIN')
+      CALL FILEHANDLER$SETSPECIFICATION('OVLBIN','STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION('OVLBIN','POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION('OVLBIN','ACTION','WRITE')
+      CALL FILEHANDLER$SETSPECIFICATION('OVLBIN','FORM','UNFORMATTED')
+
+      CALL FILEHANDLER$UNIT('OVLBIN',NFIL)
+      
+      WRITE(NFIL)SIM(1)%NKPT
+      WRITE(NFIL)SIM(1)%NSPIN
+      DO IKPT=1,SIM(1)%NKPT
+        DO ISPIN=1,SIM(1)%NSPIN
+          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          NB1=SIM(1)%STATEARR(IKPT,ISPIN)%NB
+          NB2=SIM(2)%STATEARR(IKPT,ISPIN)%NB
+          NOCC=SIM(1)%STATEARR(IKPT,ISPIN)%NOCC
+          WRITE(NFIL)NB2,NB1,NOCC
+          WRITE(NFIL)OVERLAP%OV
+        ENDDO
+      ENDDO          
+      CALL FILEHANDLER$CLOSE('OVLBIN')
+                          CALL TRACE$POP
+      END SUBROUTINE OVERLAPMATOUT
+
+
