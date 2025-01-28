@@ -47,6 +47,8 @@ def main():
     parser = argparse.ArgumentParser(description='Visualize overlap matrix')
     parser.add_argument('filename', nargs='?', help='the file to process')
     parser.add_argument('--output-dir', help='directory to save the plots')
+    parser.add_argument('--row-interval', type=str, help='row interval to select submatrix (e.g., "0:10")')
+    parser.add_argument('--col-interval', type=str, help='column interval to select submatrix (e.g., "0:10")')
     args = parser.parse_args()
 
     if args.filename:
@@ -55,16 +57,28 @@ def main():
         parser.print_help()
         sys.exit(1)
 
+    row_interval = parse_interval(args.row_interval)
+    col_interval = parse_interval(args.col_interval)
+
     for ikpt in range(XASData.nkpt):
         for ispin in range(XASData.nspin):
-            plot_matrix(XASData, ikpt, ispin, args.output_dir)
+            plot_matrix(XASData, ikpt, ispin, args.output_dir, row_interval, col_interval)
     if(args.output_dir):
         print(f'Plots saved to {args.output_dir}')
     else:
         plt.show()
-    # np.set_printoptions(precision=4, suppress=True, linewidth=np.inf)
-    # print("Matrix (first 6x6 block):\n", matrix[0:6, 0:6])
-    
+
+
+def parse_interval(interval_str):
+    if interval_str:
+        try:
+            start, end = map(int, interval_str.split(':'))
+            return slice(start, end)
+        except ValueError:
+            print(f'Invalid interval format: {interval_str}. Expected format "start:end".')
+            sys.exit(1)
+    return slice(None)
+
 
 def read_data(filename):
     # Placeholder for file processing logic
@@ -94,16 +108,19 @@ def read_data(filename):
                 XAS.add_matrix(ikpt, ispin, matrix)
     return XAS
 
-def plot_matrix(XASData, k_point, spin, output_dir=None):
+def plot_matrix(XASData, k_point, spin, output_dir=None, row_interval=slice(None), col_interval=slice(None)):
     matrix = XASData.get_matrix(k_point, spin)
     nocc = XASData.get_nocc(k_point, spin)
     if matrix is not None:
+        submatrix = matrix[row_interval, col_interval]
         plt.figure(dpi=150)
-        plt.imshow(np.abs(matrix), cmap='Blues', interpolation='none', vmin=0)
+        plt.imshow(np.abs(submatrix), cmap='Blues', interpolation='none', vmin=0)
         plt.colorbar(label='abs. val.')
         plt.title(f'Overlap Matrix for k-point {k_point+1}, spin {spin+1}')
         plt.xlabel('Column index')
         plt.ylabel('Row index')
+        plt.gca().xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+        plt.gca().yaxis.set_major_locator(plt.MaxNLocator(integer=True))
         # Draw a red border around the square sub matrix of size NOCC
         rect = plt.Rectangle((-0.5, -0.5), nocc, nocc, edgecolor='red', facecolor='none', linewidth=2)
         plt.gca().add_patch(rect)
