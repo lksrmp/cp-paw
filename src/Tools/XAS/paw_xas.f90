@@ -2993,7 +2993,7 @@
 !     **************************************************************************
 !     ** WRITE COMPLEX MATRIX TO FILE                                         **
 !     **************************************************************************
-      INTEGER(4), PARAMETER :: LIMIT=20
+      INTEGER(4), PARAMETER :: LIMIT=25
       INTEGER(4), INTENT(IN) :: N
       INTEGER(4), INTENT(IN) :: M
       COMPLEX(8), INTENT(IN) :: A(N,M)
@@ -3423,3 +3423,208 @@
       END SUBROUTINE OVERLAPMATOUT
 
 
+
+      SUBROUTINE TEST_OCCUPATION_CHANGE
+      IMPLICIT NONE
+      INTEGER(4), PARAMETER :: N=10
+      INTEGER(4), PARAMETER :: NOCC=4
+      REAL(8), ALLOCATABLE :: AUX1(:,:) ! (N,N)
+      REAL(8), ALLOCATABLE :: AUX2(:,:) ! (N,N)
+      COMPLEX(8), ALLOCATABLE :: WORK(:,:)
+      COMPLEX(8), ALLOCATABLE :: WORKVEC(:)
+      COMPLEX(8), ALLOCATABLE :: OVORIGINAL(:,:) ! (N,N)
+      COMPLEX(8), ALLOCATABLE :: OV(:,:) ! (N,N)
+      COMPLEX(8), ALLOCATABLE :: OVOCC(:,:) ! (NOCC,NOCC)
+      COMPLEX(8), ALLOCATABLE :: OVEMP(:,:) ! (N-NOCC,NOCC)
+      COMPLEX(8), ALLOCATABLE :: KMAT(:,:) ! (N-NOCC,NOCC)
+      INTEGER(4) :: I,J
+      CHARACTER(256) :: FORMAT
+      COMPLEX(8) :: ADET
+      COMPLEX(8) :: AMPL
+
+      ALLOCATE(AUX1(N,N))
+      ALLOCATE(AUX2(N,N))
+      ALLOCATE(OV(N,N))
+      ALLOCATE(OVORIGINAL(N,N))
+      ALLOCATE(OVOCC(NOCC,NOCC))
+      ALLOCATE(OVEMP(N-NOCC,NOCC))
+      ALLOCATE(KMAT(N-NOCC,NOCC))
+      CALL RANDOM_SEED()
+      CALL RANDOM_NUMBER(AUX1)
+      ! CALL RANDOM_NUMBER(AUX2)
+      AUX2=0.D0
+
+      OVORIGINAL=CMPLX(AUX1,AUX2,KIND=8)
+      DEALLOCATE(AUX1)
+      DEALLOCATE(AUX2)
+      OVORIGINAL=0.1D0*OVORIGINAL
+      DO I=1,N
+        OVORIGINAL(I,I)=OVORIGINAL(I,I)+0.8D0
+      ENDDO
+
+      OV=OVORIGINAL
+      OVOCC=OV(1:NOCC,1:NOCC)
+      OVEMP=OV(NOCC+1:N,1:NOCC)
+
+      CALL LIB$DETC8(NOCC,OVOCC,ADET)
+
+      ALLOCATE(WORK(NOCC,NOCC))
+      CALL LIB$INVERTC8(NOCC,OVOCC,WORK)
+      CALL LIB$MATMULC8(N-NOCC,NOCC,NOCC,OVEMP,WORK,KMAT)
+      DEALLOCATE(WORK)
+
+      
+
+      OPEN(UNIT=10,FILE='OCCUPATIONEXCHANGE.dat')
+      WRITE(10,*)'OV='
+      WRITE(FORMAT,*)N
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N
+        WRITE(10,FMT=FORMAT)OV(I,:)
+      ENDDO
+      WRITE(10,*)'OVOCC='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,NOCC
+        WRITE(10,FMT=FORMAT)OVOCC(I,:)
+      ENDDO
+      WRITE(10,*)'OVEMP='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N-NOCC
+        WRITE(10,FMT=FORMAT)OVEMP(I,:)
+      ENDDO
+      WRITE(10,*)'ADET=',ADET
+      WRITE(10,*)'KMAT='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N-NOCC
+        WRITE(10,FMT=FORMAT)KMAT(I,:)
+      ENDDO
+
+      WRITE(10,*)'FINAL STATE    ','AMPL    ','AMPL*ADET'
+      DO J=1,N-NOCC
+        AMPL=(0.D0,0.D0)
+        DO I=1,NOCC
+          AMPL=AMPL+CONJG(KMAT(J,I))
+        ENDDO
+        AMPL=(1.D0,0.D0)-AMPL
+        AMPL=(-1.D0)**NOCC*AMPL
+        WRITE(10,*)J+NOCC,AMPL,AMPL*CONJG(ADET)
+      ENDDO
+
+!     ==========================================================================
+!     == SWITCH ROWS
+!     ==========================================================================
+      OV=OVORIGINAL
+      ALLOCATE(WORKVEC(N))
+      WORKVEC=OV(NOCC,:)
+      OV(NOCC,:)=OV(NOCC+2,:)
+      OV(NOCC+2,:)=WORKVEC
+      DEALLOCATE(WORKVEC)
+      OVOCC=OV(1:NOCC,1:NOCC)
+      OVEMP=OV(NOCC+1:N,1:NOCC)
+      CALL LIB$DETC8(NOCC,OVOCC,ADET)
+      ALLOCATE(WORK(NOCC,NOCC))
+      CALL LIB$INVERTC8(NOCC,OVOCC,WORK)
+      CALL LIB$MATMULC8(N-NOCC,NOCC,NOCC,OVEMP,WORK,KMAT)
+      DEALLOCATE(WORK)
+
+      WRITE(10,*)'#########################################'
+      WRITE(10,*)'## SWITCH ROWS NOCC, NOCC+2'
+      WRITE(10,*)'#########################################'
+      WRITE(10,*)'OV='
+      WRITE(FORMAT,*)N
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N
+        WRITE(10,FMT=FORMAT)OV(I,:)
+      ENDDO
+      WRITE(10,*)'OVOCC='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,NOCC
+        WRITE(10,FMT=FORMAT)OVOCC(I,:)
+      ENDDO
+      WRITE(10,*)'OVEMP='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N-NOCC
+        WRITE(10,FMT=FORMAT)OVEMP(I,:)
+      ENDDO
+      WRITE(10,*)'ADET=',ADET
+      WRITE(10,*)'KMAT='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N-NOCC
+        WRITE(10,FMT=FORMAT)KMAT(I,:)
+      ENDDO
+
+      WRITE(10,*)'FINAL STATE    ','AMPL    ','AMPL*ADET'
+      DO J=1,N-NOCC
+        AMPL=(0.D0,0.D0)
+        DO I=1,NOCC
+          AMPL=AMPL+CONJG(KMAT(J,I))
+        ENDDO
+        AMPL=(1.D0,0.D0)-AMPL
+        AMPL=(-1.D0)**NOCC*AMPL
+        WRITE(10,*)J+NOCC,AMPL,AMPL*CONJG(ADET)
+      ENDDO
+
+!     ==========================================================================
+!     == SWITCH COLUMNS
+!     ==========================================================================
+      OV=OVORIGINAL
+      ALLOCATE(WORKVEC(N))
+      WORKVEC=OV(:,NOCC)
+      OV(:,NOCC)=OV(:,NOCC+1)
+      OV(:,NOCC+1)=WORKVEC
+      DEALLOCATE(WORKVEC)
+      OVOCC=OV(1:NOCC,1:NOCC)
+      OVEMP=OV(NOCC+1:N,1:NOCC)
+      CALL LIB$DETC8(NOCC,OVOCC,ADET)
+      ALLOCATE(WORK(NOCC,NOCC))
+      CALL LIB$INVERTC8(NOCC,OVOCC,WORK)
+      CALL LIB$MATMULC8(N-NOCC,NOCC,NOCC,OVEMP,WORK,KMAT)
+      DEALLOCATE(WORK)
+
+      WRITE(10,*)'#########################################'
+      WRITE(10,*)'## SWITCH COLUMNS NOCC, NOCC+1'
+      WRITE(10,*)'#########################################'
+      WRITE(10,*)'OV='
+      WRITE(FORMAT,*)N
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N
+        WRITE(10,FMT=FORMAT)OV(I,:)
+      ENDDO
+      WRITE(10,*)'OVOCC='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,NOCC
+        WRITE(10,FMT=FORMAT)OVOCC(I,:)
+      ENDDO
+      WRITE(10,*)'OVEMP='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N-NOCC
+        WRITE(10,FMT=FORMAT)OVEMP(I,:)
+      ENDDO
+      WRITE(10,*)'ADET=',ADET
+      WRITE(10,*)'KMAT='
+      WRITE(FORMAT,*)NOCC
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F6.3,",",F6.3,") "))'
+      DO I=1,N-NOCC
+        WRITE(10,FMT=FORMAT)KMAT(I,:)
+      ENDDO
+
+      WRITE(10,*)'FINAL STATE    ','AMPL    ','AMPL*ADET'
+      DO J=1,N-NOCC
+        AMPL=(0.D0,0.D0)
+        DO I=1,NOCC
+          AMPL=AMPL+CONJG(KMAT(J,I))
+        ENDDO
+        AMPL=(1.D0,0.D0)-AMPL
+        AMPL=(-1.D0)**NOCC*AMPL
+        WRITE(10,*)J+NOCC,AMPL,AMPL*CONJG(ADET)
+      ENDDO
+
+      END SUBROUTINE TEST_OCCUPATION_CHANGE

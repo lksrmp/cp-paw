@@ -50,3 +50,7 @@ tmp.*
 /doc/
 /err*
 /out*
+# PERSONAL, DO NOT COMMIT
+/data/
+/pot_testing/
+/rixs_testing/
