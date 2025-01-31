@@ -55,6 +55,7 @@
         LOGICAL(4) :: TKMAT ! WRITE OVERLAP_TYPE%KMAT
         LOGICAL(4) :: TADET ! WRITE OVERLAP_TYPE%ADET
         LOGICAL(4) :: TRAW  ! WRITE SPECTRUM_TYPE%IRAW
+        LOGICAL(4) :: TKPTSPIN ! WRITE K-POINT AND SPIN SPECTRA SEPARATELY
       END TYPE OUTPUT_TYPE
 
       TYPE SPECTRUM_TYPE
@@ -995,6 +996,7 @@
       OUTPUT%TDIPOLE=.FALSE.
       OUTPUT%TADET=.FALSE.
       OUTPUT%TRAW=.FALSE.
+      OUTPUT%TKPTSPIN=.FALSE.
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
       CALL LINKEDLIST$EXISTL(LL_CNTL,'OUTPUT',1,TCHK)
@@ -1030,6 +1032,9 @@
 !     TRAW
       CALL LINKEDLIST$EXISTD(LL_CNTL,'RAW',1,TCHK)
       IF(TCHK) CALL LINKEDLIST$GET(LL_CNTL,'RAW',1,OUTPUT%TRAW)
+!     TKPTSPIN
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'KPTSPIN',1,TCHK)
+      IF(TCHK) CALL LINKEDLIST$GET(LL_CNTL,'KPTSPIN',1,OUTPUT%TKPTSPIN)
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XASCNTL$OUTPUT
@@ -1038,6 +1043,7 @@
       SUBROUTINE INITIALIZEFILEHANDLER
 !     **************************************************************************
       USE STRINGS_MODULE
+      IMPLICIT NONE
       CHARACTER(256) :: ROOTNAME
       CHARACTER(256) :: XASINNAME
       INTEGER(4)     :: ISVAR
@@ -2597,26 +2603,51 @@
       IF(THISTASK.NE.1) RETURN
                           CALL TRACE$PUSH('XAS$OUTPUT')
       CALL CONSTANTS('EV',EV)
-      ALLOCATE(ISUM(SETTINGS%NE))
+! WARNING: THERE IS A MAXIMUM LINE LENGTH THAT CAN CRASH THE PROGRAM
+!          RECL=1000 IN PAW_FILEHANDLER.F90, LINE 721
+      IF(OUTPUT%TKPTSPIN.AND.SIM(1)%NKPT*SIM(1)%NSPIN.GT.70) THEN
+        CALL FILEHANDLER$UNIT('PROT',NFIL)
+        WRITE(NFIL,FMT='(A)')'WARNING: LINE LENGTH TOO LONG FOR OUTPUT, SWITCHING TO TOTAL SPECTRUM'
+        OUTPUT%TKPTSPIN=.FALSE.
+      ENDIF   
       DO ISPEC=1,SETTINGS%NSPEC
         SPECTRUM=>SPECTRUMARR(ISPEC)
 !       OPEN FILE
         CALL XAS$FILEHANDLER(ISPEC,'XASOUT','O')
         CALL FILEHANDLER$UNIT('XASOUT',NFIL)
-        ISUM=0.D0
-        DO IKPT=1,SIM(1)%NKPT
-          DO ISPIN=1,SIM(1)%NSPIN
-            ISUM(:)=ISUM(:)+SPECTRUM%I(IKPT,ISPIN,:)
+        IF(OUTPUT%TKPTSPIN) THEN
+          WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY[EV] |'
+          DO IKPT=1,SIM(1)%NKPT
+            DO ISPIN=1,SIM(1)%NSPIN
+              WRITE(NFIL,FMT='(A4,I4,A4,I1,A1)',ADVANCE='NO') ' KP=',IKPT,' SP=',ISPIN,'|'
+            ENDDO
           ENDDO
-        ENDDO
-        DO I=1,SETTINGS%NE
-! TODO: CHECK OUTPUT FOR K-POINTS AND SPINS
-          WRITE(NFIL,*) SPECTRUM%E(I)/EV,ISUM(I)
-        ENDDO
+          WRITE(NFIL,*)
+          DO I=1,SETTINGS%NE
+            WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPECTRUM%E(I)/EV
+            DO IKPT=1,SIM(1)%NKPT
+              DO ISPIN=1,SIM(1)%NSPIN
+                WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPECTRUM%I(IKPT,ISPIN,I)
+              ENDDO
+            ENDDO
+            WRITE(NFIL,*)
+          ENDDO
+        ELSE
+          ALLOCATE(ISUM(SETTINGS%NE))
+          ISUM=0.D0
+          DO IKPT=1,SIM(1)%NKPT
+            DO ISPIN=1,SIM(1)%NSPIN
+              ISUM(:)=ISUM(:)+SPECTRUM%I(IKPT,ISPIN,:)
+            ENDDO
+          ENDDO
+          DO I=1,SETTINGS%NE
+            WRITE(NFIL,*) SPECTRUM%E(I)/EV,ISUM(I)
+          ENDDO
+          DEALLOCATE(ISUM)
+        ENDIF
 !       CLOSE FILE
         CALL XAS$FILEHANDLER(ISPEC,'XASOUT','C')
-      ENDDO
-      DEALLOCATE(ISUM)
+      ENDDO   
       IF(OUTPUT%TRAW) THEN
         DO ISPEC=1,SETTINGS%NSPEC
           SPECTRUM=>SPECTRUMARR(ISPEC)
@@ -2654,7 +2685,6 @@
           END IF
 ! ERROR: THERE IS A MAXIMUM LINE LENGTH THAT CAN CRASH THE PROGRAM
 !        EFFECTED BY SIZE OF SECOND WRITEMATC8 ARGUMENT
-! TODO: WRITE OUTPUT SUCH THAT IT CAN EASILY BE READ BY PYTHON
           IF(OUTPUT%TOVL) THEN
             ! CALL WRITEMATC8ABS(NB2,NB1,OVERLAP%OV,'OVL',IKPT,ISPIN)
             CALL WRITEMATC8(NB2,NB1,OVERLAP%OV,'OVL',IKPT,ISPIN)
@@ -2891,6 +2921,7 @@
 !     **************************************************************************
 !     ** CALCULATE LL=L*L+L-M+1                                               **
 !     **************************************************************************
+      IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: L
       INTEGER(4), INTENT(IN) :: M
       INTEGER(4), INTENT(OUT) :: LL
@@ -2960,6 +2991,7 @@
 !     **************************************************************************
 !     ** CALCULATE CROSS PRODUCT OF TWO VECTORS                               **
 !     **************************************************************************
+      IMPLICIT NONE
       REAL(8), INTENT(IN) :: A(3)
       REAL(8), INTENT(IN) :: B(3)
       REAL(8), INTENT(OUT) :: C(3)
@@ -2995,7 +3027,10 @@
 !     **************************************************************************
 !     ** WRITE COMPLEX MATRIX TO FILE                                         **
 !     **************************************************************************
-      INTEGER(4), PARAMETER :: LIMIT=20
+      IMPLICIT NONE
+! WARNING: LIMIT DUE TO RECL IN PAW_FILEHANDLER.F90, LINE 721
+      INTEGER(4), PARAMETER :: RECL=1000
+      INTEGER(4), PARAMETER :: LIMIT=INT(RECL/30)
       INTEGER(4), INTENT(IN) :: N
       INTEGER(4), INTENT(IN) :: M
       COMPLEX(8), INTENT(IN) :: A(N,M)
@@ -3014,7 +3049,7 @@
       MLIM=MIN(LIMIT,M)
       NLIM=MIN(LIMIT,N)
       WRITE(FORMAT,*)MLIM
-      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F14.8,",",F14.8,") "))'
+      FORMAT="("//TRIM(ADJUSTL(FORMAT))//'("(",F13.8,",",F13.8,") "))'
       WRITE(NFIL,FMT='(A,I5,A,I3)')'# KPOINT:',IKPT,' SPIN:',ISPIN
       DO I=1,NLIM
         WRITE(NFIL,FMT=FORMAT)A(I,1:MLIM)
@@ -3027,6 +3062,7 @@
 !     **************************************************************************
 !     ** WRITE ABSOLUTE VALUE OF COMPLEX MATRIX TO FILE                       **
 !     **************************************************************************
+      IMPLICIT NONE
       INTEGER(4), PARAMETER :: LIMIT=50
       INTEGER(4), INTENT(IN) :: N
       INTEGER(4), INTENT(IN) :: M
