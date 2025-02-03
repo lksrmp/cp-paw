@@ -18,6 +18,7 @@
       COMPLEX(8) :: FAC  ! FACTOR FOR SUM OF COMPLEX CUBES
       LOGICAL(4) :: TREAL  ! REAL PART EXISTS
       LOGICAL(4) :: TIMAG  ! IMAGINARY PART EXISTS
+      REAL(8) :: KPT(3)  ! K-POINT IN RECIPROCAL ANGSTROM
       COMPLEX(8), ALLOCATABLE :: CVOL(:,:,:)  ! COMPLEX VOLUMETRIC DATA
       END TYPE CUBE_TYPE
 
@@ -47,6 +48,7 @@
       CALL READCUBES
       CALL CONSTRUCTCOMPLEXCUBE
       CALL CHECKCONSISTENCY
+      CALL KPOINT
       CALL SUMCUBES
       CALL WRITECOMPLEXCUBE
 
@@ -165,11 +167,13 @@
       USE CUBE_MODULE, ONLY: REALOUT,IMAGOUT,TREAL,TIMAG,CUBES,NCUBES
       IMPLICIT NONE
       INTEGER(4) :: NFIL
-      LOGICAL(4) :: TCHK
+      LOGICAL(4) :: TCHK,TCHK1
       REAL(8) :: SVAR(2)
       INTEGER(4) :: I
+      REAL(8) :: ANGSTROM
 !     **************************************************************************
                           CALL TRACE$PUSH('READCNTL')
+      CALL CONSTANTS('ANGSTROM',ANGSTROM)
       CALL LINKEDLIST$NEW(LL_CNTL)
       CALL FILEHANDLER$UNIT('CUBCNTL',NFIL)
       CALL LINKEDLIST$READ(LL_CNTL,NFIL,'~')
@@ -229,8 +233,24 @@
           CALL LINKEDLIST$GET(LL_CNTL,'FAC',1,SVAR)
           CUBES(I)%FAC=CMPLX(SVAR(1),SVAR(2),KIND=8)
         ELSE
-          CUBES(I)%FAC=CMPLX(1.0,0.0,KIND=8)
+          CUBES(I)%FAC=CMPLX(1.D0,0.D0,KIND=8)
         END IF
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'KPT[1/AA]',1,TCHK)
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'KPT[1/BOHR]',1,TCHK1)
+        IF(TCHK.AND.TCHK1) THEN
+          CALL ERROR$MSG('K-POINT IN RECIPROCAL GIVEN IN TWO UNITS')
+          CALL ERROR$I4VAL('CUBE NUMBER',I)
+          CALL ERROR$STOP('READCNTL')
+        END IF
+        IF(TCHK) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'KPT[1/A]',1,CUBES(I)%KPT)
+        ELSE IF(TCHK1) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'KPT[1/BOHR]',1,CUBES(I)%KPT)
+          CUBES(I)%KPT=CUBES(I)%KPT*ANGSTROM
+        ELSE
+          CUBES(I)%KPT=(/0.D0,0.D0,0.D0/)
+        END IF
+PRINT *, 'CUBES(I)%KPT=', CUBES(I)%KPT
         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
       ENDDO
                           CALL TRACE$POP
@@ -556,7 +576,7 @@
 !
 !     ..1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE WRITECOMPLEXCUBE
-!     **************************************************************************^
+!     **************************************************************************
       USE CUBE_MODULE, ONLY: CUBSUM,CUBES,CUB_TYPE,TREAL,TIMAG,REALOUT,IMAGOUT
       USE CLOCK_MODULE
       IMPLICIT NONE
@@ -566,7 +586,7 @@
       CHARACTER(256) :: LINE1
       CHARACTER(256) :: LINE2
       CHARACTER(32) :: NOW
-!     **************************************************************************^
+!     **************************************************************************
                           CALL TRACE$PUSH('WRITECOMPLEXCUBE')
       IF(.NOT.ALLOCATED(CUBSUM)) THEN
         CALL ERROR$MSG('COMPLEX CUBE NOT SUMMED UP')
@@ -595,7 +615,7 @@
 !
 !     ..1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE WRITECUB(NFIL,NATOMS,O,GRID,VXL,ATOM,DATA,LINE1,LINE2)
-!     **************************************************************************^
+!     **************************************************************************
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4), INTENT(IN) :: NATOMS
@@ -627,3 +647,40 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE WRITECUB
+!
+!     ..1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE KPOINT
+!     **************************************************************************
+      USE CUBE_MODULE, ONLY: CUBES,NCUBES,CUBE_TYPE
+      IMPLICIT NONE
+      COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      REAL(8) :: R(3)
+      TYPE(CUBE_TYPE), POINTER :: REF
+      TYPE(CUBE_TYPE), POINTER :: CUBE
+      INTEGER(4) :: ICUBE
+      INTEGER(4) :: I,J,K
+      REAL(8) :: VXL1(3),VXL2(3),VXL3(3),O(3)
+!     **************************************************************************
+                          CALL TRACE$PUSH('KPOINT')
+      REF=>CUBES(1)
+      VXL1=REF%REAL%VXL(1,:)
+      VXL2=REF%REAL%VXL(2,:)
+      VXL3=REF%REAL%VXL(3,:)
+      O=REF%REAL%O(:)
+      DO K=1,REF%REAL%GRID(3)
+        DO J=1,REF%REAL%GRID(2)
+          DO I=1,REF%REAL%GRID(1)
+            R=O+(I-1)*VXL1+(J-1)*VXL2+(K-1)*VXL3
+            
+            DO ICUBE=1,NCUBES
+              CUBE=>CUBES(ICUBE)
+! WARNING: CHECK THIS, IS IT NECESSARY TO USE AT ALL, FACTOR 2*PI?, EXP(-)?
+              CUBE%CVOL(I,J,K)=CUBE%CVOL(I,J,K)*EXP(CI*DOT_PRODUCT(CUBE%KPT,R))
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE KPOINT
