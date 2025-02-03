@@ -122,7 +122,8 @@ export TOOLLIST=" \
         Tools/Wave/paw_1davpot \
         Tools/Wave/paw_cmcwave \
         Tools/Wave/paw_wave \
-        Tools/Bands/paw_bands"
+        Tools/Bands/paw_bands \
+        Tools/Cube/paw_cube"
 
 # files from $(BASEDIR)/src/Buildtools to be placed in etc
 export ADMINLIST=" \
