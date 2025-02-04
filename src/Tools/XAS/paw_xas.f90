@@ -2584,6 +2584,7 @@
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       IF(THISTASK.NE.1) RETURN
                           CALL TRACE$PUSH('XAS$OUTPUT')
+                          CALL TIMING$CLOCKON('XAS$OUTPUT')
       CALL CONSTANTS('EV',EV)
 ! WARNING: THERE IS A MAXIMUM LINE LENGTH THAT CAN CRASH THE PROGRAM
 !          RECL=1000 IN PAW_FILEHANDLER.F90, LINE 721
@@ -2702,7 +2703,7 @@
           END IF
         ENDDO
       ENDDO
-
+                          CALL TIMING$CLOCKOFF('XAS$OUTPUT')
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$OUTPUT
@@ -2721,6 +2722,7 @@
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OUTPUTGATHER')
+                          CALL TIMING$CLOCKON('XAS$OUTPUTGATHER')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
 !     SEND NOCC AND NB TO READ TASK
       DO IS=1,NSIM
@@ -2784,6 +2786,7 @@
           END IF
         ENDDO
       ENDDO
+                          CALL TIMING$CLOCKOFF('XAS$OUTPUTGATHER')
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$OUTPUTGATHER
@@ -3309,6 +3312,7 @@
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       IF(THISTASK.NE.1) RETURN
                           CALL TRACE$PUSH('XAS$WRITERESTART')
+                          CALL TIMING$CLOCKON('XAS$WRITERESTART')
       CALL FILEHANDLER$UNIT('RSTRT_OUT',NFIL)
       REWIND NFIL
       DO IS=1,2
@@ -3340,6 +3344,7 @@
         ENDDO
       ENDDO
       CALL FILEHANDLER$CLOSE('RSTRT_OUT')
+                          CALL TIMING$CLOCKOFF('XAS$WRITERESTART')
                           CALL TRACE$POP
       END SUBROUTINE XAS$WRITERESTART
 !
@@ -3357,6 +3362,7 @@
       INTEGER(4) :: THISTASK,NTASKS
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$READRESTART')
+                          CALL TIMING$CLOCKON('XAS$READRESTART')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL CONSTANTS('EV',EV)
       IF(THISTASK.EQ.1) THEN
@@ -3455,6 +3461,7 @@
         WRITE(NFIL,FMT='(A10,F20.10)')'ETOT 1:',SIM(1)%ETOT/EV
         WRITE(NFIL,FMT='(A10,F20.10)')'ETOT 2:',SIM(2)%ETOT/EV
       END IF
+                          CALL TIMING$CLOCKOFF('XAS$READRESTART')
                           CALL TRACE$POP
       END SUBROUTINE XAS$READRESTART
 !
