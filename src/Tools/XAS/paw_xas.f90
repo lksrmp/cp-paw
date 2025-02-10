@@ -254,6 +254,8 @@
 
       CALL XAS$REPORTSETTINGS
 
+      CALL XAS$WRITEDENMAT
+
       CALL XAS$WRITERESTART
 
 !     REPORT UNUSED LINKEDLISTS
@@ -3573,7 +3575,6 @@
       COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:)
       COMPLEX(8), ALLOCATABLE :: DENMAT1(:,:,:)
       COMPLEX(8) :: CSVAR1,CSVAR2
-      LOGICAL(4), PARAMETER :: TPR=.TRUE.
       INTEGER(4) :: NFIL
 !     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -3650,26 +3651,6 @@
         !     ENDDO ! LMN1
         !   ENDDO ! IAT
         ! END IF
-!       PRINTOUT FOR TEST
-        IF(TPR) THEN
-          CALL FILEHANDLER$UNIT('PROT',NFIL)
-          WRITE(NFIL,'(80("#"))')
-          WRITE(NFIL,FMT='("DENSITY MATRICES FOR SIM ",I2)') IS
-          WRITE(NFIL,'(80("#"))')
-          DO IAT=1,NAT
-            ISP=SIM(IS)%ISPECIES(IAT)
-            LMNX=SIM(IS)%LMNX(ISP)
-            DO ISPIN=1,NSPIN
-              WRITE(NFIL,FMT='("DENMAT FOR ATOM ",I3,"(",A6,") AND SPIN",I2)')IAT,SIM(IS)%ATOMID(IAT),ISPIN
-              DO LMN1=1,LMNX
-                WRITE(NFIL,FMT='("R",I3,*(F10.5))')LMN1,REAL(SIM(IS)%DENMAT(LMN1,:LMNX,ISPIN,IAT))
-                IF(ANY(AIMAG(SIM(IS)%DENMAT(LMN1,:LMNX,ISPIN,IAT)).GT.1.D-8)) THEN
-                  WRITE(NFIL,FMT='("I",I3,*(F10.5))')LMN1,AIMAG(SIM(IS)%DENMAT(LMN1,:LMNX,ISPIN,IAT))
-                END IF
-              ENDDO
-            ENDDO
-          ENDDO
-        END IF
       ENDDO ! IS
                           CALL TIMING$CLOCKOFF('DENMAT')
                           CALL TRACE$POP
@@ -3745,3 +3726,45 @@
       END IF
       RETURN
       END SUBROUTINE DENMATCALC
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$WRITEDENMAT
+!     **************************************************************************
+!     ** WRITE DENSITY MATRIX TO FILE                                         **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: RTASK,NSIM,SIM
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: IS
+      INTEGER(4) :: IAT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: LMNX
+      INTEGER(4) :: LMN
+      INTEGER(4) :: ISP
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XAS$WRITEDENMAT')
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+      DO IS=1,NSIM
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='("DENSITY MATRICES FOR SIM ",I2)') IS
+        WRITE(NFIL,'(80("#"))')
+        DO IAT=1,SIM(IS)%NAT
+          ISP=SIM(IS)%ISPECIES(IAT)
+          LMNX=SIM(IS)%LMNX(ISP)
+          DO ISPIN=1,SIM(IS)%NSPIN
+            WRITE(NFIL,FMT='("DENMAT FOR ATOM ",I3,"(",A6,") AND SPIN",I2)')IAT,SIM(IS)%ATOMID(IAT),ISPIN
+            DO LMN=1,LMNX
+              WRITE(NFIL,FMT='("R",I3,*(F10.5))')LMN,REAL(SIM(IS)%DENMAT(LMN,:LMNX,ISPIN,IAT))
+              IF(ANY(AIMAG(SIM(IS)%DENMAT(LMN,:LMNX,ISPIN,IAT)).GT.1.D-8)) THEN
+                WRITE(NFIL,FMT='("I",I3,*(F10.5))')LMN,AIMAG(SIM(IS)%DENMAT(LMN,:LMNX,ISPIN,IAT))
+              END IF
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XAS$WRITEDENMAT
