@@ -83,6 +83,7 @@
         INTEGER(4) :: NPRO ! #(PROJECTIONS)
         INTEGER(4) :: LNXX
         CHARACTER(6) :: FLAG
+        INTEGER(4), ALLOCATABLE :: LMNX(:) ! (NSP)
         INTEGER(4), ALLOCATABLE :: LNX(:) ! (NSP)
         INTEGER(4), ALLOCATABLE :: LOX(:,:) ! (LNXX,NSP)
         INTEGER(4), ALLOCATABLE :: MAP(:,:) ! (NAT,LNXX) INDEX-1 OF ATOM AND LN
@@ -102,6 +103,7 @@
         INTEGER(4), ALLOCATABLE :: ISPECIES(:) ! (NAT) SPECIES INDEX
         REAL(8), ALLOCATABLE :: XK(:,:) ! (3,NKPT) K-POINTS IN REL. COORD.
         REAL(8), ALLOCATABLE :: WKPT(:) ! (NKPT) K-POINT WEIGHTS
+        COMPLEX(8), ALLOCATABLE :: DENMAT(:,:,:,:) ! (LMNXX,LMNXX,NDIM,NAT) DENSITY MATRIX
         TYPE(SETUP_TYPE), ALLOCATABLE :: SETUP(:) ! (NSP) ARRAY OF SETUPS
         TYPE(STATE_TYPE), ALLOCATABLE :: STATEARR(:,:) ! (NKPT,NSPIN) ARRAY OF STATES
         TYPE(STATE_TYPE), POINTER :: STATE ! CURRENT STATE
@@ -220,6 +222,8 @@
       ELSE
 !       READ DFT CALCULATION DATA
         CALL XAS$READ
+
+        CALL XAS$DENMAT
 !       REPORT DFT CALCULATION DATA
         CALL XAS$SELECT('GROUNDSTATE')
         CALL XAS$REPORTSIMULATION
@@ -1334,6 +1338,13 @@
         CALL MPE$BROADCAST('~',RTASK,THIS%TINV)
         CALL MPE$BROADCAST('~',RTASK,THIS%SPACEGROUP)
         CALL MPE$BROADCAST('~',RTASK,THIS%TSHIFT)
+        ALLOCATE(THIS%LMNX(THIS%NSP))
+        THIS%LMNX=0
+        DO ISP=1,THIS%NSP
+          DO LN=1,THIS%LNX(ISP)
+            THIS%LMNX(ISP)=THIS%LMNX(ISP)+2*THIS%LOX(LN,ISP)+1
+          ENDDO
+        ENDDO
 !       ========================================================================
 !       == READ ATOMIC STRUCTURE                                              ==
 !       ========================================================================
@@ -3535,3 +3546,202 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE KMAPINIT
+! ERROR: CHECK DEFINITIONS OF NDIM, NDIMD AND EVERYTHING CONNECTED TO IT!
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$DENMAT
+!     **************************************************************************
+!     ** CALCULATE DENSITY MATRIX                                             **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: RTASK,TRSTRT,NSIM,SIM,NKPTG
+      IMPLICIT NONE
+      INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: IS
+      INTEGER(4) :: NAT
+      INTEGER(4) :: IAT
+      INTEGER(4) :: NDIM
+      INTEGER(4) :: NDIMD
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: ISP
+      INTEGER(4) :: LMNXX
+      INTEGER(4) :: LMNX
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: IPRO
+      INTEGER(4) :: NB
+      INTEGER(4) :: LMN1,LMN2
+      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:)
+      COMPLEX(8), ALLOCATABLE :: DENMAT1(:,:,:)
+      COMPLEX(8) :: CSVAR1,CSVAR2
+      LOGICAL(4), PARAMETER :: TPR=.TRUE.
+      INTEGER(4) :: NFIL
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+!     READTASK CONTAINS ALL DATA (COULD CALCULATE IN PARALLEL BUT MORE COMPLEX)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('DENMAT')
+                          CALL TIMING$CLOCKON('DENMAT')
+      IF(TRSTRT) THEN
+        CALL ERROR$MSG('DENSITY MATRIX CAN NOT BE CALCULATED FROM XASRSTRT FILE')
+        CALL ERROR$STOP('DENMAT')
+      END IF
+!     LOOP OVER BOTH SIMULATIONS
+      DO IS=1,NSIM
+        NAT=SIM(IS)%NAT
+        NSPIN=SIM(IS)%NSPIN
+        NDIM=SIM(IS)%NDIM
+        NDIMD=NSPIN
+        IF(NDIM.NE.1) THEN
+          CALL ERROR$MSG('DENSITY MATRIX ONLY IMPLEMENTED FOR NDIM=1')
+          CALL ERROR$STOP('XAS$DENMAT')
+        END IF
+!       GET MAXIMUM NUMBER OF LMNX OF ALL SPECIES
+        LMNXX=0
+        DO ISP=1,SIM(IS)%NSP
+          LMNXX=MAX(LMNXX,SIM(IS)%LMNX(ISP))
+        ENDDO
+        ALLOCATE(SIM(IS)%DENMAT(LMNXX,LMNXX,NDIMD,NAT))
+        SIM(IS)%DENMAT=(0.D0,0.D0)
+!       LOOP OVER KPOINTS AND SPINS
+        DO IKPT=1,NKPTG
+          DO ISPIN=1,NSPIN
+!           SET POINTER TO STATE
+            SIM(IS)%STATE=>SIM(IS)%STATEARR(IKPT,ISPIN)
+            NB=SIM(IS)%STATE%NB
+            IPRO=1
+!           LOOP OVER ATOMS
+            DO IAT=1,NAT
+              ISP=SIM(IS)%ISPECIES(IAT)
+              LMNX=SIM(IS)%LMNX(ISP)
+              ALLOCATE(PROJ(NDIM,NB,LMNX))
+              PROJ(:,:,:)=SIM(IS)%STATE%PROJ(:,:,IPRO:IPRO-1+LMNX)
+              ALLOCATE(DENMAT1(LMNX,LMNX,NDIMD))
+
+              CALL DENMATCALC(NDIM,NB,LMNX,SIM(IS)%STATE%OCC,PROJ,DENMAT1)
+
+              IF(NDIM.EQ.1) THEN
+                SIM(IS)%DENMAT(1:LMNX,1:LMNX,ISPIN,IAT) &
+&                     =SIM(IS)%DENMAT(1:LMNX,1:LMNX,ISPIN,IAT)+DENMAT1(:,:,1)
+              ELSE
+                CALL ERROR$MSG('DENSITY MATRIX ONLY IMPLEMENTED FOR NDIM=1')
+                CALL ERROR$STOP('XAS$DENMAT')
+!                 SIM(IS)%DENMAT(1:LMNX,1:LMNX,:,IAT) &
+! &                     =SIM(IS)%DENMAT(1:LMNX,1:LMNX,:,IAT)+DENMAT1(:,:,:)
+              END IF
+              DEALLOCATE(PROJ)
+              DEALLOCATE(DENMAT1)
+              IPRO=IPRO+LMNX
+            ENDDO ! IAT
+          ENDDO ! ISPIN
+        ENDDO ! IKPT
+!       CONVERT SPIN-UP AND SPIN-DOWN DENSITY MATRIX INTO
+!       TOTAL AND SPIN DENSITY MATRIX
+        IF(NSPIN.EQ.2) THEN
+          DO IAT=1,NAT
+            ISP=SIM(IS)%ISPECIES(IAT)
+            LMNX=SIM(IS)%LMNX(ISP)
+            DO LMN1=1,LMNX
+              DO LMN2=1,LMNX
+                CSVAR1=SIM(IS)%DENMAT(LMN1,LMN2,1,IAT)
+                CSVAR2=SIM(IS)%DENMAT(LMN1,LMN2,2,IAT)
+                SIM(IS)%DENMAT(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2 ! TOTAL
+                SIM(IS)%DENMAT(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2 ! SPIN
+              ENDDO ! LMN2
+            ENDDO ! LMN1
+          ENDDO ! IAT
+        END IF
+!       PRINTOUT FOR TEST
+        IF(TPR) THEN
+          CALL FILEHANDLER$UNIT('PROT',NFIL)
+          WRITE(NFIL,'(80("#"))')
+          WRITE(NFIL,FMT='("DENSITY MATRICES FOR SIM ",I2)') IS
+          WRITE(NFIL,'(80("#"))')
+          DO IAT=1,NAT
+            ISP=SIM(IS)%ISPECIES(IAT)
+            LMNX=SIM(IS)%LMNX(ISP)
+            DO ISPIN=1,NSPIN
+              WRITE(NFIL,FMT='("DENMAT FOR ATOM ",I3,"(",A6,") AND SPIN",I2)')IAT,SIM(IS)%ATOMID(IAT),ISPIN
+              DO LMN1=1,LMNX
+                WRITE(NFIL,FMT='("R",I3,*(F10.5))')LMN1,REAL(SIM(IS)%DENMAT(LMN1,:LMNX,ISPIN,IAT))
+                IF(ANY(AIMAG(SIM(IS)%DENMAT(LMN1,:LMNX,ISPIN,IAT)).GT.1.D-8)) THEN
+                  WRITE(NFIL,FMT='("I",I3,*(F10.5))')LMN1,AIMAG(SIM(IS)%DENMAT(LMN1,:LMNX,ISPIN,IAT))
+                END IF
+              ENDDO
+            ENDDO
+          ENDDO
+        END IF
+      ENDDO ! IS
+                          CALL TIMING$CLOCKOFF('DENMAT')
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$DENMAT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE DENMATCALC(NDIM,NB,LMNX,OCC,PROJ,DENMAT)
+!     **************************************************************************
+!     ** CALCULATE DENSITY MATRIX                                             **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NDIM
+      INTEGER(4), INTENT(IN) :: NB
+      INTEGER(4), INTENT(IN) :: LMNX
+      REAL(8), INTENT(IN) :: OCC(NB)
+      COMPLEX(8), INTENT(IN) :: PROJ(NDIM,NB,LMNX)
+      COMPLEX(8), INTENT(OUT) :: DENMAT(LMNX,LMNX,NDIM)
+      COMPLEX(8) :: DENMAT1(LMNX,LMNX,NDIM,NDIM)
+      INTEGER(4) :: LMN1,LMN2
+      INTEGER(4) :: IDIM1,IDIM2,IDIM
+      INTEGER(4) :: IB
+      COMPLEX(8) :: CSVAR
+      INTEGER(4) :: NFIL
+      LOGICAL(4), PARAMETER :: TPR=.FALSE.
+!     **************************************************************************
+      IF(NDIM.NE.1) THEN
+        CALL ERROR$MSG('DENSITY MATRIX ONLY IMPLEMENTED FOR NDIM=1')
+        CALL ERROR$STOP('DENMATCALC')
+      END IF
+      DENMAT=(0.D0,0.D0)
+      DENMAT1=(0.D0,0.D0)
+      DO IB=1,NB
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            DO IDIM1=1,NDIM
+              DO IDIM2=1,NDIM
+                DENMAT1(LMN1,LMN2,IDIM1,IDIM2)=DENMAT1(LMN1,LMN2,IDIM1,IDIM2) &
+&                 +PROJ(IDIM1,IB,LMN1)*OCC(IB)*CONJG(PROJ(IDIM2,IB,LMN2))
+              ENDDO ! IDIM2
+            ENDDO ! IDIM1
+          ENDDO ! LMN2
+        ENDDO ! LMN1
+      ENDDO ! IB
+!     MAP DENSITY MATRIX ONTO TOTAL AND SPIN DENSITY
+      IF(NDIM.EQ.1) THEN
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            DENMAT(LMN1,LMN2,1)=DENMAT1(LMN1,LMN2,1,1)
+          ENDDO
+        ENDDO
+      ELSE
+        CALL ERROR$MSG('DENSITY MATRIX ONLY IMPLEMENTED FOR NDIM=1')
+        CALL ERROR$STOP('DENMATCALC')
+      END IF
+!     SYMMETRIZE DENSITY MATRIX
+      DO IDIM=1,NDIM
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            CSVAR=0.5D0*(DENMAT(LMN1,LMN2,IDIM)+CONJG(DENMAT(LMN2,LMN1,IDIM)))
+            DENMAT(LMN1,LMN2,IDIM)=CSVAR
+            DENMAT(LMN2,LMN1,IDIM)=CONJG(CSVAR)
+          ENDDO ! LMN2
+        ENDDO ! LMN1
+      ENDDO ! IDIM
+!     SYMMETRIZE DENSITY MATRIX WITH RESPECT TO TIME INVERSION            
+!     FOR COLLINEAR CALCULATIONS PSI(K)=CONJG(PSI(-K)). THEREFORE THE                          
+!     DENSITY MATRIX IS REAL AFTER SUMMING OVER K-POINTS. THIS IS NOT TRUE
+!     FOR TRANSPORT CALCULATIONS. THIS SYMMETRY FAILS FRO SPIN-ORBIT      
+!     AND NON-COLLINEAR CALCULATIONS WHERE AN EXPLICIT MAGNETIC FIELD     
+!     IS PRESENT.
+      IF(NDIM.EQ.1) THEN
+        DENMAT(:,:,1)=REAL(DENMAT(:,:,1),KIND=8)
+      END IF
+      RETURN
+      END SUBROUTINE DENMATCALC
