@@ -3636,20 +3636,20 @@
         ENDDO ! IKPT
 !       CONVERT SPIN-UP AND SPIN-DOWN DENSITY MATRIX INTO
 !       TOTAL AND SPIN DENSITY MATRIX
-        IF(NSPIN.EQ.2) THEN
-          DO IAT=1,NAT
-            ISP=SIM(IS)%ISPECIES(IAT)
-            LMNX=SIM(IS)%LMNX(ISP)
-            DO LMN1=1,LMNX
-              DO LMN2=1,LMNX
-                CSVAR1=SIM(IS)%DENMAT(LMN1,LMN2,1,IAT)
-                CSVAR2=SIM(IS)%DENMAT(LMN1,LMN2,2,IAT)
-                SIM(IS)%DENMAT(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2 ! TOTAL
-                SIM(IS)%DENMAT(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2 ! SPIN
-              ENDDO ! LMN2
-            ENDDO ! LMN1
-          ENDDO ! IAT
-        END IF
+        ! IF(NSPIN.EQ.2) THEN
+        !   DO IAT=1,NAT
+        !     ISP=SIM(IS)%ISPECIES(IAT)
+        !     LMNX=SIM(IS)%LMNX(ISP)
+        !     DO LMN1=1,LMNX
+        !       DO LMN2=1,LMNX
+        !         CSVAR1=SIM(IS)%DENMAT(LMN1,LMN2,1,IAT)
+        !         CSVAR2=SIM(IS)%DENMAT(LMN1,LMN2,2,IAT)
+        !         SIM(IS)%DENMAT(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2 ! TOTAL
+        !         SIM(IS)%DENMAT(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2 ! SPIN
+        !       ENDDO ! LMN2
+        !     ENDDO ! LMN1
+        !   ENDDO ! IAT
+        ! END IF
 !       PRINTOUT FOR TEST
         IF(TPR) THEN
           CALL FILEHANDLER$UNIT('PROT',NFIL)
