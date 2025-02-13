@@ -2590,6 +2590,7 @@
       REAL(8) :: EV
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: NB1,NB2,NOCC
+      REAL(8) :: SVAR
       REAL(8), ALLOCATABLE :: ISUM(:) ! SUM OF SPECTRUM OVER K POINTS AND SPINS
       TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
       INTEGER(4) :: NTASKS,THISTASK
@@ -2633,7 +2634,16 @@
           ISUM=0.D0
           DO IKPT=1,SIM(1)%NKPT
             DO ISPIN=1,SIM(1)%NSPIN
-              ISUM(:)=ISUM(:)+SPECTRUM%I(IKPT,ISPIN,:)
+!             GET ADET FROM OTHER SPIN DIRECTION
+              IF(SIM(1)%NSPIN.EQ.2) THEN
+                I=MOD(ISPIN,2)+1
+                OVERLAP=>OVERLAPARR(IKPT,I)
+                SVAR=ABS(OVERLAP%ADET)**2
+!             FOR NSPIN=1 IT IS SIMPLY A CONSTANT FACTOR THAT CAN BE OMITTED
+              ELSE
+                SVAR=1.D0
+              END IF
+              ISUM(:)=ISUM(:)+SPECTRUM%I(IKPT,ISPIN,:)*SVAR
             ENDDO
           ENDDO
           DO I=1,SETTINGS%NE
