@@ -69,6 +69,7 @@
         REAL(8), ALLOCATABLE :: I(:,:,:) ! (NKPT,NSPIN,NE) CROSS SECTION
         REAL(8), ALLOCATABLE :: ERAW(:,:,:)  ! (NKPT,NSPIN,NB2-NOCC)
         REAL(8), ALLOCATABLE :: IRAW(:,:,:)  ! (NKPT,NSPIN,NB2-NOCC)
+        REAL(8), ALLOCATABLE :: ICONV(:,:)  ! (NKPT,NE) CONVOLUTED CROSS SECTION
       END TYPE SPECTRUM_TYPE
 
 !     GENERAL SETTINGS OF A SIMULATION 
@@ -247,6 +248,8 @@
       CALL XAS$CROSSSECTION
 
       CALL XAS$OUTPUTGATHER
+
+      CALL XAS$SPINCONV
 
       CALL XAS$OUTPUT
 
@@ -2633,18 +2636,7 @@
           ALLOCATE(ISUM(SETTINGS%NE))
           ISUM=0.D0
           DO IKPT=1,SIM(1)%NKPT
-            DO ISPIN=1,SIM(1)%NSPIN
-!             GET ADET FROM OTHER SPIN DIRECTION
-              IF(SIM(1)%NSPIN.EQ.2) THEN
-                I=MOD(ISPIN,2)+1
-                OVERLAP=>OVERLAPARR(IKPT,I)
-                SVAR=ABS(OVERLAP%ADET)**2
-!             FOR NSPIN=1 IT IS SIMPLY A CONSTANT FACTOR THAT CAN BE OMITTED
-              ELSE
-                SVAR=1.D0
-              END IF
-              ISUM(:)=ISUM(:)+SPECTRUM%I(IKPT,ISPIN,:)*SVAR
-            ENDDO
+            ISUM(:)=ISUM(:)+SPECTRUM%ICONV(IKPT,:)
           ENDDO
           DO I=1,SETTINGS%NE
             WRITE(NFIL,*) SPECTRUM%E(I)/EV,ISUM(I)
@@ -3778,3 +3770,45 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$WRITEDENMAT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$SPINCONV
+!     **************************************************************************
+!     ** SPIN CONVOLUTION FOR NSPIN=2                                         **
+!     ** TOTAL = I(UP) * |ADET(DOWN)|^2 + I(DOWN) * |ADET(UP)|^2              **
+!     ** SPIN CONVOLUTION FOR NSPIN=1 (I(UP)=I(DOWN), ADET(UP)=ADET(DOWN))    **
+!     ** TOTAL = 2 * I * |ADET|^2                                             **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SIM,RTASK,SETTINGS,OVERLAP,OVERLAPARR,NKPTG
+      IMPLICIT NONE
+      INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: ISPINOPPOSITE
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XAS$SPINCONV')
+      DO ISPEC=1,SETTINGS%NSPEC
+        SPECTRUM=>SPECTRUMARR(ISPEC)
+        ALLOCATE(SPECTRUM%ICONV(SIM(1)%NKPT,SETTINGS%NE))
+        SPECTRUM%ICONV=0.D0
+        DO IKPT=1,NKPTG
+          DO ISPIN=1,SIM(1)%NSPIN
+            IF(SIM(1)%NSPIN.EQ.1) THEN
+              OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+              SPECTRUM%ICONV(IKPT,:)=SPECTRUM%ICONV(IKPT,:)+ &
+     &                        2.D0*SPECTRUM%I(IKPT,ISPIN,:)*ABS(OVERLAP%ADET)**2
+            ELSE
+              ISPINOPPOSITE=MOD(ISPIN,2)+1
+              OVERLAP=>OVERLAPARR(IKPT,ISPINOPPOSITE)
+              SPECTRUM%ICONV(IKPT,:)=SPECTRUM%ICONV(IKPT,:)+ &
+     &                             SPECTRUM%I(IKPT,ISPIN,:)*ABS(OVERLAP%ADET)**2
+            END IF
+          ENDDO
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XAS$SPINCONV
