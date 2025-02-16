@@ -4473,6 +4473,7 @@ RETURN
       DO(:,:,:,:)=0.D0
       CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
       POTB=0
+      CALL WAVES$WRITEDENMAT(NAT,LMNXX,NDIMD_,DENMAT)
       DO IAT=THISTASK,NAT,NTASKS   ! DISTRIBUTE WORK ACCROSS TASKS
         ISP=MAP%ISP(IAT)
         LMNX=MAP%LMNX(ISP)
@@ -4914,6 +4915,132 @@ END IF
                               CALL TRACE$POP
       RETURN
       END SUBROUTINE WAVES$HPSI
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$WRITEDENMAT(NAT,LMNXX,NDIMD_,DENMAT)
+!     **************************************************************************
+!     **                                                                      **
+!     **  WRITES THE DENMAT ARRAY TO THE OUTPUT FILE                          **
+!     **                                                                      **
+!     **************************************************************************
+      USE WAVES_MODULE
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4), PARAMETER  :: SETL=3
+      INTEGER(4), PARAMETER  :: SETMN=2*SETL+1
+      INTEGER(4),INTENT(IN)  :: NAT
+      INTEGER(4),INTENT(IN)  :: LMNXX
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      COMPLEX(8),INTENT(IN)  :: DENMAT(LMNXX,LMNXX,NDIMD_,NAT)
+      COMPLEX(8),ALLOCATABLE :: DENMATUD(:,:,:)
+      REAL(8),ALLOCATABLE :: DENMATF(:,:,:)
+      INTEGER(4)             :: IAT
+      INTEGER(4)             :: ISP
+      INTEGER(4)             :: LMNX
+      INTEGER(4)             :: NTASKS,THISTASK
+      LOGICAL(4)             :: TSTOPSIM
+      INTEGER(4)             :: NFIL
+      CHARACTER(32)          :: ATOM
+      INTEGER(4)             :: IDIM
+      INTEGER(4)             :: LMN,LMN1,LMN2
+      INTEGER(4)             :: LN,LN1,LN2
+      INTEGER(4)             :: LNX
+      INTEGER(4),ALLOCATABLE :: LOX(:)
+      INTEGER(4)             :: L,L1,L2
+      INTEGER(4)             :: NL3  ! NUMBER OF L=3-SHELLS
+      INTEGER(4)             :: M1,M2
+      REAL(8),ALLOCATABLE    :: EVAL(:)
+      REAL(8),ALLOCATABLE    :: EVEC(:,:)
+      INTEGER(4) :: I
+
+
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      IF(THISTASK.NE.1) RETURN
+      IF(NSPIN.EQ.3) RETURN
+                          CALL TRACE$PUSH('WAVES$WRITEDENMAT')
+
+      CALL FILEHANDLER$SETFILE('DENMAT',.TRUE.,-'.DENMAT')
+      CALL FILEHANDLER$SETSPECIFICATION('DENMAT','STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION('DENMAT','POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION('DENMAT','ACTION','WRITE')
+      CALL FILEHANDLER$SETSPECIFICATION('DENMAT','FORM','FORMATTED')
+
+      CALL FILEHANDLER$UNIT('DENMAT',NFIL)
+      DO IAT=1,NAT
+        ISP=MAP%ISP(IAT)
+        CALL SETUP$ISELECT(ISP)
+        CALL SETUP$GETI4('LNX',LNX)
+        ALLOCATE(LOX(LNX))
+        CALL SETUP$GETI4A('LOX',LNX,LOX)
+
+        CALL SETUP$UNSELECT()
+        LMNX=MAP%LMNX(ISP)
+        CALL ATOMLIST$GETCH('NAME',IAT,ATOM)
+        print *, 'ATOM',ATOM
+        ALLOCATE(DENMATUD(LMNX,LMNX,NDIMD_))
+        IF(NSPIN.EQ.1) THEN
+          DENMATUD(:,:,:)=DENMAT(1:LMNX,1:LMNX,:,IAT)
+        ELSE
+          DENMATUD(:,:,1)=0.5D0*(DENMAT(1:LMNX,1:LMNX,1,IAT)+DENMAT(1:LMNX,1:LMNX,2,IAT))
+          DENMATUD(:,:,2)=0.5D0*(DENMAT(1:LMNX,1:LMNX,1,IAT)-DENMAT(1:LMNX,1:LMNX,2,IAT))
+        END IF
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='("DENSITY MATRIX FOR ATOM ",A)') ATOM
+        WRITE(NFIL,'(80("#"))')
+        DO IDIM=1,NDIMD_
+          WRITE(NFIL,FMT='("# SPIN ",I2)') IDIM
+          DO LMN=1,LMNX
+            WRITE(NFIL,FMT='(*(F10.5))') REAL(DENMATUD(LMN,:LMNX,IDIM))
+            IF(ANY(AIMAG(DENMATUD(LMN,:LMNX,IDIM)).GT.1.D-8)) THEN
+              WRITE(NFIL,FMT='("IMAG: ",*(F10.5))') AIMAG(DENMATUD(LMN,:LMNX,IDIM))
+            END IF
+          ENDDO
+        ENDDO
+        NL3=0
+        DO LN=1,LNX
+          L=LOX(LN)
+          IF(L.EQ.SETL) NL3=NL3+1
+        ENDDO
+        IF(NL3.GT.0) THEN
+          WRITE(NFIL,'(80("#"))')
+          WRITE(NFIL,FMT='("EIGENVALUES AND VECTORS OF F SHELL FOR ATOM ",A)') ATOM
+          WRITE(NFIL,'(80("#"))')
+          ALLOCATE(DENMATF(NL3*SETMN,NL3*SETMN,NDIMD))
+          LMN1=1
+          DO LN=1,LNX
+            L=LOX(LN)
+            IF(L.EQ.SETL) EXIT
+            LMN1=LMN1+2*L+1
+          ENDDO
+          DENMATF(:,:,:)=REAL(DENMATUD(LMN1:LMN1+NL3*SETMN-1,LMN1:LMN1+NL3*SETMN-1,:),KIND=8)
+          DO IDIM=1,NDIMD_
+            WRITE(NFIL,FMT='("# SPIN ",I2)') IDIM
+
+            WRITE(NFIL,'("DENMATF")')
+            DO I=1,NL3*SETMN
+              WRITE(NFIL,*) DENMATF(I,:,IDIM)
+            ENDDO
+
+            ALLOCATE(EVAL(NL3*SETMN))
+            ALLOCATE(EVEC(NL3*SETMN,NL3*SETMN))
+            CALL LIB$DIAGR8(NL3*SETMN,DENMATF(:,:,IDIM),EVAL,EVEC)
+            WRITE(NFIL,FMT='(A12,A12)') 'EIGENVALUE','EIGENVECTOR'
+            DO I=1,NL3*SETMN
+              WRITE(NFIL,FMT='(*(F12.8))') EVAL(I),EVEC(:,I)
+            ENDDO
+            DEALLOCATE(EVAL)
+            DEALLOCATE(EVEC)
+          ENDDO
+          DEALLOCATE(DENMATF)
+        END IF
+          
+
+        DEALLOCATE(DENMATUD)
+        DEALLOCATE(LOX)
+      ENDDO
+      CALL FILEHANDLER$CLOSE('DENMAT')
+                          CALL TRACE$POP
+      END SUBROUTINE WAVES$WRITEDENMAT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE WAVES_HPROJ(NDIM,NB,LMNX,DH,PROJ,HPROJ)
