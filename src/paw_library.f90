@@ -447,6 +447,182 @@
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB$SMINVERTR8(N,AINV,U,V,BINV)
+!     **************************************************************************
+!     **  CONSTRUCT INVERSE OF REAL SQUARE MATRIX B                           **    
+!     **    USING SHERMAN-MORRISON FORMULA                                    **
+!     **  B = A + U * V^T                                                     **
+!     **  BINV = AINV - AINV * U * V^T * AINV / ( 1 + V^T * AINV * U )        **
+!     **  WHERE AINV IS THE KNOWN INVERSE OF REFERENCE MATRIX A               **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: N         ! DIMENSION OF THE MATRIX
+      REAL(8)   ,INTENT(IN) :: AINV(N,N) ! MATRIX TO BE INVERTED
+      REAL(8)   ,INTENT(IN) :: U(N)      ! VECTOR U
+      REAL(8)   ,INTENT(IN) :: V(N)      ! VECTOR V
+      REAL(8)   ,INTENT(OUT):: BINV(N,N) ! INVERTED MATRIX
+      REAL(8)   ,PARAMETER  :: ONE=1.D0
+      REAL(8)   ,PARAMETER  :: ZERO=0.D0
+      REAL(8)               :: W(N)
+      REAL(8)               :: Z(N)
+      REAL(8)               :: LAMBDA
+      REAL(8)   ,ALLOCATABLE:: RES(:,:)
+      REAL(8)               :: DEV
+!     **************************************************************************
+!     Z = AINV * U
+      CALL DGEMV('N',N,N,ONE,AINV,N,U,1,ZERO,Z,1)
+!     W = AINV^T * V
+      CALL DGEMV('T',N,N,ONE,AINV,N,V,1,ZERO,W,1)
+!     LAMBDA = V^T * Z
+      LAMBDA=DOT_PRODUCT(V,Z)
+!     LAMBDA = -ONE / (ONE + LAMBDA)
+      LAMBDA=-ONE/(ONE+LAMBDA)
+!     BINV = AINV + LAMBDA * Z * W^T
+      BINV=AINV
+      CALL DGER(N,N,LAMBDA,Z,1,W,1,BINV,N)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB$SMINVERTC8(N,AINV,U,V,BINV)
+!     **************************************************************************
+!     **  CONSTRUCT INVERSE OF COMPLEX SQUARE MATRIX B                        **    
+!     **    USING SHERMAN-MORRISON FORMULA                                    **
+!     **  B = A + U * V^H                                                     **
+!     **  BINV = AINV - AINV * U * V^H * AINV / ( 1 + V^H * AINV * U )        **
+!     **  WHERE AINV IS THE KNOWN INVERSE OF REFERENCE MATRIX A               **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: N         ! DIMENSION OF THE MATRIX
+      COMPLEX(8),INTENT(IN) :: AINV(N,N) ! MATRIX TO BE INVERTED
+      COMPLEX(8),INTENT(IN) :: U(N)      ! VECTOR U
+      COMPLEX(8),INTENT(IN) :: V(N)      ! VECTOR V
+      COMPLEX(8),INTENT(OUT):: BINV(N,N) ! INVERTED MATRIX
+      COMPLEX(8),PARAMETER  :: ONE=1.D0
+      COMPLEX(8),PARAMETER  :: ZERO=0.D0
+      COMPLEX(8)            :: W(N)
+      COMPLEX(8)            :: Z(N)
+      COMPLEX(8)            :: LAMBDA
+!     **************************************************************************
+!     Z = AINV * U
+      CALL ZGEMV('N',N,N,ONE,AINV,N,U,1,ZERO,Z,1)
+!     W = AINV^H * V
+      CALL ZGEMV('C',N,N,ONE,AINV,N,V,1,ZERO,W,1)
+!     LAMBDA = V^H * Z
+      LAMBDA=DOT_PRODUCT(V,Z)
+!     LAMBDA = -ONE / (ONE + LAMBDA)
+      LAMBDA=-ONE/(ONE+LAMBDA)
+!     BINV = AINV + LAMBDA * Z * W^H
+      BINV=AINV
+      CALL ZGERC(N,N,LAMBDA,Z,1,W,1,BINV,N)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB$SMFASTINVERTR8(FLAG,N,AINV,UORV,IND,BINV)
+!     **************************************************************************
+!     **  CONSTRUCT FAST INVERSE OF REAL SQUARE MATRIX B                      **    
+!     **    USING SHERMAN-MORRISON FORMULA                                    **
+!     **  B = A + U * V^T                                                     **
+!     **  BINV = AINV - AINV * U * V^T * AINV / ( 1 + V^T * AINV * U )        **
+!     **  WHERE AINV IS THE KNOWN INVERSE OF REFERENCE MATRIX A               **
+!     **  SPECIAL CASE WHERE EITHER U OR V IS A UNIT VECTOR                   **
+!     **  CASE 'V' DOES NOT SAVE MUCH BUT 'U' IS MORE THAN FACTOR 2 FASTER    **
+!     **************************************************************************
+      IMPLICIT NONE
+      CHARACTER(1),INTENT(IN) :: FLAG    ! 'N' NORMAL, 'U' OR 'V' IS A UNIT VECTOR
+      INTEGER(4),INTENT(IN) :: N         ! DIMENSION OF THE MATRIX
+      REAL(8)   ,INTENT(IN) :: AINV(N,N) ! MATRIX TO BE INVERTED
+      REAL(8)   ,INTENT(IN) :: UORV(N)   ! VECTOR U OR V FOR FLAG 'V' OR 'U'
+      INTEGER(4) ,INTENT(IN) :: IND      ! INDEX OF THE ONE IN THE UNIT VECTOR
+      REAL(8)   ,INTENT(OUT):: BINV(N,N) ! INVERTED MATRIX
+      REAL(8)   ,PARAMETER  :: ONE=1.D0
+      REAL(8)   ,PARAMETER  :: ZERO=0.D0
+      REAL(8)               :: W(N)
+      REAL(8)               :: Z(N)
+      REAL(8)               :: LAMBDA
+      REAL(8)   ,ALLOCATABLE:: RES(:,:)
+      REAL(8)               :: DEV
+!     **************************************************************************
+      IF(FLAG.EQ.'U') THEN
+!       Z = AINV * U
+        Z = AINV(:,IND)
+!       W = AINV^T * V
+        CALL DGEMV('T',N,N,ONE,AINV,N,UORV,1,ZERO,W,1)
+!       LAMBDA = V^T * Z
+        LAMBDA=DOT_PRODUCT(UORV,Z)        
+      ELSE IF(FLAG.EQ.'V') THEN
+!       Z = AINV * U
+        CALL DGEMV('N',N,N,ONE,AINV,N,UORV,1,ZERO,Z,1)
+!       W = AINV^T * V
+        W = AINV(IND,:)
+!       LAMBDA = V^T * Z
+        LAMBDA=Z(IND)
+      ELSE
+        CALL ERROR$MSG('FLAG NOT RECOGNIZED')
+        CALL ERROR$CHVAL('FLAG',FLAG)
+        CALL ERROR$STOP('LIB$SMFASTINVERTR8')
+      END IF
+!     LAMBDA = -ONE / (ONE + LAMBDA)
+      LAMBDA=-ONE/(ONE+LAMBDA)
+!     BINV = AINV + LAMBDA * Z * W^T
+      BINV=AINV
+      CALL DGER(N,N,LAMBDA,Z,1,W,1,BINV,N)
+      RETURN
+      END
+      !
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB$SMFASTINVERTC8(FLAG,N,AINV,UORV,IND,BINV)
+!     **************************************************************************
+!     **  CONSTRUCT FAST INVERSE OF COMPLEX SQUARE MATRIX B                   **    
+!     **    USING SHERMAN-MORRISON FORMULA                                    **
+!     **  B = A + U * V^H                                                     **
+!     **  BINV = AINV - AINV * U * V^H * AINV / ( 1 + V^H * AINV * U )        **
+!     **  WHERE AINV IS THE KNOWN INVERSE OF REFERENCE MATRIX A               **
+!     **  SPECIAL CASE WHERE EITHER U OR V IS A UNIT VECTOR                   **
+!     **  CASE 'V' DOES NOT SAVE MUCH BUT 'U' IS MORE THAN FACTOR 2 FASTER    **
+!     **************************************************************************
+      IMPLICIT NONE
+      CHARACTER(1),INTENT(IN) :: FLAG    ! 'U' OR 'V' IS A UNIT VECTOR
+      INTEGER(4),INTENT(IN) :: N         ! DIMENSION OF THE MATRIX
+      COMPLEX(8)   ,INTENT(IN) :: AINV(N,N) ! MATRIX TO BE INVERTED
+      COMPLEX(8)   ,INTENT(IN) :: UORV(N)   ! VECTOR U OR V FOR FLAG 'V' OR 'U'
+      INTEGER(4) ,INTENT(IN) :: IND      ! INDEX OF THE ONE IN THE UNIT VECTOR
+      COMPLEX(8)   ,INTENT(OUT):: BINV(N,N) ! INVERTED MATRIX
+      COMPLEX(8)   ,PARAMETER  :: ONE=1.D0
+      COMPLEX(8)   ,PARAMETER  :: ZERO=0.D0
+      COMPLEX(8)               :: W(N)
+      COMPLEX(8)               :: Z(N)
+      COMPLEX(8)               :: LAMBDA
+!     **************************************************************************
+      IF(FLAG.EQ.'U') THEN
+!       Z = AINV * U
+        Z = AINV(:,IND)
+!       W = AINV^H * V
+        CALL ZGEMV('C',N,N,ONE,AINV,N,UORV,1,ZERO,W,1)
+!       LAMBDA = V^H * Z
+        LAMBDA=DOT_PRODUCT(UORV,Z)        
+      ELSE IF(FLAG.EQ.'V') THEN
+!       Z = AINV * U
+        CALL ZGEMV('N',N,N,ONE,AINV,N,UORV,1,ZERO,Z,1)
+!       W = AINV^H * V
+        W = CONJG(AINV(IND,:))
+!       LAMBDA = V^H * Z
+        LAMBDA=Z(IND)
+      ELSE
+        CALL ERROR$MSG('FLAG NOT RECOGNIZED')
+        CALL ERROR$CHVAL('FLAG',FLAG)
+        CALL ERROR$STOP('LIB$SMFASTINVERTR8')
+      END IF
+!     LAMBDA = -ONE / (ONE + LAMBDA)
+      LAMBDA=-ONE/(ONE+LAMBDA)
+!     BINV = AINV + LAMBDA * Z * W^T
+      BINV=AINV
+      CALL ZGERC(N,N,LAMBDA,Z,1,W,1,BINV,N)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE LIB$SVDR8(M,N,A,U,S,VT)
 !     **************************************************************************
 !     **  SINGULAR VALUE DECOMPOSITION OF THE MXN MATRIX A                    **
