@@ -120,12 +120,12 @@
       TYPE(SIMULATION_TYPE), POINTER :: THIS ! CURRENT SIMULATION
 
       TYPE(OVERLAP_TYPE), ALLOCATABLE, TARGET :: OVERLAPARR(:,:) ! (NKPT,NSPIN)
-      TYPE(OVERLAP_TYPE), POINTER :: OVERLAP ! CURRENT OVERLAP
+      TYPE(OVERLAP_TYPE), POINTER :: OVL ! CURRENT OVERLAP
 
       TYPE(SETTINGS_TYPE) :: SETTINGS
 
       TYPE(SPECTRUM_TYPE), ALLOCATABLE, TARGET :: SPECTRUMARR(:) ! (NSPEC)
-      TYPE(SPECTRUM_TYPE), POINTER :: SPECTRUM ! CURRENT SPECTRUM
+      TYPE(SPECTRUM_TYPE), POINTER :: SPEC ! CURRENT SPECTRUM
 
       REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
       INTEGER(4), ALLOCATABLE :: ATOMMAP(:) ! (NAT) ATOM INDEX MAP SIM1->SIM2
@@ -140,6 +140,7 @@
 
       INTEGER(4), ALLOCATABLE :: KMAP(:) ! (NKPT) K-POINT RESPONSIBILITY OF TASKS
       INTEGER(4) :: NKPTG  ! #(KPOINTS TOTAL)
+      INTEGER(4) :: NSPING ! #(SPINS TOTAL)
       INTEGER(4) :: RTASK  ! TASK RESPONSIBLE FOR READ/WRITE
       END MODULE XAS_MODULE
 
@@ -148,22 +149,7 @@
         TYPE(LL_TYPE) :: LL_CNTL
         SAVE
       END MODULE XASCNTL_MODULE
-
-      ! MODULE XASSTP_MODULE  ! MARK: XASSTP_MODULE
-      !   USE XASPDOS_MODULE, ONLY: NPD
-      !   USE LINKEDLIST_MODULE, ONLY: LL_TYPE
-      !   TYPE STP_TYPE
-      !     INTEGER(4) :: NFIL=0
-      !     TYPE(LL_TYPE) :: LL
-      !     INTEGER(4) :: GID=0
-      !     INTEGER(4) :: LNX=0
-      !     INTEGER(4) :: NR=0
-      !     INTEGER(4) :: NB ! #(STATES IN AE ATOMIC CALCULATION)
-      !     INTEGER(4) :: NC ! #(CORE STATES)
-      !   END TYPE STP_TYPE
-      !   TYPE(STP_TYPE) :: STP(NPD)
-      ! END MODULE XASSTP_MODULE
-
+!
       PROGRAM PAW_XAS  ! MARK: PAW_XAS
       ! USE XASPDOS_MODULE, ONLY: NPD,PD
       USE XASCNTL_MODULE, ONLY: LL_CNTL
@@ -173,9 +159,6 @@
       IMPLICIT NONE
       INTEGER(4) :: NFIL
       CHARACTER(32) :: DATIME
-      INTEGER(4) :: IPD
-      INTEGER(4) :: I
-      INTEGER(4) :: NUM_ARGS
       INTEGER(4) :: NTASKS
       INTEGER(4) :: THISTASK
 !     **************************************************************************
@@ -393,166 +376,6 @@
       NULLIFY(THIS)
       RETURN
       END SUBROUTINE XAS$UNSELECT
-! !
-! !     ..................................................................
-!       SUBROUTINE XAS$READPDOS(NFIL,IPD)  ! MARK: XAS$READPDOS
-! !     ******************************************************************
-! !     ** READS PDOS FILE FROM NFIL INTO THE XAS MODULE                **
-! !     ** INPUT: NFIL - UNIT NUMBER OF PDOS FILE                       **
-! !     **        IPD  - INDEX OF PDOS TO BE READ                       **
-! !     ** ADAPTED FROM PDOS$READ                                       **
-! !     ******************************************************************
-!       USE XASPDOS_MODULE, ONLY: PD,NPD
-!       USE LINKEDLIST_MODULE
-!       IMPLICIT NONE
-!       INTEGER(4),INTENT(IN)  :: NFIL
-!       INTEGER(4),INTENT(IN)  :: IPD
-!       INTEGER(4)             :: ISP,IKPT,ISPIN,IB
-!       INTEGER(4)             :: LNX1,NB
-!       INTEGER(4)             :: IOS
-!       CHARACTER(82)          :: IOSTATMSG
-!       LOGICAL(4)             :: TCHK
-!       REAL(8)                :: OCCSUM
-!       INTEGER(4)             :: ILOGICAL
-
-!       INTEGER(4)             :: NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,SPACEGROUP
-!       LOGICAL(4)             :: TINV,TSHIFT
-!       INTEGER(4)                               :: NKDIV(3)
-!       INTEGER(4)                               :: ISHIFT(3)
-!       REAL(8)                                  :: RNTOT,NEL
-!       REAL(8)                                  :: RBAS(3,3)
-!       CHARACTER(6)           :: FLAG
-! !     ******************************************************************
-!                              CALL TRACE$PUSH('XAS$PDOSREAD')
-! !     CHECK SELECTION OF PDOS INDEX
-!       IF(IPD.LT.1.OR.IPD.GT.NPD)THEN
-!         CALL ERROR$MSG('PDOS INDEX NOT IN RANGE')
-!         CALL ERROR$I4VAL('IPD',IPD)
-!         CALL ERROR$I4VAL('NPD',NPD)
-!         CALL ERROR$STOP('XAS$READPDOS')
-!       END IF
-! !
-! !     ==================================================================
-! !     == GENERAL QUANTITIES                                           ==
-! !     ==================================================================
-!       TCHK=.FALSE.
-!       READ(NFIL,ERR=100)NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
-!       TCHK=.TRUE.
-!  100  CONTINUE
-!       IF(.NOT.TCHK) THEN
-!         PRINT*,'WARNING: NO OCCUPATIONS PRESENT IN PDOS FILE'
-!         PRINT*,'            OCCUPATIONS WILL BE SET TO 0'
-!         FLAG='LEGACY'
-!         REWIND(NFIL)
-!         READ(NFIL)NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX
-!       END IF
-      
-!       ALLOCATE(PD(IPD)%LNX(NSP))
-!       ALLOCATE(PD(IPD)%LOX(LNXX,NSP))
-!       ALLOCATE(PD(IPD)%ISPECIES(NAT))
-!       READ(NFIL)PD(IPD)%LNX(:),PD(IPD)%LOX(:,:),PD(IPD)%ISPECIES(:)
-      
-!       IF(FLAG.EQ.'181213')THEN
-! !         == GFORTRAN LOGICAL REPRESENTATION DEFINED WITH TRUE=1, FALSE=0     ==
-! !         https://gcc.gnu.org/onlinedocs/gfortran/compiler-characteristics/
-! !         internal-representation-of-logical-variables.html
-! !         == IFORT LOGICAL REPRESENTATION DEFINED WITH VALUE OF LAST BIT      ==
-! !         https://www.intel.com/content/www/us/en/docs/fortran-compiler/
-! !         developer-guide-reference/2024-2/logical-data-representations.html
-! !         == BOTH SHARE MEANING OF LAST BIT 1=TRUE, 0=FALSE                   ==
-! !         == ENSURES BACKWARDS COMPATIBILITY WITH OLD PDOS FILES              ==
-!         READ(NFIL)NKDIV(:),ISHIFT(:),RNTOT,NEL,ILOGICAL
-!         TINV=BTEST(ILOGICAL,0)
-!         READ(NFIL)SPACEGROUP,ILOGICAL
-!         TSHIFT=BTEST(ILOGICAL,0)
-!       END IF
-! !
-! !     ==================================================================
-! !     == ATOMIC STRUCTURE                                             ==
-! !     ==================================================================
-!       ALLOCATE(PD(IPD)%R(3,NAT))
-!       ALLOCATE(PD(IPD)%ATOMID(NAT))
-!       READ(NFIL)RBAS(:,:),PD(IPD)%R(:,:),PD(IPD)%ATOMID(:)
-! !
-! !     ==================================================================
-! !     == ELEMENT SPECIFIC QUANTITIES                                  ==
-! !     ==================================================================
-!       ALLOCATE(PD(IPD)%IZ(NSP))
-!       ALLOCATE(PD(IPD)%RAD(NSP)); PD(IPD)%RAD=0.D0
-!       ALLOCATE(PD(IPD)%PHIOFR(LNXX,NSP)); PD(IPD)%PHIOFR=0.D0
-!       ALLOCATE(PD(IPD)%DPHIDR(LNXX,NSP)); PD(IPD)%DPHIDR=0.D0
-!       ALLOCATE(PD(IPD)%OV(LNXX,LNXX,NSP)); PD(IPD)%OV=0.D0
-!       DO ISP=1,NSP
-!         LNX1=PD(IPD)%LNX(ISP)
-!         READ(NFIL)PD(IPD)%IZ(ISP),PD(IPD)%RAD(ISP),PD(IPD)%PHIOFR(1:LNX1,ISP) &
-!      &            ,PD(IPD)%DPHIDR(1:LNX1,ISP),PD(IPD)%OV(1:LNX1,1:LNX1,ISP)
-!       ENDDO
-! !
-! !     ==================================================================
-! !     ==  NOW READ PROJECTIONS                                       ==
-! !     ==================================================================
-!       OCCSUM=0.0D0
-!       ALLOCATE(PD(IPD)%XK(3,NKPT))
-!       ALLOCATE(PD(IPD)%WKPT(NKPT))
-!       ALLOCATE(PD(IPD)%STATEARR(NKPT,NSPIN))
-!       DO IKPT=1,NKPT
-!         DO ISPIN=1,NSPIN
-!           PD(IPD)%STATE=>PD(IPD)%STATEARR(IKPT,ISPIN)
-!           READ(NFIL,ERR=9998,END=9998)PD(IPD)%XK(:,IKPT),NB,PD(IPD)%WKPT(IKPT)
-!           PD(IPD)%STATE%NB=NB
-!           ALLOCATE(PD(IPD)%STATE%EIG(NB))
-!           ALLOCATE(PD(IPD)%STATE%VEC(NDIM,NPRO,NB))
-!           ALLOCATE(PD(IPD)%STATE%OCC(NB))
-!           DO IB=1,NB
-!             IF(FLAG.EQ.'LEGACY') THEN
-!               PD(IPD)%STATE%OCC(:)=0.D0
-!               READ(NFIL,ERR=9999,IOSTAT=IOS)PD(IPD)%STATE%EIG(IB),PD(IPD)%STATE%VEC(:,:,IB)
-!             ELSE
-!               READ(NFIL,ERR=9999,IOSTAT=IOS)PD(IPD)%STATE%EIG(IB) &
-!     &                          ,PD(IPD)%STATE%OCC(IB),PD(IPD)%STATE%VEC(:,:,IB)
-!               OCCSUM=OCCSUM+PD(IPD)%STATE%OCC(IB)
-!             END IF
-!           ENDDO
-!         ENDDO
-!       ENDDO
-! PRINT*,"OCCSUM",OCCSUM
-! !     SET FIXED SIZE VARIABLES IN PDOS STRUCTURE
-!       PD(IPD)%FLAG=FLAG
-!       PD(IPD)%NAT=NAT
-!       PD(IPD)%NSP=NSP
-!       PD(IPD)%NKPT=NKPT
-!       PD(IPD)%NSPIN=NSPIN
-!       PD(IPD)%NDIM=NDIM
-!       PD(IPD)%NPRO=NPRO
-!       PD(IPD)%NKDIV(:)=NKDIV(:)
-!       PD(IPD)%ISHIFT(:)=ISHIFT(:)
-!       PD(IPD)%RNTOT=RNTOT
-!       PD(IPD)%NEL=NEL
-!       PD(IPD)%TINV=TINV
-!       PD(IPD)%LNXX=LNXX
-!       PD(IPD)%RBAS(:,:)=RBAS(:,:)
-!       PD(IPD)%SPACEGROUP=SPACEGROUP
-!       PD(IPD)%TSHIFT=TSHIFT
-!                              CALL TRACE$POP
-!       RETURN
-!  9999 CONTINUE
-!       CALL FILEHANDLER$IOSTATMESSAGE(IOS,IOSTATMSG)
-!       CALL ERROR$MSG('ERROR READING PDOS FILE')
-!       CALL ERROR$I4VAL('IOS',IOS)
-!       CALL ERROR$CHVAL('IOSTATMSG',IOSTATMSG)
-!       CALL ERROR$I4VAL('IB',IB)
-!       CALL ERROR$I4VAL('IKPT',IKPT)
-!       CALL ERROR$I4VAL('ISPIN',ISPIN)
-!       CALL ERROR$I4VAL('NPRO',NPRO)
-!       CALL ERROR$STOP('XAS$READPDOS')
-!       STOP
-!  9998 CONTINUE
-!       CALL ERROR$MSG('ERROR READING PDOS FILE')
-!       CALL ERROR$MSG('OLD VERSION: VARIABLE WKPT IS NOT PRESENT')
-!       CALL ERROR$MSG('PRODUCE NEW PDOS FILE')
-!       CALL ERROR$STOP('XAS$READPDOS')
-!       STOP
-!       END SUBROUTINE XAS$READPDOS
 !
 !     ..................................................................
       SUBROUTINE DATACONSISTENCY  ! MARK: DATACONSISTENCY
@@ -670,12 +493,11 @@
 !     **                                                                      **
 !     **************************************************************************
       USE XASCNTL_MODULE, ONLY: LL_CNTL
-      USE XAS_MODULE, ONLY: THIS,SELECTED,TRSTRT
+      USE XAS_MODULE, ONLY: SELECTED,TRSTRT
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
       CHARACTER(11), INTENT(IN) :: ID ! GROUNDSTATE OR EXCITESTATE
       LOGICAL(4) :: TCHK
-      INTEGER(4) :: NFIL
       CHARACTER(256) :: FILENAME
 !     **************************************************************************
                           CALL TRACE$PUSH('XASCNTL$FILES')
@@ -826,7 +648,7 @@
 !     **                                                                      **
 !     **************************************************************************
       USE XASCNTL_MODULE, ONLY: LL_CNTL
-      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,TSPECTRUM,SETTINGS
+      USE XAS_MODULE, ONLY: SPEC,SPECTRUMARR,TSPECTRUM,SETTINGS
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
@@ -853,7 +675,7 @@
       SETTINGS%NSPEC=NSPEC
 !     LOOP OVER SPECTRA AND READ DATA
       DO ISPEC=1,NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
+        SPEC=>SPECTRUMARR(ISPEC)
         CALL LINKEDLIST$SELECT(LL_CNTL,'~')
         CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
         CALL LINKEDLIST$SELECT(LL_CNTL,'SPECTRUM',ISPEC)
@@ -864,24 +686,24 @@
           CALL ERROR$I4VAL('ISPEC',ISPEC)
           CALL ERROR$STOP('XASCNTL$SPECTRUM')
         END IF
-        CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,SPECTRUM%FILE)
+        CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,SPEC%FILE)
 !       POLARISATION IN CARTHESIAN COORDINATES
         CALL LINKEDLIST$EXISTD(LL_CNTL,'POLXYZ',1,TCHK)
         IF(TCHK) THEN
           CALL LINKEDLIST$GET(LL_CNTL,'POLXYZ',1,REALPOLXYZ)
-          SPECTRUM%TPOLXYZ=.TRUE.
-          SPECTRUM%POLXYZ(1)=CMPLX(REALPOLXYZ(1),REALPOLXYZ(2),KIND=8)
-          SPECTRUM%POLXYZ(2)=CMPLX(REALPOLXYZ(3),REALPOLXYZ(4),KIND=8)
-          SPECTRUM%POLXYZ(3)=CMPLX(REALPOLXYZ(5),REALPOLXYZ(6),KIND=8)
+          SPEC%TPOLXYZ=.TRUE.
+          SPEC%POLXYZ(1)=CMPLX(REALPOLXYZ(1),REALPOLXYZ(2),KIND=8)
+          SPEC%POLXYZ(2)=CMPLX(REALPOLXYZ(3),REALPOLXYZ(4),KIND=8)
+          SPEC%POLXYZ(3)=CMPLX(REALPOLXYZ(5),REALPOLXYZ(6),KIND=8)
         ELSE
-          SPECTRUM%TPOLXYZ=.FALSE.
+          SPEC%TPOLXYZ=.FALSE.
         END IF
 !       NORMAL OF THE SYSTEM
         CALL LINKEDLIST$EXISTD(LL_CNTL,'NORMAL',1,TCHK)
         CALL LINKEDLIST$EXISTD(LL_CNTL,'KDIR',1,TCHK1)
         CALL LINKEDLIST$EXISTD(LL_CNTL,'POL',1,TCHK2)
 
-        IF(SPECTRUM%TPOLXYZ) THEN
+        IF(SPEC%TPOLXYZ) THEN
           IF(TCHK.OR.TCHK1.OR.TCHK2) THEN
             CALL ERROR$MSG('NORMAL, KDIR, OR POL NOT COMPATIBLE WITH POLXYZ')
             CALL ERROR$I4VAL('ISPEC',ISPEC)
@@ -896,13 +718,13 @@
             CALL ERROR$STOP('XASCNTL$SPECTRUM')
           END IF
 !         NORMAL OF THE SYSTEM
-          CALL LINKEDLIST$GET(LL_CNTL,'NORMAL',1,SPECTRUM%NORMAL)
+          CALL LINKEDLIST$GET(LL_CNTL,'NORMAL',1,SPEC%NORMAL)
 !         DIRECTION OF THE K-VECTOR
-          CALL LINKEDLIST$GET(LL_CNTL,'KDIR',1,SPECTRUM%KDIR)
+          CALL LINKEDLIST$GET(LL_CNTL,'KDIR',1,SPEC%KDIR)
 !         POLARISATION
           CALL LINKEDLIST$GET(LL_CNTL,'POL',1,REALPOL)
-          SPECTRUM%POL(1)=CMPLX(REALPOL(1),REALPOL(2),KIND=8)
-          SPECTRUM%POL(2)=CMPLX(REALPOL(3),REALPOL(4),KIND=8)
+          SPEC%POL(1)=CMPLX(REALPOL(1),REALPOL(2),KIND=8)
+          SPEC%POL(2)=CMPLX(REALPOL(3),REALPOL(4),KIND=8)
         END IF
       ENDDO
       TSPECTRUM=.TRUE.
@@ -915,7 +737,7 @@
 !     **                                                                      **
 !     **************************************************************************
       USE XASCNTL_MODULE, ONLY: LL_CNTL
-      USE XAS_MODULE, ONLY: SETTINGS,SIM,TSIM,TSETTINGS,TRSTRT
+      USE XAS_MODULE, ONLY: SETTINGS,TSIM,TSETTINGS,TRSTRT,THIS
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
@@ -951,12 +773,14 @@
       CALL LINKEDLIST$GET(LL_CNTL,'ATOM',1,ATOM)
       SETTINGS%ATOM=TRIM(ATOM)
       TCHK=.FALSE.
-      DO IAT=1,SIM(1)%NAT
-        IF(TRIM(ATOM).EQ.TRIM(SIM(1)%ATOMID(IAT))) THEN
+      CALL XAS$SELECT('GROUNDSTATE')
+      DO IAT=1,THIS%NAT
+        IF(TRIM(ATOM).EQ.TRIM(THIS%ATOMID(IAT))) THEN
           TCHK=.TRUE.
           EXIT
         END IF
       ENDDO
+      CALL XAS$UNSELECT
       IF(TCHK) THEN
         SETTINGS%IATOM=IAT
       ELSE
@@ -1229,19 +1053,19 @@
 !     **  READ FILE PRODUCED BY SIMULATION CODE                               **
 !     **************************************************************************
       USE MPE_MODULE
-      USE XAS_MODULE, ONLY: THIS,SELECTED,SIMULATION_TYPE,SIM,TSIM, &
-     &                      OVERLAP,OVERLAPARR,TRSTRT,KMAP,NKPTG,RTASK
+      USE XAS_MODULE, ONLY: THIS,SIMULATION_TYPE,SIM,TSIM,OVL,OVERLAPARR, &
+     &                      TRSTRT,KMAP,NKPTG,NSPING,RTASK,STATE_TYPE
       USE RADIAL_MODULE, ONLY: NGID
       IMPLICIT NONE
       INTEGER(4), PARAMETER :: NSIM=2
       REAL(8), PARAMETER :: TOL=1.D-8
       LOGICAL(4), PARAMETER :: TPR=.FALSE.
+      TYPE(STATE_TYPE), POINTER :: S
       INTEGER(4) :: NFIL(NSIM)
       INTEGER(4) :: IS
       INTEGER(4) :: ILOGICAL
       INTEGER(4) :: ISP
       INTEGER(4) :: GID
-      INTEGER(4) :: GID_
       INTEGER(4) :: IGID
       CHARACTER(8) :: GRIDTYPE
       CHARACTER(8) :: GRIDTYPE_
@@ -1261,8 +1085,6 @@
       INTEGER(4) :: IPRO
       INTEGER(4) :: IB1,IB2
       INTEGER(4) :: IKPT
-      INTEGER(4) :: IG
-      INTEGER(4) :: NKPT
       INTEGER(4) :: NKPT_
       INTEGER(4) :: NB_
       INTEGER(4) :: NSPIN_
@@ -1272,14 +1094,12 @@
       INTEGER(4) :: NGG(NSIM)
       INTEGER(4) :: NDIM(NSIM)
       INTEGER(4) :: NB(NSIM)
-      INTEGER(4) :: NBH(NSIM)
       LOGICAL(4) :: TSUPER(NSIM)
       INTEGER(4), ALLOCATABLE :: IGVEC(:,:,:) ! (NSIM,3,NGG)
       REAL(8) :: XK(NSIM,3)
       COMPLEX(8), ALLOCATABLE :: PSIK1(:,:,:) ! (NGG,NDIM,NB)
       COMPLEX(8), ALLOCATABLE :: PSIK2(:,:,:) ! (NGG,NDIM,NB)
       REAL(8), ALLOCATABLE :: OCC(:,:,:) ! (NB,NKPT,NSPIN)
-      COMPLEX(8), ALLOCATABLE :: OVLAP(:,:) ! (NB,NB)
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$READ')
@@ -1321,6 +1141,7 @@
 !       DISTRIBUTE WORKLOAD FOR K-POINT LOOP WHILE READING FOR SIMULATION
         IF(IS.EQ.1) THEN
           NKPTG=THIS%NKPT
+          NSPING=THIS%NSPIN
           ALLOCATE(KMAP(NKPTG))
           CALL KMAPINIT(NKPTG,RTASK,KMAP)
         END IF
@@ -1468,25 +1289,25 @@
         DO IKPT=1,NKPT_
           IF(KMAP(IKPT).NE.THISTASK.AND.THISTASK.NE.RTASK) CYCLE
           DO ISPIN=1,NSPIN_
-            THIS%STATE=>THIS%STATEARR(IKPT,ISPIN)
-            THIS%STATE%NB=NB_
-            ALLOCATE(THIS%STATE%OCC(NB_))
-            THIS%STATE%OCC(:)=OCC(:,IKPT,ISPIN)
+            S=>THIS%STATEARR(IKPT,ISPIN)
+            S%NB=NB_
+            ALLOCATE(S%OCC(NB_))
+            S%OCC(:)=OCC(:,IKPT,ISPIN)
 !           COUNT NUMBER OF OCCUPIED STATES
 ! ERROR: INVALID METHOD TO COUNT OCCUPIED STATES
-            THIS%STATE%NOCC=-1
+            S%NOCC=-1
             DO IB=1,NB_
-              IF(THIS%STATE%OCC(IB).LT.THIS%STATE%OCCTOL) THEN
-                THIS%STATE%NOCC=IB-1
+              IF(S%OCC(IB).LT.S%OCCTOL) THEN
+                S%NOCC=IB-1
                 EXIT
               END IF
             ENDDO ! END IB
-            IF(THIS%STATE%NOCC.EQ.-1) THEN
+            IF(S%NOCC.EQ.-1) THEN
               IF(THIS%ID.EQ.'EXCITESTATE') THEN
                 CALL ERROR$MSG('NO UNOCCUPIED STATES FOUND FOR EXCITESTATE')
                 CALL ERROR$STOP('XAS$READ')
               END IF
-              THIS%STATE%NOCC=NB_
+              S%NOCC=NB_
             END IF
           ENDDO ! END ISPIN
         ENDDO ! END IKPT
@@ -1514,22 +1335,25 @@
 !     CALCULATE TOTAL CORE ENERGY
       CALL XAS_COREENERGY
 !     ADD TOGETHER FOR TOTAL ENERGY
-      SIM(1)%ETOT=SIM(1)%EDFT+SIM(1)%ECORE
-      SIM(2)%ETOT=SIM(2)%EDFT+SIM(2)%ECORE
+      CALL XAS$SELECT('GROUNDSTATE')
+      THIS%ETOT=THIS%EDFT+THIS%ECORE
+      CALL XAS$UNSELECT
+      CALL XAS$SELECT('EXCITESTATE')
+      THIS%ETOT=THIS%EDFT+THIS%ECORE
+      CALL XAS$UNSELECT
 !     ==================================================================
 !     == DATA CONSISTENCY CHECKS BETWEEN BOTH SIMULATIONS             ==
 !     ==================================================================
       CALL DATACONSISTENCY
 
 !     ALLOCATE STORAGE ARRAYS FOR OVERLAP_TYPES AND STATE_TYPES
-      ALLOCATE(OVERLAPARR(SIM(1)%NKPT,SIM(1)%NSPIN))
+      ALLOCATE(OVERLAPARR(NKPTG,NSPING))
 !
 !     ==================================================================
 !     == WAVE FUNCTIONS AND PROJECTIONS                               ==
 !     ==================================================================
-      NKPT=SIM(1)%NKPT
 !     LOOP OVER K POINTS
-      DO IKPT=1,NKPT
+      DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK.AND.THISTASK.NE.RTASK) CYCLE
         IF(THISTASK.EQ.RTASK) THEN
           CALL TRACE$I4VAL(' READ/SEND IKPT',IKPT)
@@ -1567,30 +1391,31 @@
         ALLOCATE(PSIK1(NGG(1),NDIM(1),NB(1)))
         ALLOCATE(PSIK2(NGG(2),NDIM(2),NB(2)))
 !       LOOP OVER SPIN
-        DO ISPIN=1,SIM(1)%NSPIN
+        DO ISPIN=1,NSPING
 !         SET STATE POINTER
           DO IS=1,NSIM
 !           SET POINTER TO SPECIFIC STATE(IKPT,ISPIN)
             SIM(IS)%STATE=>SIM(IS)%STATEARR(IKPT,ISPIN)
+            S=>SIM(IS)%STATEARR(IKPT,ISPIN)
 !           CHECK IF NB CONSISTENT FOR OCCUPATIONS AND EIGENVALUES/PROJECTIONS
-            IF(NB(IS).NE.SIM(IS)%STATE%NB) THEN
+            IF(NB(IS).NE.S%NB) THEN
               CALL ERROR$MSG('NB FOR PROJECTIONS AND EIGENVALUES NOT THE SAME')
               CALL ERROR$MSG('FOR OCCUPATIONS AND EIGENVALUES/PROJECTIONS')
-              CALL ERROR$I4VAL('NB_OCC',SIM(IS)%STATE%NB)
+              CALL ERROR$I4VAL('NB_OCC',S%NB)
               CALL ERROR$I4VAL('NB_PROJ',NB(IS))
               CALL ERROR$STOP('XAS$READ')
             END IF
 !           ALLOCATE STORAGE FOR PROJECTIONS
-            ALLOCATE(SIM(IS)%STATE%PROJ(NDIM(IS),NB(IS),SIM(IS)%NPRO))
+            ALLOCATE(S%PROJ(NDIM(IS),NB(IS),SIM(IS)%NPRO))
 !           ALLOCATE STORAGE FOR EIGENVALUES
-            ALLOCATE(SIM(IS)%STATE%EIG(NB(IS)))
+            ALLOCATE(S%EIG(NB(IS)))
           ENDDO ! END LOOP OVER IS
 !         SET POINTER TO SPECIFIC OVERLAP(IKPT,ISPIN)
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          OVL=>OVERLAPARR(IKPT,ISPIN)
 ! WARNING: FIND OUT REQUIRED ORDER OF OVERLAP
 !         ALLOCATE STORAGE FOR OVERLAP
           IF(THISTASK.EQ.KMAP(IKPT)) THEN
-            ALLOCATE(OVERLAP%PW(NB(2),NB(1)))
+            ALLOCATE(OVL%PW(NB(2),NB(1)))
           END IF
           IF(THISTASK.EQ.RTASK) THEN
 !           READ PLANE WAVE BASIS
@@ -1620,10 +1445,10 @@
 ! WARNING: CHECK IF SCALARPRODUCT IS CORRECT ALSO WITH CONJG
 !          SHOULD BE THE CASE AS CALL OF ZGEMM IS DONE WITH 'C' OPTION
 ! WARNING: CHECK WILL NOT WORK IF ONLY USING REAL WAVE FUNCTIONS AT GAMMA POINT
-                CALL LIB$SCALARPRODUCTC8(.FALSE.,NGG(1),1,PSIK1(:,1,IB1),1,PSIK2(:,1,IB2),OVERLAP%PW(IB2,IB1))
+                CALL LIB$SCALARPRODUCTC8(.FALSE.,NGG(1),1,PSIK1(:,1,IB1),1,PSIK2(:,1,IB2),OVL%PW(IB2,IB1))
               ENDDO ! END LOOP OVER BANDS
             ENDDO ! END LOOP OVER BANDS
-            OVERLAP%PW=OVERLAP%PW*V
+            OVL%PW=OVL%PW*V
           END IF
           CALL TIMING$CLOCKOFF('XAS$READ_SCALARPRODUCT')
         ENDDO ! END LOOP OVER SPIN
@@ -1698,14 +1523,10 @@
 !     **************************************************************************
 !     ** REPORT DATA FOR A SELECTED SIMULATION                                **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: THIS,SELECTED,S,OVERLAP,OVERLAPARR,RTASK
+      USE XAS_MODULE, ONLY: THIS,SELECTED,RTASK
       IMPLICIT NONE
       INTEGER(4) :: NFIL
-! TODO: REMOVE HARDCODED OUTPUT
-      integer(4) :: nfilo=11
-      integer(4) :: nfilc=12
-      INTEGER(4) :: NB1,NB2
-      INTEGER(4) :: IAT,ISP,ISPIN,IKPT,IPRO,IB
+      INTEGER(4) :: IAT,ISP,ISPIN,IKPT
       CHARACTER(256) :: FORMAT
       REAL(8) :: EV
       INTEGER(4) :: NTASKS,THISTASK
@@ -1778,79 +1599,6 @@
         ENDDO
       ELSE
         WRITE(*,*) 'NO OUTPUT FOR GENERAL INFORMATION IMPLEMENTED'
-!         WRITE(NFIL,'(80("#"))')
-!         WRITE(NFIL,FMT='(A19)')'GENERAL INFORMATION'
-!         WRITE(NFIL,'(80("#"))')
-!         CALL XAS$SELECT('EXCITESTATE')
-!         NB2=THIS%STATE%NB
-!         IF(THIS%LNXX.GT.9) THEN
-!           WRITE(FORMAT,'("(",I2,"F10.4)")')THIS%LNXX
-!         ELSE
-!           WRITE(FORMAT,'("(",I1,"F10.4)")')THIS%LNXX
-!         END IF
-!         CALL XAS$UNSELECT
-!         CALL XAS$SELECT('GROUNDSTATE')
-!         NB1=THIS%STATE%NB
-!         WRITE(NFIL,FMT='(A)')'ATOMIC OVERLAP MATRIX S'
-!         DO IAT=1,THIS%NAT
-!           WRITE(NFIL,FMT='(A10,I10)')'ATOM',IAT
-!           DO IPRO=1,THIS%LNXX
-!             WRITE(NFIL,FMT=FORMAT)S(IAT,IPRO,:)
-!           ENDDO
-!         ENDDO
-! ! TODO: PROPER OUTPUT FOR OVERLAP MATRIX
-!         OVERLAP=>OVERLAPARR(1,1)
-!         IF(NB1.GT.99) THEN
-!           WRITE(FORMAT,'("(",I3,"F10.6)")')NB1
-!         ELSE IF(NB1.GT.9.AND.NB1.LT.100) THEN
-!           WRITE(FORMAT,'("(",I2,"F10.6)")')NB1
-!         ELSE
-!           WRITE(FORMAT,'("(",I1,"F10.6)")')NB1
-!         END IF
-!         open(nfilo,file='pw.dat')
-!         open(nfilc,file='pw_c.dat')
-!         WRITE(NFIL,FMT='(A)')'PLANE WAVE OVERLAP MATRIX OF FIRST K POINT/SPIN'
-!         DO IB=1,NB2
-!           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%PW(IB,:))
-!           WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%PW(IB,:))
-!           write(nfilc,*)OVERLAP%PW(IB,:)
-!         ENDDO
-!         close(nfilo)
-!         close(nfilc)
-!         open(nfilo,file='aug.dat')
-!         open(nfilc,file='aug_c.dat')
-!         WRITE(NFIL,FMT='(A)')'AUGMENTATION OVERLAP MATRIX OF FIRST K POINT/SPIN'
-!         DO IB=1,NB2
-!           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%AUG(IB,:))
-!           WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%AUG(IB,:))
-!           write(nfilc,*)OVERLAP%AUG(IB,:)
-!         ENDDO
-!         close(nfilo)
-!         close(nfilc)
-!         WRITE(NFIL,FMT='(A)')'OVERLAP MATRIX OF FIRST K POINT/SPIN'
-!         open(nfilo,file='ov.dat')
-!         open(nfilc,file='ov_c.dat')
-!         DO IB=1,NB2
-!           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
-!           WRITE(nfilo,FMT=FORMAT)CDABS(OVERLAP%OV(IB,:))
-!           write(nfilc,*)OVERLAP%OV(IB,:)
-!         ENDDO
-!         close(nfilo)
-!         close(nfilc)
-!         WRITE(NFIL,FMT='(A)')'OCCUPIED OVERLAP OF FIRST K POINT/SPIN'
-!         DO IB=1,THIS%STATEARR(1,1)%NOCC
-!           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OVOCC(IB,:))
-!         ENDDO
-!         WRITE(NFIL,FMT='(A)')'EMPTY OVERLAP OF FIRST K POINT/SPIN'
-!         DO IB=1,NB2-THIS%STATEARR(1,1)%NOCC
-!           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%OVEMP(IB,:))
-!         ENDDO
-!         WRITE(NFIL,FMT='(A)')'KMAT OF FIRST K POINT/SPIN'
-!         DO IB=1,NB2-THIS%STATEARR(1,1)%NOCC
-!           WRITE(NFIL,FMT=FORMAT)CDABS(OVERLAP%KMAT(IB,:))
-!         ENDDO
-! ! TODO: OUTPUT FOR DIPOLE ELEMENTS
-!         CALL XAS$UNSELECT
       END IF
                           CALL TRACE$POP
       END SUBROUTINE XAS$REPORTSIMULATION
@@ -1860,7 +1608,7 @@
 !     **************************************************************************
 !     ** REPORT SETTINGS FOR XAS CALCULATION                                  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SETTINGS,SPECTRUM,SPECTRUMARR,OUTPUT,TRSTRT
+      USE XAS_MODULE, ONLY: SETTINGS,SPEC,SPECTRUMARR,OUTPUT,TRSTRT
       USE STRINGS_MODULE
       IMPLICIT NONE
       INTEGER(4) :: NFIL
@@ -1889,16 +1637,16 @@
       WRITE(NFIL,FMT='(A10,F20.10)')'EMAX:',SETTINGS%EMAX/EV
       WRITE(NFIL,FMT='(A10,F10.6)')'GAMMA:',SETTINGS%GAMMA/EV
       DO ISPEC=1,SETTINGS%NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
+        SPEC=>SPECTRUMARR(ISPEC)
         WRITE(NFIL,'(80("#"))')
         WRITE(NFIL,FMT='(A10,I10)')'SPECTRUM:',ISPEC
-        WRITE(NFIL,FMT='(A10,A)')'FILE:',TRIM(ADJUSTL(SPECTRUM%FILE))
-        IF(.NOT.SPECTRUM%TPOLXYZ) THEN
-          WRITE(NFIL,FMT='(A10,3F10.4)')'NORMAL:',SPECTRUM%NORMAL(:)
-          WRITE(NFIL,FMT='(A10,3F10.4)')'KDIR:',SPECTRUM%KDIR(:)
-          WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL:',SPECTRUM%POL(:)
+        WRITE(NFIL,FMT='(A10,A)')'FILE:',TRIM(ADJUSTL(SPEC%FILE))
+        IF(.NOT.SPEC%TPOLXYZ) THEN
+          WRITE(NFIL,FMT='(A10,3F10.4)')'NORMAL:',SPEC%NORMAL(:)
+          WRITE(NFIL,FMT='(A10,3F10.4)')'KDIR:',SPEC%KDIR(:)
+          WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POL:',SPEC%POL(:)
         END IF
-        WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZ:',SPECTRUM%POLXYZ(:)
+        WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZ:',SPEC%POLXYZ(:)
       ENDDO
       WRITE(NFIL,'(80("#"))')
       WRITE(NFIL,FMT='(A19)')'OUTPUT'
@@ -1915,47 +1663,46 @@
       END SUBROUTINE XAS$REPORTSETTINGS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XAS$AMPL(IKPT,ISPIN,IEMP,AMPL)  ! MARK: XAS$AMPL
+      SUBROUTINE XAS$AMPL(NB,NOCC,IEMP,LINMAT,DIPOLE,ADET,AMPL)  ! MARK: XAS$AMPL
 !     **************************************************************************
 !     ** CALCULATE TRANSITION AMPLITUDE FOR A GIVEN FINAL STATE (IKPT,ISPIN,F)**
 !     ** THREE COMPONENTS ARE FOR THE THREE CARTESIAN DIRECTIONS              **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SIM,STATE_TYPE,OVERLAP,OVERLAPARR
       IMPLICIT NONE
 !     REDUCE CALCULATION TO SINGLE PARTICLE SPECTRUM
       LOGICAL(4), PARAMETER :: SINGLEPARTICLE=.FALSE.
-      INTEGER(4), INTENT(IN) :: IKPT ! K POINT INDEX
-      INTEGER(4), INTENT(IN) :: ISPIN ! SPIN INDEX
+      INTEGER(4), INTENT(IN) :: NB ! NUMBER OF BANDS
+      INTEGER(4), INTENT(IN) :: NOCC ! NUMBER OF OCCUPIED STATES
       INTEGER(4), INTENT(IN) :: IEMP ! FINAL STATE ORBITAL INDEX WITHIN UNOCCUPIED
+      COMPLEX(8), INTENT(IN) :: LINMAT(NB-NOCC,NOCC) ! LINEAR DEPENDENCE MATRIX
+      COMPLEX(8), INTENT(IN) :: DIPOLE(3,NB) ! DIPOLE MATRIX
+      COMPLEX(8), INTENT(IN) :: ADET ! DETERMINANT OF OCCUPIED OVERLAP MATRIX
       COMPLEX(8), INTENT(OUT) :: AMPL(3) ! TRANSITION AMPLITUDE
       INTEGER(4) :: IFINAL ! INDEX FOR FINAL STATE WITHIN ALL STATES
-      TYPE(STATE_TYPE), POINTER :: STATE
       INTEGER(4) :: IB
 !     **************************************************************************
-      STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
-      OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-      IFINAL=IEMP+STATE%NOCC
+      IFINAL=IEMP+NOCC
 !     CHECK IF FINAL STATE ORBITAL INDEX IS VALID
-      IF(IFINAL.GT.STATE%NB) THEN
+      IF(IFINAL.GT.NB) THEN
         CALL ERROR$MSG('FINAL STATE ORBITAL INDEX OUT OF BOUNDS')
         CALL ERROR$I4VAL('IEMP',IEMP)
-        CALL ERROR$I4VAL('NB',STATE%NB)
+        CALL ERROR$I4VAL('NB',NB)
         CALL ERROR$STOP('XAS$AMPL')
       END IF
-      IF(IFINAL.LE.STATE%NOCC) THEN
+      IF(IFINAL.LE.NOCC) THEN
         CALL ERROR$MSG('FINAL STATE ORBITAL INDEX OCCUPIED')
         CALL ERROR$I4VAL('IEMP',IEMP)
-        CALL ERROR$I4VAL('NOCC',STATE%NOCC)
+        CALL ERROR$I4VAL('NOCC',NOCC)
         CALL ERROR$STOP('XAS$AMPL')
       END IF
       AMPL=(0.D0,0.D0)
 ! WARNING: CHECK INDICES
-      DO IB=1,STATE%NOCC
-        AMPL(:)=AMPL(:)+CONJG(OVERLAP%KMAT(IEMP,IB))*OVERLAP%DIPOLE(:,IB)
+      DO IB=1,NOCC
+        AMPL(:)=AMPL(:)+CONJG(LINMAT(IEMP,IB))*DIPOLE(:,IB)
       ENDDO
-      AMPL(:)=OVERLAP%DIPOLE(:,IFINAL)-AMPL(:)
-      AMPL(:)=(-1.D0)**STATE%NOCC*AMPL(:)*CONJG(OVERLAP%ADET)
-      IF(SINGLEPARTICLE) AMPL(:)=OVERLAP%DIPOLE(:,IFINAL)
+      AMPL(:)=DIPOLE(:,IFINAL)-AMPL(:)
+      AMPL(:)=(-1.D0)**NOCC*AMPL(:)*CONJG(ADET)
+      IF(SINGLEPARTICLE) AMPL(:)=DIPOLE(:,IFINAL)
       RETURN
       END SUBROUTINE XAS$AMPL
 !
@@ -1964,31 +1711,26 @@
 !     **************************************************************************
 !     ** CALCULATE XAS CROSS SECTION                                          **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SETTINGS,SIM,STATE_TYPE, &
-&                           KMAP,NKPTG,RTASK
+      USE XAS_MODULE, ONLY: SPEC,SPECTRUMARR,SETTINGS,SIM,STATE_TYPE, &
+&                           KMAP,NKPTG,NSPING,RTASK,OVL,OVERLAPARR
       USE MPE_MODULE
       IMPLICIT NONE
-      INTEGER(4) :: NFIL
       INTEGER(4) :: ISPEC
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IFINAL
-      TYPE(STATE_TYPE), POINTER :: STATE
+      TYPE(STATE_TYPE), POINTER :: S
       COMPLEX(8) :: AMPL(3)
       COMPLEX(8) :: CVAR
       INTEGER(4) :: NB,NOCC
       REAL(8) :: SIGMA
       REAL(8) :: EGROUND,EEXCITE  ! TOTAL ENERGY OF CALCULATION
       REAL(8) :: EF
-      REAL(8) :: DEATOM  ! ENERGY DIFFERENCE OF SUM OF ISOLATED ATOMS
       REAL(8) :: EV
       REAL(8) :: EMIN,EMAX
       REAL(8) :: E
       INTEGER(4) :: NE
       INTEGER(4) :: I
-      REAL(8), ALLOCATABLE :: X(:)
-      REAL(8), ALLOCATABLE :: Y(:)
-      REAL(8), ALLOCATABLE :: YCONV(:)
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$CROSSSECTION')
@@ -1999,27 +1741,22 @@
       CALL CONSTANTS('EV',EV)
       EGROUND=SIM(1)%ETOT
       EEXCITE=SIM(2)%ETOT
-! WARNING: ALIGNMENT OF ENERGIES NECESSARY?
-!       CALL XAS_ATOMENERGYDIFF(DEATOM)
-! write(*,*) 'DEATOM',DEATOM
-! write(*,*) 'EGROUND',EGROUND
-! write(*,*) 'EEXCITE',EEXCITE
 !     AUTOMATICALLY FIND ENERGY RANGE (ONLY RTASK HAS ALL ENERGIES)
       IF(THISTASK.EQ.RTASK) THEN
-        DO IKPT=1,SIM(1)%NKPT
-          DO ISPIN=1,SIM(1)%NSPIN
-            STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
-            DO IFINAL=1,STATE%NB-STATE%NOCC
-              EF=EEXCITE+STATE%EIG(IFINAL+STATE%NOCC)
+        DO IKPT=1,NKPTG
+          DO ISPIN=1,NSPING
+            S=>SIM(2)%STATEARR(IKPT,ISPIN)
+            DO IFINAL=1,S%NB-S%NOCC
+              EF=EEXCITE+S%EIG(IFINAL+S%NOCC)
               E=EF-EGROUND!+DEATOM
               IF(E.LT.EMIN) EMIN=E
               IF(E.GT.EMAX) EMAX=E
             ENDDO
           ENDDO
         ENDDO
-        STATE=>SIM(2)%STATEARR(1,1)
-        NB=STATE%NB
-        NOCC=STATE%NOCC
+        S=>SIM(2)%STATEARR(1,1)
+        NB=S%NB
+        NOCC=S%NOCC
       END IF
       CALL MPE$BROADCAST('~',RTASK,EMIN)
       CALL MPE$BROADCAST('~',RTASK,EMAX)
@@ -2034,61 +1771,61 @@
       SETTINGS%NE=NE
 
       DO ISPEC=1,SETTINGS%NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
-        ALLOCATE(SPECTRUM%E(NE))
-        ALLOCATE(SPECTRUM%I(SIM(2)%NKPT,SIM(2)%NSPIN,NE))
-        SPECTRUM%I(:,:,:)=0.D0
+        SPEC=>SPECTRUMARR(ISPEC)
+        ALLOCATE(SPEC%E(NE))
+        ALLOCATE(SPEC%I(NKPTG,NSPING,NE))
+        SPEC%I(:,:,:)=0.D0
 ! ERROR: ALLOCATION OF SPECTRUM%ERAW AND SPECTRUM%IRAW CAN BE WRONG IF NB OR 
 !        NOCC ARE NOT THE SAME FOR ALL K POINTS
-        ALLOCATE(SPECTRUM%ERAW(SIM(2)%NKPT,SIM(2)%NSPIN,NB-NOCC))
-        SPECTRUM%ERAW(:,:,:)=0.D0
-        ALLOCATE(SPECTRUM%IRAW(SIM(2)%NKPT,SIM(2)%NSPIN,NB-NOCC))
-        SPECTRUM%IRAW(:,:,:)=0.D0
-        SPECTRUM%I(:,:,:)=0.D0
+        ALLOCATE(SPEC%ERAW(NKPTG,NSPING,NB-NOCC))
+        SPEC%ERAW(:,:,:)=0.D0
+        ALLOCATE(SPEC%IRAW(NKPTG,NSPING,NB-NOCC))
+        SPEC%IRAW(:,:,:)=0.D0
+        SPEC%I(:,:,:)=0.D0
         DO I=1,NE
-          SPECTRUM%E(I)=EMIN+REAL(I-1,KIND=8)*SETTINGS%DE
+          SPEC%E(I)=EMIN+REAL(I-1,KIND=8)*SETTINGS%DE
         ENDDO
       ENDDO
 
-! TODO: METHOD FOR PROPER ENERGY ALIGNMENT
 ! TODO: CLEANUP
       CALL TRACE$PASS('XAS$CROSSSECTION LOOP')
 !     LOOP OVER K POINTS
-      DO IKPT=1,SIM(1)%NKPT
+      DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK) CYCLE
         CALL TRACE$I4VAL(' IKPT',IKPT)
 !       LOOP OVER SPIN
-        DO ISPIN=1,SIM(1)%NSPIN
-          STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
-          DO IFINAL=1,STATE%NB-STATE%NOCC
+        DO ISPIN=1,NSPING
+          S=>SIM(2)%STATEARR(IKPT,ISPIN)
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          DO IFINAL=1,S%NB-S%NOCC
 ! TODO: CHECK IMPLEMENTATION WEIGHT OF K POINT AND ROLE OF INVERSION SYMMETRY
-            CALL XAS$AMPL(IKPT,ISPIN,IFINAL,AMPL)
-            EF=EEXCITE+STATE%EIG(IFINAL+STATE%NOCC)
+            CALL XAS$AMPL(S%NB,S%NOCC,IFINAL,OVL%KMAT,OVL%DIPOLE,OVL%ADET,AMPL)
+            EF=EEXCITE+S%EIG(IFINAL+S%NOCC)
             E=EF-EGROUND!+DEATOM
 !           LOOP OVER SPECTRA
             DO ISPEC=1,SETTINGS%NSPEC
-              SPECTRUM=>SPECTRUMARR(ISPEC)
-              CVAR=DOT_PRODUCT(SPECTRUM%POLXYZ,AMPL)
+              SPEC=>SPECTRUMARR(ISPEC)
+              CVAR=DOT_PRODUCT(SPEC%POLXYZ,AMPL)
 !             ABSOLUTE SQUARE AND WEIGHT OF K POINT
               SIGMA=SIM(1)%WKPT(IKPT)*REAL(CONJG(CVAR)*CVAR,KIND=8)
-              SPECTRUM%ERAW(IKPT,ISPIN,IFINAL)=E
-              SPECTRUM%IRAW(IKPT,ISPIN,IFINAL)=SIGMA
-              CALL XAS$MAPGRID(E,SIGMA,NE,SPECTRUM%I(IKPT,ISPIN,:), &
-       &                       EMIN,EMAX,SETTINGS%DE)
+              SPEC%ERAW(IKPT,ISPIN,IFINAL)=E
+              SPEC%IRAW(IKPT,ISPIN,IFINAL)=SIGMA
+              CALL XAS$MAPGRID(E,SIGMA,NE,SPEC%I(IKPT,ISPIN,:), &
+     &                         EMIN,SETTINGS%DE)
             ENDDO
           ENDDO
         ENDDO
       ENDDO
       
       DO ISPEC=1,SETTINGS%NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
-        CALL MPE$COMBINE('~','+',SPECTRUM%I)
-        CALL MPE$COMBINE('~','+',SPECTRUM%ERAW)
-        CALL MPE$COMBINE('~','+',SPECTRUM%IRAW)
-        DO IKPT=1,SIM(2)%NKPT
-          DO ISPIN=1,SIM(2)%NSPIN
+        SPEC=>SPECTRUMARR(ISPEC)
+        CALL MPE$COMBINE('~','+',SPEC%I)
+        CALL MPE$COMBINE('~','+',SPEC%ERAW)
+        CALL MPE$COMBINE('~','+',SPEC%IRAW)
+        DO IKPT=1,NKPTG
+          DO ISPIN=1,NSPING
             ! CALL LORENTZCONV(NE,SPECTRUM%E,SPECTRUM%I(IKPT,ISPIN,:),SETTINGS%GAMMA)
-            CALL GAUSSCONV(NE,SPECTRUM%E,SPECTRUM%I(IKPT,ISPIN,:),SETTINGS%GAMMA)
+            CALL GAUSSCONV(NE,SPEC%E,SPEC%I(IKPT,ISPIN,:),SETTINGS%GAMMA)
           ENDDO
         ENDDO
       ENDDO
@@ -2102,12 +1839,11 @@
 !     **************************************************************************
 !     ** CALCULATE OVERLAP MATRIX                                             **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE,TOVERLAP,TRSTRT, &
-&                           KMAP,NKPTG
+      USE XAS_MODULE, ONLY: S,OVL,OVERLAPARR,SIM,STATE_TYPE,TOVERLAP,TRSTRT, &
+&                           KMAP,NKPTG,NSPING
       IMPLICIT NONE
       LOGICAL(4), PARAMETER :: TTEST=.TRUE. ! TEST EIGENVALUES OF OVERLAP
-      TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
-      INTEGER(4) :: NKPT,NSPIN
+      TYPE(STATE_TYPE), POINTER :: S1,S2
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: NOCC
       INTEGER(4) :: NTASKS,THISTASK
@@ -2132,31 +1868,29 @@
         CALL XAS$OVERLAPAUGMENTATION
       END IF
 
-      NKPT=NKPTG
-      NSPIN=SIM(1)%NSPIN
-      DO IKPT=1,NKPT
+      DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK) CYCLE
-        DO ISPIN=1,NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          STATE1=>SIM(1)%STATEARR(IKPT,ISPIN)
-          STATE2=>SIM(2)%STATEARR(IKPT,ISPIN)
-          ALLOCATE(OVERLAP%OV(STATE2%NB,STATE1%NB))
-          OVERLAP%OV(:,:)=OVERLAP%PW(:,:)+OVERLAP%AUG(:,:)
+        DO ISPIN=1,NSPING
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          S1=>SIM(1)%STATEARR(IKPT,ISPIN)
+          S2=>SIM(2)%STATEARR(IKPT,ISPIN)
+          ALLOCATE(OVL%OV(S2%NB,S1%NB))
+          OVL%OV(:,:)=OVL%PW(:,:)+OVL%AUG(:,:)
 !         CHECK OF NUMBER OF OCCUPIED STATES IS THE SAME TO PRODUCE SQUARE MATRIX
-          IF(STATE1%NOCC.NE.STATE2%NOCC) THEN
+          IF(S1%NOCC.NE.S2%NOCC) THEN
             CALL ERROR$MSG('NUMBER OF OCCUPIED STATES NOT THE SAME')
             CALL ERROR$MSG('HAS NUMBER OF ELECTRONS CHANGED OR VARIABLE OCCUPATIONS?')
-            CALL ERROR$I4VAL('NOCC1',STATE1%NOCC)
-            CALL ERROR$I4VAL('NOCC2',STATE2%NOCC)
+            CALL ERROR$I4VAL('NOCC1',S1%NOCC)
+            CALL ERROR$I4VAL('NOCC2',S2%NOCC)
             CALL ERROR$I4VAL('IKPT',IKPT)
             CALL ERROR$I4VAL('ISPIN',ISPIN)
             CALL ERROR$STOP('XAS$OVERLAP')
           END IF
-          NOCC=STATE1%NOCC
-          ALLOCATE(OVERLAP%OVOCC(NOCC,NOCC))
-          ALLOCATE(OVERLAP%OVEMP(STATE2%NB-NOCC,NOCC))
-          OVERLAP%OVOCC(:,:)=OVERLAP%OV(1:NOCC,1:NOCC)
-          OVERLAP%OVEMP(:,:)=OVERLAP%OV(NOCC+1:STATE2%NB,1:NOCC)
+          NOCC=S1%NOCC
+          ALLOCATE(OVL%OVOCC(NOCC,NOCC))
+          ALLOCATE(OVL%OVEMP(S2%NB-NOCC,NOCC))
+          OVL%OVOCC(:,:)=OVL%OV(1:NOCC,1:NOCC)
+          OVL%OVEMP(:,:)=OVL%OV(NOCC+1:S2%NB,1:NOCC)
         ENDDO
       ENDDO  
       TOVERLAP=.TRUE.  
@@ -2169,42 +1903,36 @@
 !     **************************************************************************
 !     ** OVERLAP CONTRIBUTION FROM PAW AUGMENTATION                           **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: S,OVERLAP,OVERLAPARR,SIM,STATE_TYPE,NKPTG,KMAP,RTASK
+      USE XAS_MODULE, ONLY: OVL,OVERLAPARR,SIM,STATE_TYPE,NKPTG,NSPING,KMAP
       USE MPE_MODULE
       IMPLICIT NONE
-      TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
-      INTEGER(4) :: NKPT,NSPIN
+      TYPE(STATE_TYPE), POINTER :: S1,S2
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: IB1,IB2
-      INTEGER(4) :: IPRO1,IPRO2
       COMPLEX(8) :: CVAR
       INTEGER(4) :: NTASKS,THISTASK
-      INTEGER(4) :: ICOUNT
-      INTEGER(4) :: WTASK
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAPAUGMENTATION')
                           CALL TIMING$CLOCKON('XAS$OVERLAPAUGMENTATION')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
-      NKPT=NKPTG
-      NSPIN=SIM(1)%NSPIN
   !   LOOP OVER K POINTS
-      DO IKPT=1,NKPT
+      DO IKPT=1,NKPTG
         IF(THISTASK.NE.KMAP(IKPT)) CYCLE
         CALL TRACE$I4VAL(' IKPT',IKPT)
   !     LOOP OVER SPIN
-        DO ISPIN=1,NSPIN
-          STATE1=>SIM(1)%STATEARR(IKPT,ISPIN)
-          STATE2=>SIM(2)%STATEARR(IKPT,ISPIN)
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          ALLOCATE(OVERLAP%AUG(STATE2%NB,STATE1%NB))
-          OVERLAP%AUG(:,:)=(0.D0,0.D0)
+        DO ISPIN=1,NSPING
+          S1=>SIM(1)%STATEARR(IKPT,ISPIN)
+          S2=>SIM(2)%STATEARR(IKPT,ISPIN)
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          ALLOCATE(OVL%AUG(S2%NB,S1%NB))
+          OVL%AUG(:,:)=(0.D0,0.D0)
   !       LOOP OVER BANDS OF FIRST SIMULATION
-          DO IB2=1,STATE2%NB
+          DO IB2=1,S2%NB
   !         LOOP OVER BANDS OF SECOND SIMULATION
-            DO IB1=1,STATE1%NB
-              CALL XAS$OVERLAPSTATE(STATE1,IB1,STATE2,IB2,CVAR)
+            DO IB1=1,S1%NB
+              CALL XAS$OVERLAPSTATE(S1,IB1,S2,IB2,CVAR)
 !             AUG(I,J)=<PSI1(J)|PSI2(I)>
-              OVERLAP%AUG(IB2,IB1)=CVAR
+              OVL%AUG(IB2,IB1)=CVAR
             ENDDO ! END LOOP OVER BANDS OF SECOND SIMULATION
           ENDDO ! END LOOP OVER BANDS OF FIRST SIMULATION
         ENDDO ! END LOOP OVER SPIN
@@ -2275,7 +2003,6 @@
       INTEGER(4) :: LN1,LN2
       INTEGER(4) :: L1,L2
       REAL(8) :: SVAL
-      INTEGER(4),ALLOCATABLE :: IATMAP1(:),IATMAP2(:)
       REAL(8), ALLOCATABLE :: PSPHI1(:),PSPHI2(:)
       REAL(8), ALLOCATABLE :: AEPHI1(:),AEPHI2(:)
       REAL(8), ALLOCATABLE :: AUX(:)
@@ -2357,7 +2084,7 @@
 !     **  CALCULATE POLARISATION FROM K VECTOR, SURFACE NORMAL,               **
 !     **  AND POLARISATION OF INCIDENT LIGHT                                  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SETTINGS
+      USE XAS_MODULE, ONLY: SPEC,SPECTRUMARR,SETTINGS
       IMPLICIT NONE
       REAL(8), PARAMETER :: TOL=1.D-10
       INTEGER(4) :: ISPEC
@@ -2373,11 +2100,11 @@
       END IF
 !     LOOP OVER SPECTRA
       DO ISPEC=1,SETTINGS%NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
+        SPEC=>SPECTRUMARR(ISPEC)
 !       AVOID CALCULATION OF CARTHESIAN POLARISATION IF IT WAS SET IN CNTL FILE
-        IF(SPECTRUM%TPOLXYZ) CYCLE
-        KVEC=SPECTRUM%KDIR
-        CALL CROSS_PROD(KVEC,SPECTRUM%NORMAL,WORK)
+        IF(SPEC%TPOLXYZ) CYCLE
+        KVEC=SPEC%KDIR
+        CALL CROSS_PROD(KVEC,SPEC%NORMAL,WORK)
         SVAR=NORM2(WORK)
         IF(SVAR.LT.TOL) THEN
           CALL ERROR$MSG('K VECTOR AND SURFACE NORMAL ARE PARALLEL')
@@ -2388,10 +2115,9 @@
         WORK=WORK/SVAR
         CALL CROSS_PROD(WORK,KVEC,WORK2)
         WORK2=WORK2/NORM2(WORK2)
-        SPECTRUM%POLXYZ=SPECTRUM%POL(1)*WORK+ &
-      &                 SPECTRUM%POL(2)*WORK2
-        SVAR=SQRT(SUM(ABS(SPECTRUM%POLXYZ)**2))
-        SPECTRUM%POLXYZ=SPECTRUM%POLXYZ/SVAR
+        SPEC%POLXYZ=SPEC%POL(1)*WORK+SPEC%POL(2)*WORK2
+        SVAR=SQRT(SUM(ABS(SPEC%POLXYZ)**2))
+        SPEC%POLXYZ=SPEC%POLXYZ/SVAR
       ENDDO
                           CALL TRACE$POP
       END SUBROUTINE XAS$POLARISATION
@@ -2402,8 +2128,8 @@
 !     ** CALCULATE DIPOLE MATRIX ELEMENTS IN EXCITED ORBITAL BASIS            **
 !     ** SIMULATION 2 IS THE EXCITED STATE, SIMULATION 1 IS THE GROUND STATE  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SETTINGS,SIM,SETUP_TYPE,STATE_TYPE,OVERLAP, &
-&                           OVERLAPARR,TRSTRT,ATOMMAP,KMAP,NKPTG
+      USE XAS_MODULE, ONLY: SETTINGS,SIM,SETUP_TYPE,STATE_TYPE,OVL, &
+&                           OVERLAPARR,TRSTRT,ATOMMAP,KMAP,NKPTG,NSPING
       IMPLICIT NONE
       LOGICAL(4), PARAMETER :: TTEST=.FALSE.
       REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
@@ -2411,7 +2137,7 @@
       INTEGER(4) :: IATOM ! ATOM WITH CORE HOLE
       INTEGER(4) :: ISP   ! SETUP INDEX OF ATOM WITH CORE HOLE
       TYPE(SETUP_TYPE), POINTER :: STP ! POINTER TO SETUP
-      TYPE(STATE_TYPE), POINTER :: STATE
+      TYPE(STATE_TYPE), POINTER :: S
       INTEGER(4) :: N
       INTEGER(4) :: IB
       INTEGER(4) :: LN
@@ -2481,13 +2207,13 @@
       DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK) CYCLE
 !       LOOP OVER SPIN
-        DO ISPIN=1,SIM(2)%NSPIN
-          STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          ALLOCATE(OVERLAP%DIPOLE(3,STATE%NB))
+        DO ISPIN=1,NSPING
+          S=>SIM(2)%STATEARR(IKPT,ISPIN)
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          ALLOCATE(OVL%DIPOLE(3,S%NB))
           IF(TTEST) WRITE(NFIL,FMT='(A10,I10,A10,I10)')'IKPT:',IKPT,'ISPIN:',ISPIN
 !         LOOP OVER BANDS
-          DO IB=1,STATE%NB
+          DO IB=1,S%NB
             IF(TTEST) WRITE(NFIL,FMT='(A10,I10)')'BAND:',IB
             CVAR=(0.D0,0.D0)
             DO LN=1,SIM(2)%LNX(ISP)
@@ -2503,12 +2229,12 @@
                 CALL SPHERICAL$GAUNT(LLVAL,4,LLCORE,GAUNT(2))
 !               Z COMPONENT
                 CALL SPHERICAL$GAUNT(LLVAL,3,LLCORE,GAUNT(3))
-                CVAR=CVAR+CONJG(STATE%PROJ(1,IB,IPRO))*RADINT(LN)*GAUNT
+                CVAR=CVAR+CONJG(S%PROJ(1,IB,IPRO))*RADINT(LN)*GAUNT
               ENDDO
             ENDDO
             CVAR=SQRT(4.D0*PI/3.D0)*CVAR
             IF(TTEST) WRITE(NFIL,FMT='(A10,3(F8.5,SP,F8.5,"I ",S))')'DIPOLE:',CVAR(:)
-            OVERLAP%DIPOLE(:,IB)=CVAR
+            OVL%DIPOLE(:,IB)=CVAR
           ENDDO ! END LOOP OVER BANDS
         ENDDO ! END LOOP OVER SPINS
       ENDDO ! END LOOP OVER K POINTS          
@@ -2525,7 +2251,7 @@
 !     **************************************************************************
 !     ** CALCULATE DETERMINANT ADET FOR OCCUPIED OVERLAP MATRIX               **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: OVERLAP,OVERLAPARR,SIM,KMAP,NKPTG
+      USE XAS_MODULE, ONLY: OVL,OVERLAPARR,SIM,KMAP,NKPTG,NSPING
       IMPLICIT NONE
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
@@ -2536,11 +2262,11 @@
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK) CYCLE
-        DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+        DO ISPIN=1,NSPING
+          OVL=>OVERLAPARR(IKPT,ISPIN)
           SIM(1)%STATE=>SIM(1)%STATEARR(IKPT,ISPIN)
-          CALL LIB$DETC8(SIM(1)%STATE%NOCC,OVERLAP%OVOCC,OVERLAP%ADET)
-          ! WRITE(*,*)'ADET:',OVERLAP%ADET
+          CALL LIB$DETC8(SIM(1)%STATE%NOCC,OVL%OVOCC,OVL%ADET)
+          ! WRITE(*,*)'ADET:',OVL%ADET
         ENDDO
       ENDDO
                           CALL TIMING$CLOCKOFF('XAS$ADET')
@@ -2552,7 +2278,7 @@
 !     **************************************************************************
 !     ** CALCULATE K MATRIX FOR XAS CALCULATION                               **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: OVERLAP,OVERLAPARR,SIM,KMAP,NKPTG
+      USE XAS_MODULE, ONLY: OVL,OVERLAPARR,SIM,KMAP,NKPTG,NSPING
       IMPLICIT NONE
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
@@ -2566,17 +2292,17 @@
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK) CYCLE
-        DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+        DO ISPIN=1,NSPING
+          OVL=>OVERLAPARR(IKPT,ISPIN)
           SIM(1)%STATE=>SIM(1)%STATEARR(IKPT,ISPIN)
           SIM(2)%STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
           NOCC=SIM(1)%STATE%NOCC
           NB1=SIM(1)%STATE%NB
           NB2=SIM(2)%STATE%NB
-          ALLOCATE(OVERLAP%KMAT(NB2-NOCC,NOCC))
+          ALLOCATE(OVL%KMAT(NB2-NOCC,NOCC))
           ALLOCATE(WORK(NOCC,NOCC))
-          CALL LIB$INVERTC8(NOCC,OVERLAP%OVOCC,WORK)
-          CALL LIB$MATMULC8(NB2-NOCC,NOCC,NOCC,OVERLAP%OVEMP,WORK,OVERLAP%KMAT)
+          CALL LIB$INVERTC8(NOCC,OVL%OVOCC,WORK)
+          CALL LIB$MATMULC8(NB2-NOCC,NOCC,NOCC,OVL%OVEMP,WORK,OVL%KMAT)
           DEALLOCATE(WORK)
         ENDDO
       ENDDO
@@ -2589,8 +2315,8 @@
 !     **************************************************************************
 !     ** OUTPUT XAS DATA TO FILE                                               **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SETTINGS,OUTPUT,SIM, &
-     &                      OVERLAP,OVERLAPARR,STATE_TYPE
+      USE XAS_MODULE, ONLY: SPEC,SPECTRUMARR,SETTINGS,OUTPUT,SIM, &
+     &                      OVL,OVERLAPARR,STATE_TYPE,NKPTG,NSPING
       IMPLICIT NONE
       INTEGER(4) :: NFIL
       INTEGER(4) :: ISPEC
@@ -2599,9 +2325,8 @@
       REAL(8) :: EV
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: NB1,NB2,NOCC
-      REAL(8) :: SVAR
       REAL(8), ALLOCATABLE :: ISUM(:,:) ! SUM OF SPECTRUM OVER K POINTS
-      TYPE(STATE_TYPE), POINTER :: STATE1,STATE2
+      TYPE(STATE_TYPE), POINTER :: S1,S2
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -2611,29 +2336,29 @@
       CALL CONSTANTS('EV',EV)
 ! WARNING: THERE IS A MAXIMUM LINE LENGTH THAT CAN CRASH THE PROGRAM
 !          RECL=1000 IN PAW_FILEHANDLER.F90, LINE 721
-      IF(OUTPUT%TKPTSPIN.AND.SIM(1)%NKPT*SIM(1)%NSPIN.GT.70) THEN
+      IF(OUTPUT%TKPTSPIN.AND.NKPTG*NSPING.GT.70) THEN
         CALL FILEHANDLER$UNIT('PROT',NFIL)
         WRITE(NFIL,FMT='(A)')'WARNING: LINE LENGTH TOO LONG FOR OUTPUT, SWITCHING TO TOTAL SPECTRUM'
         OUTPUT%TKPTSPIN=.FALSE.
       END IF   
       DO ISPEC=1,SETTINGS%NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
+        SPEC=>SPECTRUMARR(ISPEC)
 !       OPEN FILE
         CALL XAS$FILEHANDLER(ISPEC,'XASOUT','O')
         CALL FILEHANDLER$UNIT('XASOUT',NFIL)
         IF(OUTPUT%TKPTSPIN) THEN
           WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY[EV] |'
-          DO IKPT=1,SIM(1)%NKPT
-            DO ISPIN=1,SIM(1)%NSPIN
+          DO IKPT=1,NKPTG
+            DO ISPIN=1,NSPING
               WRITE(NFIL,FMT='(A4,I4,A4,I1,A1)',ADVANCE='NO') ' KP=',IKPT,' SP=',ISPIN,'|'
             ENDDO
           ENDDO
           WRITE(NFIL,*)
           DO I=1,SETTINGS%NE
-            WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPECTRUM%E(I)/EV
-            DO IKPT=1,SIM(1)%NKPT
-              DO ISPIN=1,SIM(1)%NSPIN
-                WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPECTRUM%I(IKPT,ISPIN,I)
+            WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPEC%E(I)/EV
+            DO IKPT=1,NKPTG
+              DO ISPIN=1,NSPING
+                WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPEC%I(IKPT,ISPIN,I)
               ENDDO
             ENDDO
             WRITE(NFIL,*)
@@ -2641,11 +2366,11 @@
         ELSE
           ALLOCATE(ISUM(SETTINGS%NE,3))
           ISUM=0.D0
-          DO IKPT=1,SIM(1)%NKPT
-            ISUM(:,:)=ISUM(:,:)+SPECTRUM%ICONV(IKPT,:,:)
+          DO IKPT=1,NKPTG
+            ISUM(:,:)=ISUM(:,:)+SPEC%ICONV(IKPT,:,:)
           ENDDO
           DO I=1,SETTINGS%NE
-            WRITE(NFIL,*) SPECTRUM%E(I)/EV,ISUM(I,:)
+            WRITE(NFIL,*) SPEC%E(I)/EV,ISUM(I,:)
           ENDDO
           DEALLOCATE(ISUM)
         END IF
@@ -2654,19 +2379,19 @@
       ENDDO   
       IF(OUTPUT%TRAW) THEN
         DO ISPEC=1,SETTINGS%NSPEC
-          SPECTRUM=>SPECTRUMARR(ISPEC)
+          SPEC=>SPECTRUMARR(ISPEC)
           CALL XAS$FILEHANDLER(ISPEC,'XASRAW','O')
           CALL FILEHANDLER$UNIT('XASRAW',NFIL)
-          DO IKPT=1,SIM(1)%NKPT
-            DO ISPIN=1,SIM(1)%NSPIN
+          DO IKPT=1,NKPTG
+            DO ISPIN=1,NSPING
               NB2=SIM(2)%STATEARR(IKPT,ISPIN)%NB
               NOCC=SIM(1)%STATEARR(IKPT,ISPIN)%NOCC
               WRITE(NFIL,FMT='(A10,I5,A10,I3)')'# KPOINT=',IKPT,' SPIN=',ISPIN
               WRITE(NFIL,FMT='(3A14)')'# ENERGY','CROSSSECTION','FINAL BAND'
               DO IFINAL=1,NB2-NOCC
                 I=IFINAL+NOCC
-                WRITE(NFIL,*)SPECTRUM%ERAW(IKPT,ISPIN,IFINAL)/EV, &
-&                            SPECTRUM%IRAW(IKPT,ISPIN,IFINAL),I
+                WRITE(NFIL,*)SPEC%ERAW(IKPT,ISPIN,IFINAL)/EV, &
+&                            SPEC%IRAW(IKPT,ISPIN,IFINAL),I
               ENDDO
             ENDDO
           ENDDO
@@ -2674,15 +2399,15 @@
         ENDDO
       END IF
 
-      DO IKPT=1,SIM(1)%NKPT
-        DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          STATE1=>SIM(1)%STATEARR(IKPT,ISPIN)
-          STATE2=>SIM(2)%STATEARR(IKPT,ISPIN)
-          NB1=STATE1%NB
-          NB2=STATE2%NB
-          NOCC=STATE1%NOCC
-          IF(NOCC.NE.STATE2%NOCC) THEN
+      DO IKPT=1,NKPTG
+        DO ISPIN=1,NSPING
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          S1=>SIM(1)%STATEARR(IKPT,ISPIN)
+          S2=>SIM(2)%STATEARR(IKPT,ISPIN)
+          NB1=S1%NB
+          NB2=S2%NB
+          NOCC=S1%NOCC
+          IF(NOCC.NE.S2%NOCC) THEN
             CALL ERROR$MSG('NUMBER OF OCCUPIED STATES NOT THE SAME')
             CALL ERROR$MSG('SHOULD HAVE BEEN CAUGHT EARLIER')
             CALL ERROR$STOP('XAS$OUTPUT')
@@ -2690,37 +2415,37 @@
 ! ERROR: THERE IS A MAXIMUM LINE LENGTH THAT CAN CRASH THE PROGRAM
 !        EFFECTED BY SIZE OF SECOND WRITEMATC8 ARGUMENT
           IF(OUTPUT%TOVL) THEN
-            ! CALL WRITEMATC8ABS(NB2,NB1,OVERLAP%OV,'OVL',IKPT,ISPIN)
-            CALL WRITEMATC8(NB2,NB1,OVERLAP%OV,'OVL',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NB2,NB1,OVL%OV,'OVL',IKPT,ISPIN)
+            CALL WRITEMATC8(NB2,NB1,OVL%OV,'OVL',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TOVLPW) THEN
-            ! CALL WRITEMATC8ABS(NB2,NB1,OVERLAP%PW,'OVLPW',IKPT,ISPIN)
-            CALL WRITEMATC8(NB2,NB1,OVERLAP%PW,'OVLPW',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NB2,NB1,OVL%PW,'OVLPW',IKPT,ISPIN)
+            CALL WRITEMATC8(NB2,NB1,OVL%PW,'OVLPW',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TOVLAUG) THEN
-            ! CALL WRITEMATC8ABS(NB2,NB1,OVERLAP%AUG,'OVLAUG',IKPT,ISPIN)
-            CALL WRITEMATC8(NB2,NB1,OVERLAP%AUG,'OVLAUG',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NB2,NB1,OVL%AUG,'OVLAUG',IKPT,ISPIN)
+            CALL WRITEMATC8(NB2,NB1,OVL%AUG,'OVLAUG',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TOVLOCC) THEN
-            ! CALL WRITEMATC8ABS(NOCC,NOCC,OVERLAP%OVOCC,'OVLOCC',IKPT,ISPIN)
-            CALL WRITEMATC8(NOCC,NOCC,OVERLAP%OVOCC,'OVLOCC',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NOCC,NOCC,OVL%OVOCC,'OVLOCC',IKPT,ISPIN)
+            CALL WRITEMATC8(NOCC,NOCC,OVL%OVOCC,'OVLOCC',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TOVLEMP) THEN
-            ! CALL WRITEMATC8ABS(NB2-NOCC,NOCC,OVERLAP%OVEMP,'OVLEMP',IKPT,ISPIN)
-            CALL WRITEMATC8(NB2-NOCC,NOCC,OVERLAP%OVEMP,'OVLEMP',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NB2-NOCC,NOCC,OVL%OVEMP,'OVLEMP',IKPT,ISPIN)
+            CALL WRITEMATC8(NB2-NOCC,NOCC,OVL%OVEMP,'OVLEMP',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TKMAT) THEN
-            ! CALL WRITEMATC8ABS(NB2-NOCC,NOCC,OVERLAP%KMAT,'KMAT',IKPT,ISPIN)
-            CALL WRITEMATC8(NB2-NOCC,NOCC,OVERLAP%KMAT,'KMAT',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NB2-NOCC,NOCC,OVL%KMAT,'KMAT',IKPT,ISPIN)
+            CALL WRITEMATC8(NB2-NOCC,NOCC,OVL%KMAT,'KMAT',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TDIPOLE) THEN
-            ! CALL WRITEMATC8ABS(NB2,3,TRANSPOSE(OVERLAP%DIPOLE),'DIPOLE',IKPT,ISPIN)
-            CALL WRITEMATC8(NB2,3,TRANSPOSE(OVERLAP%DIPOLE),'DIPOLE',IKPT,ISPIN)
+            ! CALL WRITEMATC8ABS(NB2,3,TRANSPOSE(OVL%DIPOLE),'DIPOLE',IKPT,ISPIN)
+            CALL WRITEMATC8(NB2,3,TRANSPOSE(OVL%DIPOLE),'DIPOLE',IKPT,ISPIN)
           END IF
           IF(OUTPUT%TADET) THEN
             CALL FILEHANDLER$UNIT('ADET',NFIL)
             WRITE(NFIL,FMT='(A,I5,A,I3)')'# KPOINT:',IKPT,' SPIN:',ISPIN
-            WRITE(NFIL,FMT='("(",F14.8,",",F14.8,")")')OVERLAP%ADET
+            WRITE(NFIL,FMT='("(",F14.8,",",F14.8,")")')OVL%ADET
           END IF
         ENDDO
       ENDDO
@@ -2745,12 +2470,13 @@
 !     ** GATHER XAS DATA FROM ALL TASKS AND WRITE TO FILE                     **
 !     **************************************************************************
       USE MPE_MODULE
-      USE XAS_MODULE, ONLY: OUTPUT,SIM,NKPTG,NSIM,KMAP,RTASK,OVERLAP,OVERLAPARR
+      USE XAS_MODULE, ONLY: OUTPUT,SIM,NKPTG,NSPING,NSIM,KMAP,RTASK,OVL,OVERLAPARR,STATE_TYPE
       IMPLICIT NONE
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IS
       INTEGER(4) :: NTASKS,THISTASK
+      TYPE(STATE_TYPE), POINTER :: S,S1,S2
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OUTPUTGATHER')
                           CALL TIMING$CLOCKON('XAS$OUTPUTGATHER')
@@ -2759,61 +2485,61 @@
       DO IS=1,NSIM
         DO IKPT=1,NKPTG
           IF(KMAP(IKPT).NE.THISTASK.AND.THISTASK.NE.RTASK) CYCLE
-          DO ISPIN=1,SIM(1)%NSPIN
-            SIM(IS)%STATE=>SIM(IS)%STATEARR(IKPT,ISPIN)
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,SIM(IS)%STATE%NOCC)
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,SIM(IS)%STATE%NB)
+          DO ISPIN=1,NSPING
+            S=>SIM(IS)%STATEARR(IKPT,ISPIN)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,S%NOCC)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,S%NB)
           ENDDO
         ENDDO
       ENDDO
       DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK.AND.THISTASK.NE.RTASK) CYCLE
-        DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          SIM(1)%STATE=>SIM(1)%STATEARR(IKPT,ISPIN)
-          SIM(2)%STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
+        DO ISPIN=1,NSPING
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          S1=>SIM(1)%STATEARR(IKPT,ISPIN)
+          S2=>SIM(2)%STATEARR(IKPT,ISPIN)
 !         OVERLAP PW AND AUG MANDATORY FOR RESTART FILE
-          IF(.NOT.ALLOCATED(OVERLAP%PW)) THEN
-            ALLOCATE(OVERLAP%PW(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+          IF(.NOT.ALLOCATED(OVL%PW)) THEN
+            ALLOCATE(OVL%PW(S2%NB,S1%NB))
           END IF
-          CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%PW)
-          IF(.NOT.ALLOCATED(OVERLAP%AUG)) THEN
-            ALLOCATE(OVERLAP%AUG(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+          CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%PW)
+          IF(.NOT.ALLOCATED(OVL%AUG)) THEN
+            ALLOCATE(OVL%AUG(S2%NB,S1%NB))
           END IF
-          CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%AUG)
+          CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%AUG)
 
           IF(OUTPUT%TOVL) THEN
-            IF(.NOT.ALLOCATED(OVERLAP%OV)) THEN
-              ALLOCATE(OVERLAP%OV(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+            IF(.NOT.ALLOCATED(OVL%OV)) THEN
+              ALLOCATE(OVL%OV(S2%NB,S1%NB))
             END IF
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%OV)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%OV)
           END IF
           IF(OUTPUT%TOVLOCC) THEN
-            IF(.NOT.ALLOCATED(OVERLAP%OVOCC)) THEN
-              ALLOCATE(OVERLAP%OVOCC(SIM(2)%STATE%NOCC,SIM(1)%STATE%NOCC))
+            IF(.NOT.ALLOCATED(OVL%OVOCC)) THEN
+              ALLOCATE(OVL%OVOCC(S2%NOCC,S1%NOCC))
             END IF
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%OVOCC)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%OVOCC)
           END IF
           IF(OUTPUT%TOVLEMP) THEN
-            IF(.NOT.ALLOCATED(OVERLAP%OVEMP)) THEN
-              ALLOCATE(OVERLAP%OVEMP(SIM(2)%STATE%NB-SIM(2)%STATE%NOCC,SIM(1)%STATE%NOCC))
+            IF(.NOT.ALLOCATED(OVL%OVEMP)) THEN
+              ALLOCATE(OVL%OVEMP(S2%NB-S2%NOCC,S1%NOCC))
             END IF
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%OVEMP)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%OVEMP)
           END IF
           IF(OUTPUT%TKMAT) THEN
-            IF(.NOT.ALLOCATED(OVERLAP%KMAT)) THEN
-              ALLOCATE(OVERLAP%KMAT(SIM(2)%STATE%NB-SIM(2)%STATE%NOCC,SIM(1)%STATE%NOCC))
+            IF(.NOT.ALLOCATED(OVL%KMAT)) THEN
+              ALLOCATE(OVL%KMAT(S2%NB-S2%NOCC,S1%NOCC))
             END IF
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%KMAT)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%KMAT)
           END IF
           IF(OUTPUT%TDIPOLE) THEN
-            IF(.NOT.ALLOCATED(OVERLAP%DIPOLE)) THEN
-              ALLOCATE(OVERLAP%DIPOLE(3,SIM(2)%STATE%NB))
+            IF(.NOT.ALLOCATED(OVL%DIPOLE)) THEN
+              ALLOCATE(OVL%DIPOLE(3,S2%NB))
             END IF
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%DIPOLE)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%DIPOLE)
           END IF
           IF(OUTPUT%TADET) THEN
-            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVERLAP%ADET)
+            CALL MPE$SENDRECEIVE('~',KMAP(IKPT),RTASK,OVL%ADET)
           END IF
         ENDDO
       ENDDO
@@ -2917,7 +2643,7 @@
       END SUBROUTINE XAS$WRITEPHI
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XAS$MAPGRID(X,Y,N,GRID,XMIN,XMAX,DE)  ! MARK: XAS$MAPGRID
+      SUBROUTINE XAS$MAPGRID(X,Y,N,GRID,XMIN,DE)  ! MARK: XAS$MAPGRID
 !     **************************************************************************
 !     ** MAP VALUE Y AT POSITION X ONTO GRID                                  **
 !     ** SPLIT BETWEEN THE TWO NEIGHBORING POINTS DEPENDING ON DISTANCE       **
@@ -2928,7 +2654,6 @@
       INTEGER(4), INTENT(IN) :: N
       REAL(8), INTENT(INOUT) :: GRID(N)
       REAL(8), INTENT(IN) :: XMIN
-      REAL(8), INTENT(IN) :: XMAX
       REAL(8), INTENT(IN) :: DE
       INTEGER(4) :: I1,I2
       REAL(8) :: X0
@@ -2989,14 +2714,12 @@
 !     **************************************************************************
 !     ** CALCULATE CORE ENERGY FOR BOTH SIMULATIONS                           **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SIM,ATOMMAP
+      USE XAS_MODULE, ONLY: SIM,ATOMMAP,NSIM
       IMPLICIT NONE
       REAL(8) :: GSCORE
       REAL(8) :: EXCORE
       INTEGER(4) :: IAT1,IAT2
       INTEGER(4) :: ISP1,ISP2
-      INTEGER(4) :: I
-      REAL(8) :: E1,E2
 !     **************************************************************************
       GSCORE=0.D0
       EXCORE=0.D0
@@ -3135,7 +2858,7 @@
       INTEGER(4), INTENT(IN) :: IKPT
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4) :: NFIL
-      INTEGER(4) :: I,J
+      INTEGER(4) :: I
       INTEGER(4) :: MLIM,NLIM
       CHARACTER(256) :: FORMAT
       INTEGER(4) :: NTASKS,THISTASK
@@ -3159,7 +2882,7 @@
 !     **************************************************************************
 !     ** WRITE COMPLEX MATRIX TO BINARY FILE                                  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: OVERLAPARR,OVERLAP,SIM
+      USE XAS_MODULE, ONLY: OVERLAPARR,OVL,SIM,NKPTG,NSPING
       USE STRINGS_MODULE
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
@@ -3194,29 +2917,29 @@
 
       CALL FILEHANDLER$UNIT(ID//'BIN',NFIL)
       
-      WRITE(NFIL)SIM(1)%NKPT
-      WRITE(NFIL)SIM(1)%NSPIN
-      DO IKPT=1,SIM(1)%NKPT
-        DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+      WRITE(NFIL)NKPTG
+      WRITE(NFIL)NSPING
+      DO IKPT=1,NKPTG
+        DO ISPIN=1,NSPING
+          OVL=>OVERLAPARR(IKPT,ISPIN)
           NB1=SIM(1)%STATEARR(IKPT,ISPIN)%NB
           NB2=SIM(2)%STATEARR(IKPT,ISPIN)%NB
           NOCC=SIM(1)%STATEARR(IKPT,ISPIN)%NOCC
           WRITE(NFIL)NB2,NB1,NOCC
           IF(ID.EQ.'OVL') THEN
-            WRITE(NFIL)OVERLAP%OV
+            WRITE(NFIL)OVL%OV
           ELSE IF(ID.EQ.'OVLAUG') THEN
-            WRITE(NFIL)OVERLAP%AUG
+            WRITE(NFIL)OVL%AUG
           ELSE IF(ID.EQ.'OVLPW') THEN
-            WRITE(NFIL)OVERLAP%PW
+            WRITE(NFIL)OVL%PW
           ELSE IF(ID.EQ.'OVLOCC') THEN
-            WRITE(NFIL)OVERLAP%OVOCC
+            WRITE(NFIL)OVL%OVOCC
           ELSE IF(ID.EQ.'OVLEMP') THEN
-            WRITE(NFIL)OVERLAP%OVEMP
+            WRITE(NFIL)OVL%OVEMP
           ELSE IF(ID.EQ.'KMAT') THEN
-            WRITE(NFIL)OVERLAP%KMAT          
+            WRITE(NFIL)OVL%KMAT          
           ELSE IF(ID.EQ.'DIPOLE') THEN
-            WRITE(NFIL)OVERLAP%DIPOLE
+            WRITE(NFIL)OVL%DIPOLE
           END IF
         ENDDO
       ENDDO          
@@ -3241,7 +2964,6 @@
       INTEGER(4) :: NFIL
       INTEGER(4) :: I,J
       INTEGER(4) :: MLIM,NLIM
-      CHARACTER(256) :: FORMAT
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -3259,153 +2981,153 @@
       ENDDO
       RETURN
       END SUBROUTINE WRITEMATC8ABS
-! WARNING: THIS TESTS ONLY CHANGE OF SIGN AND NOT A POTENTIAL RANDOM PHASE CHANGE
-!          COULD THIS HAPPEN IN A SIMULATION?
-!     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE TEST$INVERSE
-!     **************************************************************************
-!     ** TEST DETERMINANT PROCEDURE FOR INDEPENDENCE OF SIGN                  **
-!     **************************************************************************
-      IMPLICIT NONE
-      INTEGER(4) :: M1 ! TOTAL STATES OF GROUNDSTATE
-      INTEGER(4) :: M2 ! TOTAL STATES OF EXCITESTATE
-      INTEGER(4) :: NOCC ! NUMBER OF OCCUPIED STATES
-      INTEGER(4) :: I,J
-      REAL(8), ALLOCATABLE :: ARE(:,:) ! HELPER MATRIX
-      REAL(8), ALLOCATABLE :: AIM(:,:) ! HELPER MATRIX
-      COMPLEX(8), ALLOCATABLE :: OVLORIGINAL(:,:) ! (M2,M1) ORIGINAL OVERLAP MATRIX
-      COMPLEX(8), ALLOCATABLE :: OVL(:,:) ! (M2,M1) OVERLAP MATRIX
-      COMPLEX(8), ALLOCATABLE :: OVLOCC(:,:) ! (NOCC,NOCC) OCCUPIED OVERLAP MATRIX
-      COMPLEX(8), ALLOCATABLE :: OVLEMP(:,:) ! (M2-NOCC,NOCC) EMPTY OVERLAP MATRIX
-      COMPLEX(8), ALLOCATABLE :: INVOVLOCC(:,:) ! (NOCC,NOCC) INVERSE OCCUPIED OVERLAP MATRIX
-      COMPLEX(8), ALLOCATABLE :: KMAT(:,:) ! (M2-NOCC,NOCC) K MATRIX
-      COMPLEX(8) :: DET
-      INTEGER(4) :: COUNT
-      INTEGER(4) :: NTASKS,THISTASK
-!     **************************************************************************
-      CALL MPE$QUERY('~',NTASKS,THISTASK)
-      IF(THISTASK.NE.1) RETURN
-      NOCC=4
-      M1=4
-      M2=8
-      IF(M1.LT.NOCC) THEN
-        CALL ERROR$MSG('NUMBER OF OCCUPIED STATES MUST BE SMALLER OR EQUAL THAN TOTAL STATES')
-        CALL ERROR$STOP('TEST$INVERSE')
-      END IF
-      IF(M2.LE.NOCC) THEN
-        CALL ERROR$MSG('NUMBER OF TOTAL STATES MUST BE LARGER THAN OCCUPIED STATES')
-        CALL ERROR$STOP('TEST$INVERSE')
-      END IF
-      ALLOCATE(OVL(M2,M1))
-      ALLOCATE(OVLORIGINAL(M2,M1))
-      ALLOCATE(OVLOCC(NOCC,NOCC))
-      ALLOCATE(OVLEMP(M2-NOCC,NOCC))
-      ALLOCATE(ARE(M2,M1))
-      ALLOCATE(AIM(M2,M1))
-      ALLOCATE(INVOVLOCC(NOCC,NOCC))
-      ALLOCATE(KMAT(M2-NOCC,NOCC))
-!     RANDOMLY INITIALIZE OVERLAP
-      CALL RANDOM_NUMBER(ARE)
-      CALL RANDOM_NUMBER(AIM)
-      OVLORIGINAL=CMPLX(ARE,AIM,KIND=8)
+! ! WARNING: THIS TESTS ONLY CHANGE OF SIGN AND NOT A POTENTIAL RANDOM PHASE CHANGE
+! !          COULD THIS HAPPEN IN A SIMULATION?
+! !     ...1.........2.........3.........4.........5.........6.........7.........8
+!       SUBROUTINE TEST$INVERSE
+! !     **************************************************************************
+! !     ** TEST DETERMINANT PROCEDURE FOR INDEPENDENCE OF SIGN                  **
+! !     **************************************************************************
+!       IMPLICIT NONE
+!       INTEGER(4) :: M1 ! TOTAL STATES OF GROUNDSTATE
+!       INTEGER(4) :: M2 ! TOTAL STATES OF EXCITESTATE
+!       INTEGER(4) :: NOCC ! NUMBER OF OCCUPIED STATES
+!       INTEGER(4) :: I,J
+!       REAL(8), ALLOCATABLE :: ARE(:,:) ! HELPER MATRIX
+!       REAL(8), ALLOCATABLE :: AIM(:,:) ! HELPER MATRIX
+!       COMPLEX(8), ALLOCATABLE :: OVLORIGINAL(:,:) ! (M2,M1) ORIGINAL OVERLAP MATRIX
+!       COMPLEX(8), ALLOCATABLE :: OVL(:,:) ! (M2,M1) OVERLAP MATRIX
+!       COMPLEX(8), ALLOCATABLE :: OVLOCC(:,:) ! (NOCC,NOCC) OCCUPIED OVERLAP MATRIX
+!       COMPLEX(8), ALLOCATABLE :: OVLEMP(:,:) ! (M2-NOCC,NOCC) EMPTY OVERLAP MATRIX
+!       COMPLEX(8), ALLOCATABLE :: INVOVLOCC(:,:) ! (NOCC,NOCC) INVERSE OCCUPIED OVERLAP MATRIX
+!       COMPLEX(8), ALLOCATABLE :: KMAT(:,:) ! (M2-NOCC,NOCC) K MATRIX
+!       COMPLEX(8) :: DET
+!       INTEGER(4) :: COUNT
+!       INTEGER(4) :: NTASKS,THISTASK
+! !     **************************************************************************
+!       CALL MPE$QUERY('~',NTASKS,THISTASK)
+!       IF(THISTASK.NE.1) RETURN
+!       NOCC=4
+!       M1=4
+!       M2=8
+!       IF(M1.LT.NOCC) THEN
+!         CALL ERROR$MSG('NUMBER OF OCCUPIED STATES MUST BE SMALLER OR EQUAL THAN TOTAL STATES')
+!         CALL ERROR$STOP('TEST$INVERSE')
+!       END IF
+!       IF(M2.LE.NOCC) THEN
+!         CALL ERROR$MSG('NUMBER OF TOTAL STATES MUST BE LARGER THAN OCCUPIED STATES')
+!         CALL ERROR$STOP('TEST$INVERSE')
+!       END IF
+!       ALLOCATE(OVL(M2,M1))
+!       ALLOCATE(OVLORIGINAL(M2,M1))
+!       ALLOCATE(OVLOCC(NOCC,NOCC))
+!       ALLOCATE(OVLEMP(M2-NOCC,NOCC))
+!       ALLOCATE(ARE(M2,M1))
+!       ALLOCATE(AIM(M2,M1))
+!       ALLOCATE(INVOVLOCC(NOCC,NOCC))
+!       ALLOCATE(KMAT(M2-NOCC,NOCC))
+! !     RANDOMLY INITIALIZE OVERLAP
+!       CALL RANDOM_NUMBER(ARE)
+!       CALL RANDOM_NUMBER(AIM)
+!       OVLORIGINAL=CMPLX(ARE,AIM,KIND=8)
 
-!     ## ORIGINAL MATRIX
-      WRITE(*,*) '####### ORIGINAL MATRIX #######'
-      OVL(:,:)=OVLORIGINAL(:,:)
-!     EXTRACTION OF OCCUPIED AND EMPTY OVERLAP
-      CALL TEST_SPLITOVL
-      CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
-      CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
-      CALL LIB$DETC8(NOCC,OVLOCC,DET)
-      CALL REPORT
+! !     ## ORIGINAL MATRIX
+!       WRITE(*,*) '####### ORIGINAL MATRIX #######'
+!       OVL(:,:)=OVLORIGINAL(:,:)
+! !     EXTRACTION OF OCCUPIED AND EMPTY OVERLAP
+!       CALL TEST_SPLITOVL
+!       CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
+!       CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
+!       CALL LIB$DETC8(NOCC,OVLOCC,DET)
+!       CALL REPORT
 
-!     ## CHANGE SIGN OF EMPTY STATE (HERE 7) IN EXCITESTATE
-!     ##    - DETERMINANT: NO EFFECT
-!     ##    - INVERSE OF OCCUPIED OVERLAP: NO EFFECT
-!     ##    - K MATRIX: CHANGED SIGN IN ROW OF STATE 7
-      WRITE(*,*) '####### CHANGE SIGN OF ROW 7 IN EXCITESTATE #######'
-      OVL(:,:)=OVLORIGINAL(:,:)
-      OVL(7,:)=OVL(7,:)*(-1.D0)
-      CALL TEST_SPLITOVL
-      CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
-      CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
-      CALL LIB$DETC8(NOCC,OVLOCC,DET)
-      CALL REPORT
+! !     ## CHANGE SIGN OF EMPTY STATE (HERE 7) IN EXCITESTATE
+! !     ##    - DETERMINANT: NO EFFECT
+! !     ##    - INVERSE OF OCCUPIED OVERLAP: NO EFFECT
+! !     ##    - K MATRIX: CHANGED SIGN IN ROW OF STATE 7
+!       WRITE(*,*) '####### CHANGE SIGN OF ROW 7 IN EXCITESTATE #######'
+!       OVL(:,:)=OVLORIGINAL(:,:)
+!       OVL(7,:)=OVL(7,:)*(-1.D0)
+!       CALL TEST_SPLITOVL
+!       CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
+!       CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
+!       CALL LIB$DETC8(NOCC,OVLOCC,DET)
+!       CALL REPORT
 
-!     ## CHANGE SIGN OF OCCUPIED STATE (HERE 3) IN EXCITESTATE
-!     ##    - DETERMINANT: CHANGED SIGN
-!     ##    - INVERSE OF OCCUPIED OVERLAP: CHANGED SIGN IN COLUMN 3  
-!     ##    - K MATRIX: CHANGED SIGN IN COLUMN 3
-      WRITE(*,*) '####### CHANGE SIGN OF ROW 3 IN EXCITESTATE #######'
-      OVL(:,:)=OVLORIGINAL(:,:)
-      OVL(3,:)=OVL(3,:)*(-1.D0)
-      CALL TEST_SPLITOVL
-      CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
-      CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
-      CALL LIB$DETC8(NOCC,OVLOCC,DET)
-      CALL REPORT
+! !     ## CHANGE SIGN OF OCCUPIED STATE (HERE 3) IN EXCITESTATE
+! !     ##    - DETERMINANT: CHANGED SIGN
+! !     ##    - INVERSE OF OCCUPIED OVERLAP: CHANGED SIGN IN COLUMN 3  
+! !     ##    - K MATRIX: CHANGED SIGN IN COLUMN 3
+!       WRITE(*,*) '####### CHANGE SIGN OF ROW 3 IN EXCITESTATE #######'
+!       OVL(:,:)=OVLORIGINAL(:,:)
+!       OVL(3,:)=OVL(3,:)*(-1.D0)
+!       CALL TEST_SPLITOVL
+!       CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
+!       CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
+!       CALL LIB$DETC8(NOCC,OVLOCC,DET)
+!       CALL REPORT
 
-!     ## CHANGE SIGN OF OCCUPIED STATE (HERE 3) IN GROUNDSTATE
-!     ##    - DETERMINANT: CHANGED SIGN
-!     ##    - INVERSE OF OCCUPIED OVERLAP: CHANGED SIGN IN ROW 3
-!     ##    - K MATRIX: NO EFFECT
-      WRITE(*,*) '####### CHANGE SIGN OF ROW 3 IN GROUNDSTATE #######'
-      OVL(:,:)=OVLORIGINAL(:,:)
-      OVL(:,3)=OVL(:,3)*(-1.D0)
-      CALL TEST_SPLITOVL
-      CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
-      CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
-      CALL LIB$DETC8(NOCC,OVLOCC,DET)
-      CALL REPORT
+! !     ## CHANGE SIGN OF OCCUPIED STATE (HERE 3) IN GROUNDSTATE
+! !     ##    - DETERMINANT: CHANGED SIGN
+! !     ##    - INVERSE OF OCCUPIED OVERLAP: CHANGED SIGN IN ROW 3
+! !     ##    - K MATRIX: NO EFFECT
+!       WRITE(*,*) '####### CHANGE SIGN OF ROW 3 IN GROUNDSTATE #######'
+!       OVL(:,:)=OVLORIGINAL(:,:)
+!       OVL(:,3)=OVL(:,3)*(-1.D0)
+!       CALL TEST_SPLITOVL
+!       CALL LIB$INVERTC8(NOCC,OVLOCC,INVOVLOCC)
+!       CALL LIB$MATMULC8(M2-NOCC,NOCC,NOCC,OVLEMP,INVOVLOCC,KMAT)
+!       CALL LIB$DETC8(NOCC,OVLOCC,DET)
+!       CALL REPORT
 
 
-      DEALLOCATE(OVL)
-      DEALLOCATE(OVLORIGINAL)
-      DEALLOCATE(OVLOCC)
-      DEALLOCATE(OVLEMP)
-      DEALLOCATE(ARE)
-      DEALLOCATE(AIM)
-      DEALLOCATE(INVOVLOCC)
-      DEALLOCATE(KMAT)
-      CONTAINS
-        SUBROUTINE TEST_SPLITOVL
-        OVLOCC(:,:)=OVL(1:NOCC,1:NOCC)
-        OVLEMP(:,:)=OVL(NOCC+1:M2,1:NOCC)
-        RETURN
-        END SUBROUTINE TEST_SPLITOVL
+!       DEALLOCATE(OVL)
+!       DEALLOCATE(OVLORIGINAL)
+!       DEALLOCATE(OVLOCC)
+!       DEALLOCATE(OVLEMP)
+!       DEALLOCATE(ARE)
+!       DEALLOCATE(AIM)
+!       DEALLOCATE(INVOVLOCC)
+!       DEALLOCATE(KMAT)
+!       CONTAINS
+!         SUBROUTINE TEST_SPLITOVL
+!         OVLOCC(:,:)=OVL(1:NOCC,1:NOCC)
+!         OVLEMP(:,:)=OVL(NOCC+1:M2,1:NOCC)
+!         RETURN
+!         END SUBROUTINE TEST_SPLITOVL
 
-        SUBROUTINE REPORT
-        WRITE(*,*) 'MATRIX OVL:'
-        DO I=1,M2
-          WRITE(*,*)OVL(I,:)
-        ENDDO
-        WRITE(*,*)'MATRIX OVLOCC:'
-        DO I=1,NOCC
-          WRITE(*,*)OVLOCC(I,:)
-        ENDDO
-        WRITE(*,*)'MATRIX OVLEMP:'
-        DO I=1,M2-NOCC
-          WRITE(*,*)OVLEMP(I,:)
-        ENDDO
-        WRITE(*,*) 'DETERMINANT:',DET
-        WRITE(*,*) 'INVERSE OVLOCC:'
-        DO I=1,NOCC
-          WRITE(*,*)INVOVLOCC(I,:)
-        ENDDO
-        WRITE(*,*) 'K MATRIX:'
-        DO I=1,M2-NOCC
-          WRITE(*,*)KMAT(I,:)
-        ENDDO
-        RETURN
-        END SUBROUTINE REPORT
-      END SUBROUTINE TEST$INVERSE
+!         SUBROUTINE REPORT
+!         WRITE(*,*) 'MATRIX OVL:'
+!         DO I=1,M2
+!           WRITE(*,*)OVL(I,:)
+!         ENDDO
+!         WRITE(*,*)'MATRIX OVLOCC:'
+!         DO I=1,NOCC
+!           WRITE(*,*)OVLOCC(I,:)
+!         ENDDO
+!         WRITE(*,*)'MATRIX OVLEMP:'
+!         DO I=1,M2-NOCC
+!           WRITE(*,*)OVLEMP(I,:)
+!         ENDDO
+!         WRITE(*,*) 'DETERMINANT:',DET
+!         WRITE(*,*) 'INVERSE OVLOCC:'
+!         DO I=1,NOCC
+!           WRITE(*,*)INVOVLOCC(I,:)
+!         ENDDO
+!         WRITE(*,*) 'K MATRIX:'
+!         DO I=1,M2-NOCC
+!           WRITE(*,*)KMAT(I,:)
+!         ENDDO
+!         RETURN
+!         END SUBROUTINE REPORT
+!       END SUBROUTINE TEST$INVERSE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$WRITERESTART
 !     **************************************************************************
 !     ** WRITE RESTART DATA TO FILE                                           **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SIM,OVERLAP,OVERLAPARR
+      USE XAS_MODULE, ONLY: SIM,OVL,OVERLAPARR
       IMPLICIT NONE
       INTEGER(4) :: NFIL
       INTEGER(4) :: IKPT,ISPIN,IS
@@ -3439,10 +3161,10 @@
       ! WRITE OVERLAP
       DO IKPT=1,SIM(1)%NKPT
         DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-          WRITE(NFIL)OVERLAP%AUG
-          WRITE(NFIL)OVERLAP%PW
-          WRITE(NFIL)OVERLAP%DIPOLE
+          OVL=>OVERLAPARR(IKPT,ISPIN)
+          WRITE(NFIL)OVL%AUG
+          WRITE(NFIL)OVL%PW
+          WRITE(NFIL)OVL%DIPOLE
         ENDDO
       ENDDO
       CALL FILEHANDLER$CLOSE('RSTRT_OUT')
@@ -3455,7 +3177,7 @@
 !     **************************************************************************
 !     ** READ RESTART DATA TO FILE                                            **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SIM,OVERLAP,OVERLAPARR,KMAP,NKPTG,RTASK
+      USE XAS_MODULE, ONLY: SIM,OVL,OVERLAPARR,KMAP,NKPTG,NSPING,RTASK
       USE MPE_MODULE
       IMPLICIT NONE
       INTEGER(4) :: NFIL
@@ -3483,6 +3205,7 @@
         ALLOCATE(SIM(IS)%WKPT(SIM(IS)%NKPT))
       ENDDO
       NKPTG=SIM(1)%NKPT
+      NSPING=SIM(1)%NSPIN
       IF(ALLOCATED(KMAP)) THEN
         CALL ERROR$MSG('KMAP ALREADY ALLOCATED')
         CALL ERROR$STOP('XAS$READRESTART')
@@ -3532,23 +3255,23 @@
       DO IKPT=1,SIM(1)%NKPT
         IF(KMAP(IKPT).NE.THISTASK.AND.THISTASK.NE.RTASK) CYCLE
         DO ISPIN=1,SIM(1)%NSPIN
-          OVERLAP=>OVERLAPARR(IKPT,ISPIN)
+          OVL=>OVERLAPARR(IKPT,ISPIN)
           SIM(1)%STATE=>SIM(1)%STATEARR(IKPT,ISPIN)
           SIM(2)%STATE=>SIM(2)%STATEARR(IKPT,ISPIN)
-          ALLOCATE(OVERLAP%PW(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
-          OVERLAP%PW=0.D0
-          ALLOCATE(OVERLAP%AUG(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
-          OVERLAP%AUG=0.D0
-          ALLOCATE(OVERLAP%DIPOLE(3,SIM(2)%STATE%NB))
-          OVERLAP%DIPOLE=0.D0
+          ALLOCATE(OVL%PW(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+          OVL%PW=0.D0
+          ALLOCATE(OVL%AUG(SIM(2)%STATE%NB,SIM(1)%STATE%NB))
+          OVL%AUG=0.D0
+          ALLOCATE(OVL%DIPOLE(3,SIM(2)%STATE%NB))
+          OVL%DIPOLE=0.D0
           IF(THISTASK.EQ.RTASK) THEN
-            READ(NFIL)OVERLAP%AUG
-            READ(NFIL)OVERLAP%PW
-            READ(NFIL)OVERLAP%DIPOLE
+            READ(NFIL)OVL%AUG
+            READ(NFIL)OVL%PW
+            READ(NFIL)OVL%DIPOLE
           END IF
-          CALL MPE$SENDRECEIVE('~',RTASK,KMAP(IKPT),OVERLAP%PW)
-          CALL MPE$SENDRECEIVE('~',RTASK,KMAP(IKPT),OVERLAP%AUG)
-          CALL MPE$SENDRECEIVE('~',RTASK,KMAP(IKPT),OVERLAP%DIPOLE)
+          CALL MPE$SENDRECEIVE('~',RTASK,KMAP(IKPT),OVL%PW)
+          CALL MPE$SENDRECEIVE('~',RTASK,KMAP(IKPT),OVL%AUG)
+          CALL MPE$SENDRECEIVE('~',RTASK,KMAP(IKPT),OVL%DIPOLE)
         ENDDO
       ENDDO
       IF(THISTASK.EQ.RTASK) THEN
@@ -3577,7 +3300,6 @@
       IMPLICIT NONE
       INTEGER(4) :: IAT1
       INTEGER(4) :: IAT2
-      INTEGER(4) :: I
       LOGICAL(4) :: FOUND
 !     **************************************************************************
                           CALL TRACE$PUSH('ATOMMAPPING')
@@ -3664,7 +3386,6 @@
       COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:)
       COMPLEX(8), ALLOCATABLE :: DENMAT1(:,:,:)
       COMPLEX(8) :: CSVAR1,CSVAR2
-      INTEGER(4) :: NFIL
 !     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
 !     READTASK CONTAINS ALL DATA (COULD CALCULATE IN PARALLEL BUT MORE COMPLEX)
@@ -3762,7 +3483,6 @@
       INTEGER(4) :: IDIM1,IDIM2,IDIM
       INTEGER(4) :: IB
       COMPLEX(8) :: CSVAR
-      INTEGER(4) :: NFIL
       LOGICAL(4), PARAMETER :: TPR=.FALSE.
 !     **************************************************************************
       IF(NDIM.NE.1) THEN
@@ -3866,7 +3586,7 @@
 !     ** SPIN CONVOLUTION FOR NSPIN=1 (I(UP)=I(DOWN), ADET(UP)=ADET(DOWN))    **
 !     ** TOTAL = 2 * I * |ADET|^2                                             **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: SPECTRUM,SPECTRUMARR,SIM,RTASK,SETTINGS,OVERLAP,OVERLAPARR,NKPTG
+      USE XAS_MODULE, ONLY: SPEC,SPECTRUMARR,RTASK,SETTINGS,OVL,OVERLAPARR,NKPTG,NSPING
       IMPLICIT NONE
       INTEGER(4) :: NTASKS,THISTASK
       INTEGER(4) :: ISPEC
@@ -3878,28 +3598,28 @@
       IF(THISTASK.NE.RTASK) RETURN
                           CALL TRACE$PUSH('XAS$SPINCONV')
       DO ISPEC=1,SETTINGS%NSPEC
-        SPECTRUM=>SPECTRUMARR(ISPEC)
-        ALLOCATE(SPECTRUM%ICONV(SIM(1)%NKPT,SETTINGS%NE,3))
-        SPECTRUM%ICONV=0.D0
+        SPEC=>SPECTRUMARR(ISPEC)
+        ALLOCATE(SPEC%ICONV(NKPTG,SETTINGS%NE,3))
+        SPEC%ICONV=0.D0
         DO IKPT=1,NKPTG
-          DO ISPIN=1,SIM(1)%NSPIN
+          DO ISPIN=1,NSPING
 !           NSPIN=1: BOTH SPIN CHANNELS ARE EQUAL AND TOTAL IS TWICE THE VALUE
-            IF(SIM(1)%NSPIN.EQ.1) THEN
-              OVERLAP=>OVERLAPARR(IKPT,ISPIN)
-              SPECTRUM%ICONV(IKPT,:,1)=SPECTRUM%ICONV(IKPT,:,1)+ &
-     &                        2.D0*SPECTRUM%I(IKPT,ISPIN,:)*ABS(OVERLAP%ADET)**2
-              SPECTRUM%ICONV(IKPT,:,2)=0.5D0*SPECTRUM%ICONV(IKPT,:,1)
-              SPECTRUM%ICONV(IKPT,:,3)=0.5D0*SPECTRUM%ICONV(IKPT,:,1)
+            IF(NSPING.EQ.1) THEN
+              OVL=>OVERLAPARR(IKPT,ISPIN)
+              SPEC%ICONV(IKPT,:,1)=SPEC%ICONV(IKPT,:,1)+ &
+     &                        2.D0*SPEC%I(IKPT,ISPIN,:)*ABS(OVL%ADET)**2
+              SPEC%ICONV(IKPT,:,2)=0.5D0*SPEC%ICONV(IKPT,:,1)
+              SPEC%ICONV(IKPT,:,3)=0.5D0*SPEC%ICONV(IKPT,:,1)
             ELSE
 !             NSPIN=2: UP=I(UP)*|ADET(DOWN)|^2, DOWN=I(DOWN)*|ADET(UP)|^2
 !                      TOTAL=UP+DOWN
               ISPINOPPOSITE=MOD(ISPIN,2)+1
-              OVERLAP=>OVERLAPARR(IKPT,ISPINOPPOSITE)
+              OVL=>OVERLAPARR(IKPT,ISPINOPPOSITE)
 !             ISPIN=1 -> ISPINOPPOSITE=2, ISPIN=2 -> ISPINOPPOSITE=1
-              SPECTRUM%ICONV(IKPT,:,ISPIN+1)=SPECTRUM%ICONV(IKPT,:,ISPIN+1)+ &
-     &                             SPECTRUM%I(IKPT,ISPIN,:)*ABS(OVERLAP%ADET)**2
-              SPECTRUM%ICONV(IKPT,:,1)=SPECTRUM%ICONV(IKPT,:,1)+ &
-     &                             SPECTRUM%I(IKPT,ISPIN,:)*ABS(OVERLAP%ADET)**2
+              SPEC%ICONV(IKPT,:,ISPIN+1)=SPEC%ICONV(IKPT,:,ISPIN+1)+ &
+     &                             SPEC%I(IKPT,ISPIN,:)*ABS(OVL%ADET)**2
+              SPEC%ICONV(IKPT,:,1)=SPEC%ICONV(IKPT,:,1)+ &
+     &                             SPEC%I(IKPT,ISPIN,:)*ABS(OVL%ADET)**2
             END IF
           ENDDO
         ENDDO
