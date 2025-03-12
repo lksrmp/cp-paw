@@ -1846,6 +1846,7 @@
 !     LOOP OVER K POINTS
       DO IKPT=1,NKPTG
         IF(KMAP(IKPT).NE.THISTASK) CYCLE
+        CALL TRACE$I4VAL(' FINALSTATELOOP IKPT:',IKPT)
 !       LOOP OVER SPIN
         DO ISPIN=1,NSPING
           OVL=>OVLARR(IKPT,ISPIN)
@@ -1859,6 +1860,7 @@
           ALLOCATE(LMAT(NB2-NOCC2,NOCC1))
 !         LOOP OVER FINAL STATES (IOCC,IEMP)
           DO IOCC=1,NOCC1
+            CALL TRACE$I4VAL(' FINAL STATE IOCC',IOCC)
             DO IEMP=1,NB1-NOCC1
               IEMPTOT=IEMP+NOCC1
 !             CALCULATE ENERGY LOSS
@@ -4035,7 +4037,7 @@
               SPEC%RIXSCONV(IKPT,:,ISPIN+1)=SPEC%RIXSCONV(IKPT,:,ISPIN+1)+ &
      &                             SPEC%RIXS(:,IKPT,ISPIN)*ABS(OVL%ADET)**4
               SPEC%RIXSCONV(IKPT,:,1)=SPEC%RIXSCONV(IKPT,:,1)+ &
-     &                             SPEC%RIXS(IKPT,ISPIN,:)*ABS(OVL%ADET)**4
+     &                             SPEC%RIXS(:,IKPT,ISPIN)*ABS(OVL%ADET)**4
             END IF
           ENDDO
         ENDDO
