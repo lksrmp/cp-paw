@@ -1857,11 +1857,12 @@
             SPEC%E(I)=SETTINGS%EMIN+REAL(I-1,8)*SETTINGS%DE
           ENDDO
         END IF
-      ENDDO 
+      ENDDO
+!     INITIALIZE CLOCK FOR LMAT, RTASK MIGHT NEVER CALL IT, TIMING WOULD BE LOST
+      CALL TIMING$CLOCKON('RIXS$LMAT')
+      CALL TIMING$CLOCKOFF('RIXS$LMAT')
 !     LOOP OVER K POINTS
       DO IKPT=1,NKPTG
-        IF(KMAP(IKPT).NE.THISTASK) CYCLE
-        CALL TRACE$I4VAL(' FINALSTATELOOP IKPT:',IKPT)
 !       LOOP OVER SPIN
         DO ISPIN=1,NSPING
           IF(KSMAP(IKPT,ISPIN).NE.THISTASK) CYCLE
@@ -1919,6 +1920,7 @@
       DEALLOCATE(TAMPL)
 
                           CALL TIMING$CLOCKOFF('RIXS$FINALSTATELOOP')
+                          CALL TIMING$CLOCKON('RIXS$FINALSTATELOOP COMBINE')
 !     COMBINE ALL SPECTRA INFORMATION FROM ALL K POINTS TO SYNC ARRAYS
       DO ISPEC=1,SETTINGS%NSPEC
         SPEC=>SPECARR(ISPEC)
@@ -1932,7 +1934,7 @@
           ENDDO
         ENDDO
       ENDDO
-                          
+                          CALL TIMING$CLOCKOFF('RIXS$FINALSTATELOOP COMBINE')
                           CALL TRACE$POP
       END SUBROUTINE RIXS$FINALSTATELOOP
 
@@ -2248,6 +2250,7 @@
       INTEGER(4) :: GID1,GID2
 !     **************************************************************************
                           CALL TRACE$PUSH('RIXS$OVERLAPATOMMATRIX')
+                          CALL TIMING$CLOCKON('RIXS$OVERLAPATOMMATRIX')
       ALLOCATE(S(SIM(1)%NAT,SIM(1)%LNXX,SIM(2)%LNXX))
       S=0.D0
       DO IAT1=1,SIM(1)%NAT
@@ -2312,6 +2315,7 @@
       !     ENDDO
       !   ENDDO
       ! ENDDO
+                          CALL TIMING$CLOCKOFF('RIXS$OVERLAPATOMMATRIX')
                           CALL TRACE$POP
       END SUBROUTINE RIXS$OVERLAPATOMMATRIX
 !
@@ -2555,6 +2559,7 @@
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
                           CALL TRACE$PUSH('RIXS$HMAT')
+                          CALL TIMING$CLOCKON('RIXS$HMAT')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
@@ -2567,6 +2572,7 @@
           CALL LIB$MATMULC8(NB1-NOCC,NOCC,NOCC,TRANSPOSE(OVL%BMAT),TRANSPOSE(OVL%AINV),OVL%HMAT)
         ENDDO ! ISPIN
       ENDDO ! IKPT
+                          CALL TIMING$CLOCKOFF('RIXS$HMAT')
                           CALL TRACE$POP
       END SUBROUTINE RIXS$HMAT
 !
@@ -2661,6 +2667,7 @@
       INTEGER(4) :: NTASKS,THISTASK
 !     **************************************************************************
                           CALL TRACE$PUSH('RIXS$ABSORPTION')
+                          CALL TIMING$CLOCKON('RIXS$ABSORPTION')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
@@ -2675,6 +2682,7 @@
           ENDDO ! IFINAL
         ENDDO ! ISPIN
       ENDDO ! IKPT
+                          CALL TIMING$CLOCKOFF('RIXS$ABSORPTION')
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE RIXS$ABSORPTION
