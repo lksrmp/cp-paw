@@ -904,13 +904,18 @@
       SUBROUTINE RIXSCNTL$ATOMCHECK  ! MARK: RIXSCNTL$ATOMCHECK
 !     **************************************************************************
 !     ** CHECK IF ATOM SELECTED IN !COREHOLE IS IN SIMULATION                 **
+!     ** NOT NECESSARY WHEN READING FROM RESTART FILE AS DIPOLE IS CALCULATED **
 !     **************************************************************************
-      USE RIXS_MODULE, ONLY: TSIM,THIS,SETTINGS,TSETTINGS
+      USE RIXS_MODULE, ONLY: TSIM,THIS,SETTINGS,TSETTINGS,TRSTRT
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
       INTEGER(4) :: IAT
 !     **************************************************************************
                           CALL TRACE$PUSH('RIXSCNTL$ATOMCHECK')
+      IF(TRSTRT) THEN
+                          CALL TRACE$POP
+        RETURN
+      END IF
       IF(.NOT.TSIM) THEN
         CALL ERROR$MSG('SIMULATION DATA NOT ALLOCATED')
         CALL ERROR$MSG('MUST BE CALLED AFTER RIXS$READ TO ACCESS ATOM NAMES')
