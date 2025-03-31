@@ -11,7 +11,7 @@
       END TYPE SETUP_TYPE
 
       TYPE STATE_TYPE
-        REAL(8) :: OCCTOL=1.D-3 ! OCCUPATION > OCCTOL IS OCCUPIED
+        REAL(8) :: OCCTOL=0.5D0 ! OCCUPATION > OCCTOL IS OCCUPIED
         INTEGER(4)          :: NB ! #(STATES)
         REAL(8), POINTER    :: EIG(:) ! (NB) EIGENVALUES
         REAL(8), POINTER    :: OCC(:) ! (NB) OCCUPATIONS
@@ -95,6 +95,8 @@
         INTEGER(4) :: ISHIFT(3) ! K-POINT SHIFTS
         REAL(8) :: RNTOT
         REAL(8) :: NEL
+        LOGICAL(4) :: TFERMI
+        REAL(8) :: EFERMI
         REAL(8) :: ETOT  ! TOTAL ENERGY
         REAL(8) :: EDFT  ! TOTAL DFT ENERGY
         REAL(8) :: ECORE  ! TOTAL CORE ENERGY
@@ -194,6 +196,8 @@
       CALL XAS$SELECT('EXCITESTATE')
       CALL XASCNTL$FILES('EXCITESTATE')
       CALL XAS$UNSELECT
+      CALL XASCNTL$TFERMI
+
 !     READ SETTINGS FOR SPECTRA
       CALL XASCNTL$SPECTRUM
 !     CALCULATE POLARISATION IN CARTESIAN COORDINATES FROM NORMAL, K, AND POL
@@ -494,12 +498,14 @@
 !     **                                                                      **
 !     **************************************************************************
       USE XASCNTL_MODULE, ONLY: LL_CNTL
-      USE XAS_MODULE, ONLY: SELECTED,TRSTRT
+      USE XAS_MODULE, ONLY: SELECTED,TRSTRT,THIS
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
       CHARACTER(11), INTENT(IN) :: ID ! GROUNDSTATE OR EXCITESTATE
       LOGICAL(4) :: TCHK
       CHARACTER(256) :: FILENAME
+      REAL(8) :: EV
+      REAL(8) :: EFERMI
 !     **************************************************************************
                           CALL TRACE$PUSH('XASCNTL$FILES')
 !     CHECK IF FLAG IS RECOGNIZED
@@ -514,6 +520,7 @@
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('XASCNTL$FILES')
       END IF
+      CALL CONSTANTS('EV',EV)
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
       CALL LINKEDLIST$EXISTL(LL_CNTL,ID,1,TCHK)
@@ -537,12 +544,46 @@
         CALL ERROR$STOP('XASCNTL$FILES')
       END IF
       CALL LINKEDLIST$GET(LL_CNTL,'FILE',0,FILENAME)
-    
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EFERMI[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'EFERMI[EV]',1,EFERMI)
+        THIS%EFERMI=EFERMI*EV
+      END IF
+      THIS%TFERMI=TCHK
       CALL XAS$SETCH('FILE',FILENAME)
       CALL XAS$SETCH('ID',ID)
       CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(FILENAME))
                           CALL TRACE$POP
       END SUBROUTINE XASCNTL$FILES
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASCNTL$TFERMI  ! MARK: XASCNTL$TFERMI
+!     **************************************************************************
+!     ** CHECK IF EITHER BOTH OR NO FERMI LEVEL IS GIVEN                      **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: THIS
+      IMPLICIT NONE
+      LOGICAL(4) :: TFERMI1
+      LOGICAL(4) :: TFERMI2
+!     **************************************************************************
+                          CALL TRACE$PUSH('XASCNTL$TFERMI')
+      CALL XAS$SELECT('GROUNDSTATE')
+      TFERMI1=THIS%TFERMI
+      CALL XAS$UNSELECT
+      CALL XAS$SELECT('EXCITESTATE')
+      TFERMI2=THIS%TFERMI
+      CALL XAS$UNSELECT
+      IF(TFERMI1.AND..NOT.TFERMI2) THEN
+        CALL ERROR$MSG('FERMI LEVEL GIVEN FOR GROUNDSTATE BUT NOT FOR EXCITESTATE')
+        CALL ERROR$STOP('XASCNTL$TFERMI')
+      END IF
+      IF(.NOT.TFERMI1.AND.TFERMI2) THEN
+        CALL ERROR$MSG('FERMI LEVEL GIVEN FOR EXCITESTATE BUT NOT FOR GROUNDSTATE')
+        CALL ERROR$STOP('XASCNTL$TFERMI')
+      END IF
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASCNTL$TFERMI
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XASCNTL$RESTART  ! MARK: XASCNTL$RESTART
@@ -1301,21 +1342,24 @@
             S%NB=NB_
             ALLOCATE(S%OCC(NB_))
             S%OCC(:)=OCC(:,IKPT,ISPIN)
-!           COUNT NUMBER OF OCCUPIED STATES
+!           COUNT NUMBER OF OCCUPIED STATES BASED ON OCCUPATION 
+!           (INTEGRATION WEIGHTS)IF NO FERMI LEVEL IS GIVEN
 ! ERROR: INVALID METHOD TO COUNT OCCUPIED STATES
-            S%NOCC=-1
-            DO IB=1,NB_
-              IF(S%OCC(IB).LT.S%OCCTOL) THEN
-                S%NOCC=IB-1
-                EXIT
+            IF(.NOT.THIS%TFERMI) THEN
+              S%NOCC=-1
+              DO IB=1,NB_
+                IF(S%OCC(IB)/THIS%WKPT(IKPT).LT.S%OCCTOL*NSPING) THEN
+                  S%NOCC=IB-1
+                  EXIT
+                END IF
+              ENDDO ! END IB
+              IF(S%NOCC.EQ.-1) THEN
+                IF(THIS%ID.EQ.'EXCITESTATE') THEN
+                  CALL ERROR$MSG('NO UNOCCUPIED STATES FOUND FOR EXCITESTATE')
+                  CALL ERROR$STOP('XAS$READ')
+                END IF
+                S%NOCC=NB_
               END IF
-            ENDDO ! END IB
-            IF(S%NOCC.EQ.-1) THEN
-              IF(THIS%ID.EQ.'EXCITESTATE') THEN
-                CALL ERROR$MSG('NO UNOCCUPIED STATES FOUND FOR EXCITESTATE')
-                CALL ERROR$STOP('XAS$READ')
-              END IF
-              S%NOCC=NB_
             END IF
           ENDDO ! END ISPIN
         ENDDO ! END IKPT
@@ -1462,6 +1506,30 @@
             OVL%PW=OVL%PW*V
           END IF
           CALL TIMING$CLOCKOFF('XAS$READ_SCALARPRODUCT')
+          IF(THISTASK.EQ.KSMAP(IKPT,ISPIN).OR.THISTASK.EQ.RTASK) THEN
+!           DETECTION OF OCCUPIED STATES THROUGH FERMI ENERGY
+            DO IS=1,NSIM
+              CALL XAS$ISELECT(IS)
+              IF(THIS%TFERMI) THEN
+                S=>THIS%STATEARR(IKPT,ISPIN)
+                S%NOCC=-1
+                DO IB=1,S%NB
+                  IF(S%EIG(IB).GT.THIS%EFERMI) THEN
+                    S%NOCC=IB-1
+                    EXIT
+                  END IF
+                ENDDO
+                IF(S%NOCC.EQ.-1) THEN
+                  IF(THIS%ID.EQ.'EXCITESTATE') THEN
+                    CALL ERROR$MSG('NO UNOCCUPIED STATES FOUND FOR EXCITESTATE')
+                    CALL ERROR$STOP('XAS$READ')
+                  END IF
+                  S%NOCC=S%NB
+                END IF
+              END IF
+              CALL XAS$UNSELECT
+            ENDDO
+          END IF
         ENDDO ! END LOOP OVER SPIN
         DEALLOCATE(PSIK1)
         DEALLOCATE(PSIK2)
@@ -1564,6 +1632,9 @@
         WRITE(NFIL,FMT='(A10,3I10)')'ISHIFT:',THIS%ISHIFT(:)
         WRITE(NFIL,FMT='(A10,F10.4)')'RNTOT:',THIS%RNTOT
         WRITE(NFIL,FMT='(A10,F10.4)')'NEL:',THIS%NEL
+        IF(THIS%TFERMI) THEN
+          WRITE(NFIL,FMT='(A10,F10.4)')'EFERMI:',THIS%EFERMI/EV
+        END IF
         WRITE(NFIL,FMT='(A10,F10.4)')'ETOT [EV]:',THIS%ETOT/EV
         WRITE(NFIL,FMT='(A10,F10.4)')'EDFT [EV]:',THIS%EDFT/EV
         WRITE(NFIL,FMT='(A10,F10.4)')'ECORE [EV]:',THIS%ECORE/EV
@@ -1863,10 +1934,12 @@
       INTEGER(4) :: MINOCC,MAXOCC
       INTEGER(4) :: IB
       CHARACTER(1024) :: ERRORMSG
+      REAL(8) :: EV
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAP')
                           CALL TIMING$CLOCKON('XAS$OVERLAP')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL CONSTANTS('EV',EV)
 !     CALCULATION UF AUGMENTATION MATRIX NOT NECESSARY WITH RESTART FILE
       IF(.NOT.TRSTRT) THEN
         IF(ALLOCATED(S)) THEN
@@ -1906,7 +1979,7 @@
             MAXOCC=MAX(S1%NOCC,S2%NOCC)
             DO IB=MINOCC,MAXOCC
               WRITE(ERRORMSG,FMT='(A1,I4,F8.3,F8.3)') &
-     &          'E',IB,S1%EIG(IB),S2%EIG(IB)
+     &          'E',IB,S1%EIG(IB)/EV,S2%EIG(IB)/EV
               CALL TRACE$PASS(TRIM(ERRORMSG))
             ENDDO
             WRITE(ERRORMSG,FMT='(A)')'SETTING EXCITED NOCC TO GROUND NOCC'
