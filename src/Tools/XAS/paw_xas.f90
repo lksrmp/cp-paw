@@ -1855,6 +1855,7 @@
       INTEGER(4) :: NFIL
       INTEGER(4) :: MINOCC,MAXOCC
       INTEGER(4) :: IB
+      CHARACTER(1024) :: ERRORMSG
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAP')
                           CALL TIMING$CLOCKON('XAS$OVERLAP')
@@ -1876,8 +1877,6 @@
         CALL XAS$OVERLAPAUGMENTATION
       END IF
 
-      CALL FILEHANDLER$UNIT('PROT',NFIL)
-
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
           IF(KSMAP(IKPT,ISPIN).NE.THISTASK) CYCLE
@@ -1888,19 +1887,23 @@
           OVL%OV(:,:)=OVL%PW(:,:)+OVL%AUG(:,:)
 !         CHECK OF NUMBER OF OCCUPIED STATES IS THE SAME TO PRODUCE SQUARE MATRIX
           IF(S1%NOCC.NE.S2%NOCC) THEN
-            WRITE(NFIL,FMT='(A,I4,A,I2,A6,I3)') &
-     &        'NUMBER OCCUPIED STATES NOT EQUAL ON IKPT=',IKPT,' ISPIN=',ISPIN,&
-     &        ' TASK=',THISTASK
-            WRITE(NFIL,FMT='(A5,A8,A8,A4)')' ','GROUND','EXCITED','TASK'
-            WRITE(NFIL,FMT='(A5,I8,I8,I8)')'NOCC',S1%NOCC,S2%NOCC,THISTASK
+            WRITE(ERRORMSG,FMT='(A,I4,A,I2)') &
+     &        'WARNING: NUMBER OCCUPIED STATES NOT EQUAL ON IKPT=',IKPT,&
+     &        ' ISPIN=',ISPIN,
+            CALL ERROR$MSG(TRIM(ERRORMSG))
+            WRITE(ERRORMSG,FMT='(A5,A8,A8)')' ','GROUND','EXCITED'
+            CALL ERROR$MSG(TRIM(ERRORMSG))
+            WRITE(ERRORMSG,FMT='(A5,I8,I8)')'NOCC',S1%NOCC,S2%NOCC
+            CALL ERROR$MSG(TRIM(ERRORMSG))
             MINOCC=MIN(S1%NOCC,S2%NOCC)
             MAXOCC=MAX(S1%NOCC,S2%NOCC)
             DO IB=MINOCC,MAXOCC
-              WRITE(NFIL,FMT='(A1,I4,F8.3,F8.3,I4)') &
-     &          'E',IB,S1%EIG(IB),S2%EIG(IB),THISTASK
+              WRITE(ERRORMSG,FMT='(A1,I4,F8.3,F8.3)') &
+     &          'E',IB,S1%EIG(IB),S2%EIG(IB)
+              CALL ERROR$MSG(TRIM(ERRORMSG))
             ENDDO
-            WRITE(NFIL,FMT='(A,A6,I3)')'SETTING EXCITED NOCC TO GROUND NOCC',&
-     &        ' TASK=',THISTASK
+            WRITE(ERRORMSG,FMT='(A)')'SETTING EXCITED NOCC TO GROUND NOCC'
+            CALL ERROR$MSG(TRIM(ERRORMSG))
             S2%NOCC=S1%NOCC
           END IF
           NOCC=S1%NOCC
