@@ -205,6 +205,7 @@
       CALL INITIALIZEFILEHANDLER
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       IF(THISTASK.EQ.1) THEN
+        WRITE(NFIL,FMT='()')
         CALL CPPAW_WRITEVERSION(NFIL)
         CALL CLOCK$NOW(DATIME)        
         WRITE(NFIL,FMT='(80("="))')
@@ -1091,6 +1092,8 @@
       USE STRINGS_MODULE
       IMPLICIT NONE
       CHARACTER(32)        :: ID
+      INTEGER(4)          :: THISTASK
+      INTEGER(4)          :: NTASKS
 !     **************************************************************************
                                    CALL TRACE$PUSH('STANDARDFILES')
 !     ==========================================================================
@@ -1104,8 +1107,13 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
 !     ==  PROTOCOL FILE ========================================================
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
       ID=+'PROT'
-      CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XPROT')
+      IF(THISTASK.GT.1) THEN
+        CALL FILEHANDLER$SETFILE(ID,.FALSE.,-'/DEV/NULL')
+      ELSE
+        CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XPROT')
+      END IF
       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','APPEND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
