@@ -3930,6 +3930,7 @@
 !     ** INITIALIZE KSMAP ARRAY                                               **
 !     **************************************************************************
       IMPLICIT NONE
+      INTEGER(4), PARAMETER :: PERLINE=14
       INTEGER(4), INTENT(IN) :: NKPTG
       INTEGER(4), INTENT(IN) :: NSPING
       INTEGER(4), INTENT(OUT) :: RTASK
@@ -3939,6 +3940,8 @@
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
       INTEGER(4) :: IND
+      INTEGER(4) :: BEGINKPT
+      INTEGER(4) :: ENDKPT
 !     **************************************************************************
                           CALL TRACE$PUSH('KSMAPINIT')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -3961,14 +3964,24 @@
       END IF
       CALL FILEHANDLER$UNIT('PROT',NFIL)
       IF(THISTASK.EQ.RTASK) THEN
-        WRITE(NFIL,FMT='(A12,I5)')'RW TASK:',RTASK
-        IF(NSPING.EQ.1) THEN
-          WRITE(NFIL,FMT='(A12,*(I4,"|"))')'KPOINT:',(IKPT, IKPT=1,NKPTG)
-        ELSE
-          WRITE(NFIL,FMT='(A12,*(I9,"|"))')'KPOINT:',(IKPT, IKPT=1,NKPTG)
-        END IF
-        WRITE(NFIL,FMT='(A12,*(I4,"|"))')'SPIN:',(MOD(IND-1,NSPING)+1, IND=1,NKPTG*NSPING)
-        WRITE(NFIL,FMT='(A12,*(I4,"|"))')'KSMAP:',(KSMAP(IKPT,:), IKPT=1,NKPTG)
+        WRITE(NFIL,FMT='(A8,I5)')'RW TASK:',RTASK
+        BEGINKPT=1
+        DO WHILE(.TRUE.)
+!         KPT IN THIS LINE (HALF FOR NSPIN=2)
+          ENDKPT=MIN(BEGINKPT+PERLINE/NSPING-1,NKPTG)
+          IF(NSPING.EQ.1) THEN
+            WRITE(NFIL,FMT='(A8,*(I4,"|"))')'KPOINT:',(IKPT, IKPT=BEGINKPT,ENDKPT)
+          ELSE
+            WRITE(NFIL,FMT='(A8,*(I9,"|"))')'KPOINT:',(IKPT, IKPT=BEGINKPT,ENDKPT)
+          END IF
+          WRITE(NFIL,FMT='(A8,*(I4,"|"))')'SPIN:',(MOD(IND-1,NSPING)+1, IND=BEGINKPT*NSPING-1,ENDKPT*NSPING)
+          WRITE(NFIL,FMT='(A8,*(I4,"|"))')'KSMAP:',(KSMAP(IKPT,:), IKPT=BEGINKPT,ENDKPT)
+          IF(ENDKPT.NE.NKPTG) THEN
+            BEGINKPT=ENDKPT+1
+          ELSE
+            EXIT
+          END IF
+        ENDDO
       END IF
                           CALL TRACE$POP
       RETURN
