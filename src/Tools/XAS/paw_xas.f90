@@ -919,6 +919,8 @@
       USE STRINGS_MODULE
       IMPLICIT NONE
       CHARACTER(32)        :: ID
+      INTEGER(4)          :: THISTASK
+      INTEGER(4)          :: NTASKS
 !     **************************************************************************
                                    CALL TRACE$PUSH('STANDARDFILES')
 !     ==========================================================================
@@ -932,8 +934,13 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
 !     ==  PROTOCOL FILE ========================================================
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
       ID=+'PROT'
-      CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XPROT')
+      IF(THISTASK.GT.1)THEN
+        CALL FILEHANDLER$SETFILE(ID,.FALSE.,-'/DEV/NULL')
+      ELSE
+        CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XPROT')
+      END IF
       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','APPEND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
@@ -1889,7 +1896,7 @@
           IF(S1%NOCC.NE.S2%NOCC) THEN
             WRITE(ERRORMSG,FMT='(A,I4,A,I2)') &
      &        'WARNING: NUMBER OCCUPIED STATES NOT EQUAL ON IKPT=',IKPT,&
-     &        ' ISPIN=',ISPIN,
+     &        ' ISPIN=',ISPIN
             CALL ERROR$MSG(TRIM(ERRORMSG))
             WRITE(ERRORMSG,FMT='(A5,A8,A8)')' ','GROUND','EXCITED'
             CALL ERROR$MSG(TRIM(ERRORMSG))
