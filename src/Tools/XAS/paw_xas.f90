@@ -1852,6 +1852,9 @@
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: NOCC
       INTEGER(4) :: NTASKS,THISTASK
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: MINOCC,MAXOCC
+      INTEGER(4) :: IB
 !     **************************************************************************
                           CALL TRACE$PUSH('XAS$OVERLAP')
                           CALL TIMING$CLOCKON('XAS$OVERLAP')
@@ -1873,6 +1876,8 @@
         CALL XAS$OVERLAPAUGMENTATION
       END IF
 
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
           IF(KSMAP(IKPT,ISPIN).NE.THISTASK) CYCLE
@@ -1883,13 +1888,20 @@
           OVL%OV(:,:)=OVL%PW(:,:)+OVL%AUG(:,:)
 !         CHECK OF NUMBER OF OCCUPIED STATES IS THE SAME TO PRODUCE SQUARE MATRIX
           IF(S1%NOCC.NE.S2%NOCC) THEN
-            CALL ERROR$MSG('NUMBER OF OCCUPIED STATES NOT THE SAME')
-            CALL ERROR$MSG('HAS NUMBER OF ELECTRONS CHANGED OR VARIABLE OCCUPATIONS?')
-            CALL ERROR$I4VAL('NOCC1',S1%NOCC)
-            CALL ERROR$I4VAL('NOCC2',S2%NOCC)
-            CALL ERROR$I4VAL('IKPT',IKPT)
-            CALL ERROR$I4VAL('ISPIN',ISPIN)
-            CALL ERROR$STOP('XAS$OVERLAP')
+            WRITE(NFIL,FMT='(A,I4,A,I2,A6,I3)') &
+     &        'NUMBER OCCUPIED STATES NOT EQUAL ON IKPT=',IKPT,' ISPIN=',ISPIN,&
+     &        ' TASK=',THISTASK
+            WRITE(NFIL,FMT='(A5,A8,A8,A4)')' ','GROUND','EXCITED','TASK'
+            WRITE(NFIL,FMT='(A5,I8,I8,I8)')'NOCC',S1%NOCC,S2%NOCC,THISTASK
+            MINOCC=MIN(S1%NOCC,S2%NOCC)
+            MAXOCC=MAX(S1%NOCC,S2%NOCC)
+            DO IB=MINOCC,MAXOCC
+              WRITE(NFIL,FMT='(A1,I4,F8.3,F8.3,I4)') &
+     &          'E',IB,S1%EIG(IB),S2%EIG(IB),THISTASK
+            ENDDO
+            WRITE(NFIL,FMT='(A,A6,I3)')'SETTING EXCITED NOCC TO GROUND NOCC',&
+     &        ' TASK=',THISTASK
+            S2%NOCC=S1%NOCC
           END IF
           NOCC=S1%NOCC
           ALLOCATE(OVL%OVOCC(NOCC,NOCC))
