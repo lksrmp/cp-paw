@@ -11,7 +11,9 @@
       END TYPE SETUP_TYPE
 
       TYPE STATE_TYPE
-        REAL(8) :: OCCTOL=0.5D0 ! OCCUPATION > OCCTOL IS OCCUPIED
+!       IF OCCUPATION > OCCPERCENT*MAXOCC THEN OCCUPIED 
+!       DEACTIVATED IF EFERMI GIVEN, MAXOCC=2.0/1.0 FOR NSPIN=1/2
+        REAL(8) :: OCCPERCENT=0.5D0 
         INTEGER(4)          :: NB ! #(STATES)
         REAL(8), POINTER    :: EIG(:) ! (NB) EIGENVALUES
         REAL(8), POINTER    :: OCC(:) ! (NB) OCCUPATIONS
@@ -1318,6 +1320,7 @@
       REAL(8) :: R1
       REAL(8) :: R1_
       REAL(8) :: V
+      REAL(8) :: OCCLIMIT
       INTEGER(4) :: LNX
       INTEGER(4) :: IB
       INTEGER(4) :: IAT
@@ -1539,9 +1542,10 @@
 !           (INTEGRATION WEIGHTS)IF NO FERMI LEVEL IS GIVEN
 ! ERROR: INVALID METHOD TO COUNT OCCUPIED STATES
             IF(.NOT.THIS%TFERMI) THEN
+              OCCLIMIT=S%OCCPERCENT*(MOD(NSPING,2)+1)
               S%NOCC=-1
               DO IB=1,NB_
-                IF(S%OCC(IB)/THIS%WKPT(IKPT).LT.S%OCCTOL*NSPING) THEN
+                IF(S%OCC(IB)/THIS%WKPT(IKPT).LT.OCCLIMIT) THEN
                   S%NOCC=IB-1
                   EXIT
                 END IF
