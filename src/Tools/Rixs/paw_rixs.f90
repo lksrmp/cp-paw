@@ -2986,25 +2986,27 @@
 !       CLOSE FILE
         CALL RIXS$FILEHANDLER(ISPEC,'RIXSOUT','C')
 !       == SPECTRUM FOR EACH K-POINT AND SPIN ==================================
-        CALL RIXS$FILEHANDLER(ISPEC,'RIXSOUT_KS','O')
-        CALL FILEHANDLER$UNIT('RIXSOUT_KS',NFIL)
-        WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY[EV] |'
-        DO IKPT=1,NKPTG
-          DO ISPIN=1,NSPING
-            WRITE(NFIL,FMT='(A4,I4,A4,I1,A1)',ADVANCE='NO') ' KP=',IKPT,' SP=',ISPIN,'|'
-          ENDDO
-        ENDDO
-        WRITE(NFIL,*)
-        DO I=1,SETTINGS%NE
-          WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPEC%E(I)/EV
+        IF(OUTPUT%TKPTSPIN) THEN
+          CALL RIXS$FILEHANDLER(ISPEC,'RIXSOUT_KS','O')
+          CALL FILEHANDLER$UNIT('RIXSOUT_KS',NFIL)
+          WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY[EV] |'
           DO IKPT=1,NKPTG
             DO ISPIN=1,NSPING
-              WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPEC%RIXS(I,IKPT,ISPIN)
+              WRITE(NFIL,FMT='(A4,I4,A4,I1,A1)',ADVANCE='NO') ' KP=',IKPT,' SP=',ISPIN,'|'
             ENDDO
           ENDDO
           WRITE(NFIL,*)
-        ENDDO
-        CALL RIXS$FILEHANDLER(ISPEC,'RIXSOUT_KS','C')
+          DO I=1,SETTINGS%NE
+            WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPEC%E(I)/EV
+            DO IKPT=1,NKPTG
+              DO ISPIN=1,NSPING
+                WRITE(NFIL,FMT='(E14.7E2)',ADVANCE='NO')SPEC%RIXS(I,IKPT,ISPIN)
+              ENDDO
+            ENDDO
+            WRITE(NFIL,*)
+          ENDDO
+          CALL RIXS$FILEHANDLER(ISPEC,'RIXSOUT_KS','C')
+        END IF
       ENDDO   
 !       IF(OUTPUT%TRAW) THEN
 !         DO ISPEC=1,SETTINGS%NSPEC
