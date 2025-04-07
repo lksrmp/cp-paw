@@ -2450,6 +2450,7 @@
 !       OPEN FILE
         CALL XAS$FILEHANDLER(ISPEC,'XASOUT','O')
         CALL FILEHANDLER$UNIT('XASOUT',NFIL)
+        CALL XAS$OUTPUTHEADER(NFIL,SPEC,SETTINGS%GAMMA)
         IF(OUTPUT%TKPTSPIN) THEN
           WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY[EV] |'
           DO IKPT=1,NKPTG
@@ -3778,3 +3779,35 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$SPINCONV
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$OUTPUTHEADER(NFIL,SPEC,GAMMA)
+!     **************************************************************************
+!     ** WRITE HEADER FOR SPECTRUM OUTPUT FILE                                **
+!     **************************************************************************
+! TODO: FIND WAY OF GETTING GIT COMMIT
+      USE XAS_MODULE, ONLY: SPECTRUM_TYPE
+      USE CLOCK_MODULE
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      TYPE(SPECTRUM_TYPE), INTENT(IN) :: SPEC
+      REAL(8), INTENT(IN) :: GAMMA
+      CHARACTER(32) :: DATETIME
+      REAL(8) :: EV
+!     **************************************************************************
+      CALL CONSTANTS('EV',EV)
+      WRITE(NFIL,FMT='(A)')'# XAS OUTPUT'
+      CALL CLOCK$NOW(DATETIME)
+      WRITE(NFIL,FMT='(A7,5X,A32)')'# DATE:',DATETIME
+      IF(.NOT.SPEC%TPOLXYZ) THEN
+        WRITE(NFIL,FMT='(A9,3X,3F10.4)')'# NORMAL:',SPEC%NORMAL(:)
+        WRITE(NFIL,FMT='(A7,5X,3F10.4)')'# KDIR:',SPEC%KDIR(:)
+        WRITE(NFIL,FMT=-'(A6,6X,2(F8.5,SP,F8.5,"I ",S))')'# POL:',SPEC%POL(:)
+      END IF
+      WRITE(NFIL,FMT=-'(A9,3X,3(F8.5,SP,F8.5,"I ",S))') &
+     &    '# POLXYZ:',SPEC%POLXYZ(:)
+      WRITE(NFIL,FMT='(A12,F8.5)')'# GAMMA[EV]:',GAMMA/EV
+      WRITE(NFIL,'(80("#"))')
+      RETURN
+      END SUBROUTINE XAS$OUTPUTHEADER
