@@ -1936,11 +1936,11 @@
         END IF
         WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZI:',SPEC%POLXYZI(:)
         IF(.NOT.SPEC%TPOLXYZO) THEN
-          WRITE(NFIL,FMT='(A10,3F10.4)')'NORMALI:',SPEC%NORMALO(:)
-          WRITE(NFIL,FMT='(A10,3F10.4)')'KDIRI:',SPEC%KDIRO(:)
-          WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POLI:',SPEC%POLO(:)
+          WRITE(NFIL,FMT='(A10,3F10.4)')'NORMALO:',SPEC%NORMALO(:)
+          WRITE(NFIL,FMT='(A10,3F10.4)')'KDIRO:',SPEC%KDIRO(:)
+          WRITE(NFIL,FMT=-'(A10,2(F8.5,SP,F8.5,"I ",S))')'POLO:',SPEC%POLO(:)
         END IF
-        WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZI:',SPEC%POLXYZO(:)
+        WRITE(NFIL,FMT=-'(A10,3(F8.5,SP,F8.5,"I ",S))')'POLXYZO:',SPEC%POLXYZO(:)
       ENDDO
       WRITE(NFIL,'(80("#"))')
       WRITE(NFIL,FMT='(A19)')'OUTPUT'
@@ -2973,6 +2973,7 @@
 !       OPEN FILE
         CALL RIXS$FILEHANDLER(ISPEC,'RIXSOUT','O')
         CALL FILEHANDLER$UNIT('RIXSOUT',NFIL)
+        CALL RIXS$OUTPUTHEADER(NFIL,SPEC)
 !       SUM UP K-POINTS
         ALLOCATE(ISUM(SETTINGS%NE,3))
         ISUM=0.D0
@@ -4355,3 +4356,51 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE RIXS$SPINCONV
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$OUTPUTHEADER(NFIL,SPEC)
+!     **************************************************************************
+!     ** WRITE HEADER FOR SPECTRUM OUTPUT FILE                                **
+!     **************************************************************************
+! TODO: FIND WAY OF GETTING GIT COMMIT
+      USE RIXS_MODULE, ONLY: SPEC_TYPE
+      USE CLOCK_MODULE
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      TYPE(SPEC_TYPE), INTENT(IN) :: SPEC
+      CHARACTER(32) :: DATETIME
+      REAL(8) :: EV
+!     **************************************************************************
+      CALL CONSTANTS('EV',EV)
+      WRITE(NFIL,FMT='("# ",A)')'RIXS OUTPUT'
+      CALL CLOCK$NOW(DATETIME)
+      WRITE(NFIL,FMT='("# ",A12,A32)')'DATE:',DATETIME
+      WRITE(NFIL,FMT='("# ",A12,F10.4)')'OMEGA[EV]:',SPEC%OMEGA/EV
+      WRITE(NFIL,FMT='("# ",A12,F10.4)')'GAMMA[EV]:',SPEC%GAMMA/EV
+      IF(SPEC%BROADMODE.EQ.'N') THEN
+        WRITE(NFIL,FMT='("# ",A12,A)')'BROADEN:','NONE'
+      ELSE IF(SPEC%BROADMODE.EQ.'G') THEN
+        WRITE(NFIL,FMT='("# ",A12,A)')'BROADEN:','GAUSSIAN'
+      ELSE IF(SPEC%BROADMODE.EQ.'L') THEN
+        WRITE(NFIL,FMT='("# ",A12,A)')'BROADEN:','LORENTZIAN'
+      END IF
+      IF(SPEC%BROADMODE.NE.'N') THEN
+        WRITE(NFIL,FMT='("# ",A12,F10.4)')'EBROAD[EV]:',SPEC%EBROAD/EV
+      END IF
+      IF(.NOT.SPEC%TPOLXYZI) THEN
+        WRITE(NFIL,FMT='("# ",A12,3F10.4)')'NORMALI:',SPEC%NORMALI(:)
+        WRITE(NFIL,FMT='("# ",A12,3F10.4)')'KDIRI:',SPEC%KDIRI(:)
+        WRITE(NFIL,FMT=-'("# ",A12,2(F8.5,SP,F8.5,"I ",S))')'POLI:',SPEC%POLI(:)
+      END IF
+      WRITE(NFIL,FMT=-'("# ",A12,3(F8.5,SP,F8.5,"I ",S))')'POLXYZI:',SPEC%POLXYZI(:)
+      IF(.NOT.SPEC%TPOLXYZO) THEN
+        WRITE(NFIL,FMT='("# ",A12,3F10.4)')'NORMALO:',SPEC%NORMALO(:)
+        WRITE(NFIL,FMT='("# ",A12,3F10.4)')'KDIRO:',SPEC%KDIRO(:)
+        WRITE(NFIL,FMT=-'("# ",A12,2(F8.5,SP,F8.5,"I ",S))')'POLO:',SPEC%POLO(:)
+      END IF
+      WRITE(NFIL,FMT=-'("# ",A12,3(F8.5,SP,F8.5,"I ",S))')'POLXYZO:',SPEC%POLXYZO(:)
+      WRITE(NFIL,FMT='("# ",A12,L2)')'ELAST. PEAK:',SPEC%TELASTIC
+      WRITE(NFIL,'(80("#"))')
+      RETURN
+      END SUBROUTINE RIXS$OUTPUTHEADER
