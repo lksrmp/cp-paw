@@ -299,6 +299,7 @@
       REAL(8)                 :: SVAR
       LOGICAL(4)              :: TCHK1,TCHK2
       REAL(8)                 :: FAV,FMAX
+      LOGICAL(4), PARAMETER :: TFREEZE=.TRUE.
 !     ******************************************************************      
                               CALL TRACE$PUSH('TIMESTEP')
       CALL FILEHANDLER$UNIT('PROT',NFILO)
@@ -410,6 +411,7 @@
 !     ==================================================================
 !     ==  PROPAGATE NUCLEI (CONSTRAINTS FOLLLOW LATER...)             ==
 !     ==================================================================
+IF(.NOT.TFREEZE) THEN
 !---DIMERMERGE FIX      
       CALL DIMER$GETL4('DIMER',TCHK)
       IF(TCHK) THEN
@@ -467,6 +469,7 @@
         CALL THERMOSTAT$SETR8('EKIN(SYSTEM)',EKIN)
         CALL THERMOSTAT$PROPAGATE()
       END IF
+END IF
 !
 !     ==================================================================
 !     ==================================================================
@@ -506,9 +509,11 @@
 !     ==================================================================
 !     == OCCUPATIONS                                                  ==
 !     ==================================================================
+IF(.NOT.TFREEZE) THEN
       CALL DYNOCC$GETR8('EKIN',SVAR)
       CALL ENERGYLIST$SET('OCCUPATION KINETIC ENERGY',SVAR)
       CALL ENERGYLIST$ADD('CONSTANT ENERGY',SVAR)
+END IF
 ! 
 !     ==================================================================
 !     ==  THERMOSTAT ACTING ON THE NUCLEI                             ==
@@ -542,7 +547,9 @@
 !     == CHECK CONVERGENCE                                            ==
 !     ==================================================================
 !     ==================================================================
+IF(.NOT.TFREEZE) THEN
       CALL ATOMS$FORCECRITERION(FAV,FMAX)
+END IF
 !PRINT*,'FORCE FAV=',FAV,' FMAX=',FMAX
 !
 !     ==================================================================
@@ -558,6 +565,7 @@
 !     == UPDATE DYNAMICAL VARIABLES                                   ==
 !     ==================================================================
 !     ==================================================================
+IF(.NOT.TFREEZE) THEN
 !     __ELECTRONIC WAVE FUNCTIONS_______________________________________
       CALL WAVES$SWITCH()
 !     __ATOMIC POSITIONS________________________________________________
@@ -574,6 +582,7 @@
 !     __ATOM THERMOSTAT_________________________________________________
       CALL THERMOSTAT$SELECT('ATOMS')
       CALL THERMOSTAT$SWITCH()
+END IF
 !
 !     ==================================================================
 !     == TURN DIALS                                                   ==
