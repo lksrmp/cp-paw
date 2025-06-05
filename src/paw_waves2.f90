@@ -2883,6 +2883,393 @@ PRINT*,'CELLSCALE ',CELLSCALE
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$WRITEOVL
+!     **************************************************************************
+!     **  THIS FUNCTION WRITES THE OVERLAP FILE                               **
+!     **  LEANS HEAVILY ON THE WRITEPDOS FUNCTION                             **
+!     **************************************************************************
+      USE WAVES_MODULE, ONLY: WAVES_SELECTWV,THIS,MAP,GSET, &
+     &                        THAMILTON,TSAFEORTHO,NDIM,NKPT,NSPIN,KMAP
+      USE MPE_MODULE
+      USE PERIODICTABLE_MODULE
+      IMPLICIT NONE
+      COMPLEX(8), PARAMETER  :: CI=(0.D0,1.D0) 
+      CHARACTER(6), PARAMETER:: FLAG='181213'
+      INTEGER(4)             :: NFIL
+      CHARACTER(256)         :: FILE
+      INTEGER(4)             :: NTASKS,THISTASK
+      INTEGER(4)             :: NSP ! #(SPECIES)
+      INTEGER(4)             :: NAT ! #(ATOMS)
+      INTEGER(4)             :: NPRO ! #(PROJECTOR FUNCTIONS)
+      INTEGER(4)             :: LNXX
+      INTEGER(4)             :: NKDIV(3) ! K-POINT DIVISION
+      INTEGER(4)                :: ISHIFT(3) ! K-POINT SHIFT
+      REAL(8)                :: NEL ! NUMBER OF ELECTRONS
+      REAL(8)                :: RNTOT
+      REAL(8)                :: ETOT ! TOTAL ENERGY FROM PAW CALCULATION
+      REAL(8)                :: EAESCF  ! TOTAL ENERGY OF ATOM FROM AESCF
+      REAL(8)                :: ECORE ! CORE ENERGY
+      INTEGER(4),ALLOCATABLE :: LNX(:)
+      INTEGER(4),ALLOCATABLE :: LOX(:,:) ! MAIN ANGULAR MOMENTUM OF AN LN
+      INTEGER(4),ALLOCATABLE :: ISPECIES(:)
+      LOGICAL(4)             :: TINV
+      INTEGER(4)             :: SPACEGROUP
+      LOGICAL(4)             :: TSHIFT
+      REAL(8)                :: RBAS(3,3)
+      REAL(8), ALLOCATABLE   :: R(:,:) ! (3,NAT) ATOMIC POSITIONS
+      CHARACTER(16),ALLOCATABLE :: ATOMID(:)
+!     ELEMENT SPECIFIC QUANTITIES
+!     ARE BEING GATHERED AND WRITTEN TO THE OVL FILE IMMEDIATELY (NOT STORED)
+      REAL(8), ALLOCATABLE :: PSPHI(:,:) ! (NR,LNX(ISP)) AUXILIARY PARTIAL WAVES
+      REAL(8), ALLOCATABLE :: AEPHI(:,:) ! (NR,LNX(ISP)) PARTIAL WAVES
+      INTEGER(4) :: NBATOM ! NUMBER OF ATOMIC WAVE FUNCTIONS
+      INTEGER(4), ALLOCATABLE :: LATOM(:) ! (NBATOM) MAIN ANGULAR MOMENTA OF ATOMIC STATES
+      REAL(8), ALLOCATABLE :: AEPSI(:,:) ! (NR,NBATOM) ATOMIC WAVE FUNCTIONS
+      INTEGER(4) :: NR ! NUMBER OF RADIAL POINTS
+      REAL(8) :: DEX ! GRID PARAMETER
+      REAL(8) :: R1 ! GRID PARAMETER
+      CHARACTER(8) :: GRIDTYPE ! GRID PARAMETER
+
+      INTEGER(4) :: NBX
+      INTEGER(4) :: NB
+      INTEGER(4) :: NBH
+      INTEGER(4) :: NGL
+      REAL(8), ALLOCATABLE :: OCC(:,:,:) ! (NBX,NKPT,NSPIN) OCCUPATION NUMBERS
+      REAL(8), ALLOCATABLE :: XK(:,:) ! (3,NKPT) K-POINTS IN RELATIVE COORDINATES
+      REAL(8), ALLOCATABLE :: WKPT(:) ! (NKPT) K-POINT WEIGHTS
+
+      LOGICAL(4) :: TKGROUP
+
+      INTEGER(4) :: ISP
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: IKPTG
+      INTEGER(4) :: IB1,IB2,IBH,IPRO,ISPIN,IDIM
+      INTEGER(4) :: GID
+      INTEGER(4) :: ILOGICAL
+      LOGICAL(4) :: TCHK
+      INTEGER(4) :: NGG
+      LOGICAL(4) :: TSUPER
+      CHARACTER(8) :: KEY
+      INTEGER(4) :: IKPTL
+      INTEGER(4) :: NKPTL
+      REAL(8) :: XKPT(3)
+      REAL(8) :: GBAS(3,3)
+      INTEGER(4), ALLOCATABLE :: IGVECG(:,:) ! (3,NGG)
+      INTEGER(4), ALLOCATABLE :: IGVECL(:,:) ! (3,NGL)
+      COMPLEX(8), ALLOCATABLE :: PSIG(:,:,:) ! (NGG,NDIM,NBH) GLOBAL PLANE WAVES
+      COMPLEX(8), ALLOCATABLE :: WORKG(:,:,:) ! (NGG,NDIM,NBH) GLOBAL WORK
+      COMPLEX(8), ALLOCATABLE :: PSIL(:,:,:) ! (NGL,NDIM,NBH) LOCAL PLANE WAVES
+      COMPLEX(8), ALLOCATABLE :: WORKL(:,:,:) ! (NGL,NDIM,NBH) LOCAL WORK
+      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NBH,NPRO) PROJECTIONS
+      COMPLEX(8), ALLOCATABLE :: VECTORPROJ(:,:,:) ! (NDIM,NB,NPRO) PROJECTIONS
+      COMPLEX(8), ALLOCATABLE :: VECTORPSIG(:,:,:) ! (NGG,NDIM,NB) PROJECTIONS
+      REAL(8), ALLOCATABLE :: EIG(:) ! (NB) EIGENVALUES
+!     **************************************************************************
+                          CALL TRACE$PUSH('WAVES$WRITEOVL')
+      CALL OVL$GETL4('INIT',TCHK)
+      IF(.NOT.TCHK) RETURN
+      CALL OVL$GETL4('WAKE',TCHK)
+      IF(.NOT.TCHK) RETURN
+
+      IF(.NOT.THAMILTON) THEN
+        CALL ERROR$MSG('EIGENVALUES NOT PRESENT')
+        CALL ERROR$STOP('WAVES$WRITEOVL')
+      END IF
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      IF(THISTASK.EQ.1) THEN
+        CALL OVL$GETCH('FILE',FILE)
+        CALL FILEHANDLER$SETFILE('OVL',.FALSE.,TRIM(FILE))
+        CALL FILEHANDLER$SETSPECIFICATION('OVL','FORM','UNFORMATTED')
+        CALL FILEHANDLER$UNIT('OVL',NFIL)
+        REWIND NFIL
+      END IF
+!
+!     ==================================================================
+!     == GENERAL QUANTITIES                                           ==
+!     ==================================================================
+      NSP=MAP%NSP
+      NAT=MAP%NAT
+      NPRO=MAP%NPRO
+      LNXX=MAP%LNXX
+!     NDIM IN WAVES_MODULE
+!     NKPT IN WAVES_MODULE
+!     NSPIN IN WAVES_MODULE
+      CALL DYNOCC$GETI4A('NKDIV',3,NKDIV)
+      CALL DYNOCC$GETI4A('ISHIFT',3,ISHIFT)
+      CALL DYNOCC$GETR8('NEL',NEL)
+! TODO: UNDERSTAND WHY THIS IS DONE
+      IF(NSPIN.EQ.1.AND.NDIM.EQ.1)THEN
+        RNTOT=0.5D0*NEL
+      ELSE
+        RNTOT=NEL
+      ENDIF
+      CALL ENERGYLIST$GET('TOTAL ENERGY',ETOT)
+      CALL KPOINTS$GETL4('TINV',TINV)
+      IF(TINV)THEN
+        !TRICLINIC WITH INVERSION SYMMETRY
+        SPACEGROUP=2
+      ELSE
+        !TRICLINIC WITHOUT INVERSION SYMMETRY
+        SPACEGROUP=1
+      ENDIF
+! TODO: WHY IS TSHIFT SET TO FALSE?
+      TSHIFT=.FALSE.
+
+      ALLOCATE(LNX(NSP))
+      LNX(:)=MAP%LNX(:)
+      ALLOCATE(LOX(LNXX,NSP))
+      LOX(:,:)=MAP%LOX(:,:)
+
+      IF(THISTASK.EQ.1)THEN
+!       NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
+        WRITE(NFIL)NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
+!       LNX(NSP),LOX(LNXX,NSP)
+        WRITE(NFIL)LNX,LOX
+        ILOGICAL=1
+        IF(.NOT.TINV)ILOGICAL=0
+!       NKDIV(3),ISHIFT(3),RNTOT,NEL,TINV
+        WRITE(NFIL)NKDIV,ISHIFT,RNTOT,NEL,ETOT,ILOGICAL
+        ILOGICAL=1
+        IF(.NOT.TSHIFT)ILOGICAL=0
+!       SPACEGROUP,TSHIFT
+        WRITE(NFIL)SPACEGROUP,ILOGICAL
+      ENDIF
+!
+!     ==================================================================
+!     == ATOMIC STRUCTURE                                             ==
+!     ==================================================================
+      ALLOCATE(R(3,NAT))
+      ALLOCATE(ATOMID(NAT))
+      ALLOCATE(ISPECIES(NAT))
+      ISPECIES(:)=MAP%ISP(:)
+      CALL CELL$GETR8A('T(0)',9,RBAS)
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
+      CALL ATOMLIST$GETCHA('NAME',0,NAT,ATOMID)
+      IF(THISTASK.EQ.1)THEN
+!       RBAS(3,3),R(3,NAT),ATOMID(NAT),ISPECIES(NAT)
+        WRITE(NFIL)RBAS,R,ATOMID,ISPECIES
+      ENDIF
+!
+!     ==================================================================
+!     == ELEMENT SPECIFIC QUANTITIES                                  ==
+!     ==================================================================
+      DO ISP=1,NSP
+        CALL SETUP$ISELECT(ISP)
+        CALL SETUP$GETI4('NB',NBATOM)
+!       GET GRID PARAMETERS
+        CALL SETUP$GETI4('GID',GID)
+        CALL RADIAL$GETCH(GID,'TYPE',GRIDTYPE)
+        CALL RADIAL$GETI4(GID,'NR',NR)
+        CALL RADIAL$GETR8(GID,'DEX',DEX)
+        CALL RADIAL$GETR8(GID,'R1',R1)
+!       GET PARTIAL WAVES
+        ALLOCATE(PSPHI(NR,LNX(ISP)))
+        ALLOCATE(AEPHI(NR,LNX(ISP)))
+        ALLOCATE(LATOM(NBATOM))
+        ALLOCATE(AEPSI(NR,NBATOM))
+        CALL SETUP$GETR8A('PSPHI',NR*LNX(ISP),PSPHI)
+        CALL SETUP$GETR8A('AEPHI',NR*LNX(ISP),AEPHI)
+        CALL SETUP$GETI4A('LB',NBATOM,LATOM)
+        CALL SETUP$GETR8A('AEPSI',NR*NBATOM,AEPSI)
+        CALL SETUP$GETR8('EAESCF',EAESCF)
+        CALL SETUP$GETR8('ECORE',ECORE)
+        IF(THISTASK.EQ.1)THEN
+!         GRIDTYPE,NR,DEX,R1
+          WRITE(NFIL)GRIDTYPE,NR,DEX,R1
+!         ECORE
+          WRITE(NFIL)ECORE
+!         PSPHI(NR,LNX(ISP))
+          WRITE(NFIL)PSPHI(:,:)
+!         AEPHI(NR,LNX(ISP))
+          WRITE(NFIL)AEPHI(:,:)
+!         NBATOM
+          WRITE(NFIL)NBATOM
+!         LATOM(NBATOM)
+          WRITE(NFIL)LATOM
+!         AEPSI(NR,NBATOM)
+          WRITE(NFIL)AEPSI(:,:)
+        ENDIF
+        DEALLOCATE(PSPHI)
+        DEALLOCATE(AEPHI)
+        DEALLOCATE(LATOM)
+        DEALLOCATE(AEPSI)
+        CALL SETUP$UNSELECT()
+      ENDDO
+!     ==================================================================
+!     == OCCUPATIONS AND K-POINTS AND THEIR WEIGHTS                   ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPT,NSPIN))
+      CALL DYNOCC$GETR8A('OCC',NBX*NKPT*NSPIN,OCC)
+      ALLOCATE(XK(3,NKPT))
+      CALL DYNOCC$GETR8A('XK',3*NKPT,XK)
+      ALLOCATE(WKPT(NKPT))
+      CALL DYNOCC$GETR8A('WKPT',NKPT,WKPT)
+      IF(THISTASK.EQ.1)THEN
+!       NB,NKPT,NSPIN
+        WRITE(NFIL)NBX,NKPT,NSPIN
+!       OCC(NB,NKPT,NSPIN),XK(3,NKPT),WKPT(NKPT)
+        WRITE(NFIL)OCC,XK,WKPT
+      ENDIF
+!
+!     ==================================================================
+!     == WAVE FUNCTIONS AND PROJECTIONS                               ==
+!     ==================================================================
+      IKPTL=0
+!     LOOP OVER GLOBAL K-POINTS
+      DO IKPTG=1,NKPT
+!       CHECK IF THISTASK IS MAIN TASK FOR THE K-POINT GROUP
+        TKGROUP=(THISTASK.EQ.KMAP(IKPTG))
+!       SET OTHER TASKS IN K-POINT GROUP ACTIVE
+        CALL MPE$BROADCAST('K',1,TKGROUP)
+!       ONLY LEAVE K-POINT GROUP AND PRINTING FIRST TASK RUNNING
+        IF(.NOT.(THISTASK.EQ.1.OR.TKGROUP)) CYCLE
+        IF(TKGROUP) THEN
+!         COUNT UP LOCAL K-POINT INDEX
+          IKPTL=IKPTL+1
+!         SELECT CORRECT WAVES
+          CALL WAVES_SELECTWV(IKPTL,1)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+!         CHECK IF EIGENVECTORS AND EIGENVALUES ARE SET AND AVAILABLE
+          IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
+            CALL ERROR$MSG('EIGENVECTORS NOT PRESENT')
+            CALL ERROR$STOP('WAVES$WRITEOVL')
+          ENDIF
+          IF(.NOT.ASSOCIATED(THIS%EIGVAL)) THEN
+            CALL ERROR$MSG('EIGENVALUES NOT PRESENT')
+            CALL ERROR$STOP('WAVES$WRITEOVL')
+          ENDIF
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          NB=THIS%NB
+          CALL PLANEWAVE$GETI4('NGG',NGG)
+          CALL PLANEWAVE$GETL4('TINV',TSUPER)
+        ENDIF
+!       ==================================================================
+!       == GENERAL INFORMATION ABOUT THE K-POINT                        ==
+!       ==================================================================
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NGG)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NB)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,NBH)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,TSUPER)
+!       KEYWORD, #(GLOBAL PLANE WAVES), DIMENSION(=1), #(BANDS), SUPERWAVEFUNCTION
+        IF(THISTASK.EQ.1) THEN
+          KEY='PSI'
+          ILOGICAL=1
+          IF(.NOT.TSUPER)ILOGICAL=0
+!         KEY,NGG,NDIM,NB,TSUPER
+          WRITE(NFIL)KEY,NGG,NDIM,NB,ILOGICAL
+        ENDIF
+
+        ALLOCATE(IGVECG(3,NGG))
+        IF(TKGROUP) THEN
+          CALL PLANEWAVE$GETR8A('GBAS',9,GBAS)
+          CALL PLANEWAVE$GETR8A('XK',3,XKPT)
+          ALLOCATE(IGVECL(3,NGL))
+          CALL PLANEWAVE$GETI4A('IGVEC',3*NGL,IGVECL)
+          CALL PLANEWAVE$COLLECTI4(3,NGL,IGVECL,NGG,IGVECG)
+          DEALLOCATE(IGVECL)
+        ENDIF
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,XKPT)
+        CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,IGVECG)
+!       RELATIVE K-POINT COORDINATES AND INTEGER REPRESENTATION GLOBAL PLANE WAVES
+        IF(THISTASK.EQ.1) THEN
+!         XKPT(3),IGVECG(3,NGG)
+          WRITE(NFIL)XKPT,IGVECG
+        ENDIF
+        DEALLOCATE(IGVECG)
+!       ==================================================================
+!       == PLANE WAVE WAVE FUNCTIONS AND PROJECTIONS                    ==
+!       ==================================================================
+        ALLOCATE(PSIG(NGG,NDIM,NBH)) ! GLOBAL WAVE FUNCTION FOR IKPT & ISPIN
+!       IF TSUPER: PSIL (PSIG) IS THE PSI+ LOCAL (GLOBAL) WAVE FUNCTION
+!                  USE WORKL (WORKG) FOR THE PSI- LOCAL (GLOBAL) WAVE FUNCTION
+        ALLOCATE(PROJ(NDIM,NBH,NPRO))
+        ALLOCATE(EIG(NB))
+        IF(TSUPER) ALLOCATE(WORKG(NGG,NDIM,NBH)) ! GLOBAL WORK ARRAY FOR PSI-
+        IF(TKGROUP) THEN
+          ALLOCATE(PSIL(NGL,NDIM,NBH))
+          IF(TSUPER) ALLOCATE(WORKL(NGL,NDIM,NBH))
+        ENDIF
+        DO ISPIN=1,NSPIN
+          IF(TKGROUP) THEN
+            CALL WAVES_SELECTWV(IKPTL,ISPIN)
+            CALL PLANEWAVE$SELECT(GSET%ID)
+            PSIL=(0.D0,0.D0)
+            PROJ=(0.D0,0.D0)
+!           TRANSFORM INTO EIGENSTATES
+            CALL WAVES_ADDPSI(NGL,NDIM,NBH,NB,PSIL,THIS%PSI0,THIS%EIGVEC)
+            CALL WAVES_ADDOPROJ(MAP%NPRO,NDIM,NBH,NB,PROJ,THIS%PROJ,THIS%EIGVEC)
+!           GET PSI- IF TSUPER
+            IF(TSUPER) THEN
+              DO IBH=1,NBH
+                CALL PLANEWAVE$INVERTG(NGL,PSIL(:,NDIM,IBH),WORKL(:,NDIM,IBH))
+              ENDDO
+            ENDIF
+! WARNING: WHAT HAPPENS TO OCCUPATIONS?
+            DO IBH=1,NBH
+              DO IDIM=1,NDIM
+                CALL PLANEWAVE$COLLECTC8(1,NGL,PSIL(1,IDIM,IBH),NGG,PSIG(1,IDIM,IBH))
+                IF(TSUPER) THEN
+                  CALL PLANEWAVE$COLLECTC8(1,NGL,WORKL(1,IDIM,IBH),NGG,WORKG(1,IDIM,IBH))
+                ENDIF
+              ENDDO
+            ENDDO
+          ENDIF
+          CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,PSIG)
+          IF(TSUPER) CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,WORKG)
+          CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,PROJ)
+          EIG=THIS%EIGVAL
+          CALL MPE$SENDRECEIVE('MONOMER',KMAP(IKPTG),1,EIG)
+          IF(THISTASK.EQ.1) THEN
+            ALLOCATE(VECTORPSIG(NGG,NDIM,NB))
+            ALLOCATE(VECTORPROJ(NDIM,NB,NPRO))
+!           UNRAVEL SUPER WAVE FUNCTIONS AND PROJECTIONS
+            IF(TSUPER) THEN
+              DO IDIM=1,NDIM
+                DO IBH=1,NBH
+                  IB1=1+2*(IBH-1)
+                  IB2=2+2*(IBH-1)
+                  VECTORPSIG(:,IDIM,IB1)=0.5D0*(PSIG(:,IDIM,IBH)+WORKG(:,IDIM,IBH))
+                  VECTORPSIG(:,IDIM,IB2)=-CI*0.5D0*(PSIG(:,IDIM,IBH)-WORKG(:,IDIM,IBH))
+                  DO IPRO=1,NPRO
+                    VECTORPROJ(IDIM,IB1,IPRO)=REAL(PROJ(IDIM,IBH,IPRO),KIND=8)
+                    VECTORPROJ(IDIM,IB2,IPRO)=AIMAG(PROJ(IDIM,IBH,IPRO))
+                  ENDDO
+                ENDDO
+              ENDDO
+            ELSE ! NOT TSUPER > NBH=NB
+              VECTORPROJ(:,:,:)=PROJ(:,:,:) ! (NDIM,NB,NPRO)
+              VECTORPSIG(:,:,:)=PSIG(:,:,:) ! (NGG,NDIM,NB)
+            ENDIF
+!           PSIG(NGG,NDIM,NB)
+            WRITE(NFIL)VECTORPSIG
+!           PROJ(NDIM,NB,NPRO)
+            WRITE(NFIL)VECTORPROJ
+!           EIG(NB)
+            WRITE(NFIL)EIG
+            DEALLOCATE(VECTORPSIG)
+            DEALLOCATE(VECTORPROJ)
+          ENDIF
+        ENDDO ! ISPIN
+        IF(TKGROUP) THEN
+          DEALLOCATE(PSIL)
+          IF(TSUPER) DEALLOCATE(WORKL)
+        ENDIF
+        DEALLOCATE(PSIG)
+        DEALLOCATE(PROJ)
+        DEALLOCATE(EIG)
+        IF(TSUPER) DEALLOCATE(WORKG)
+      ENDDO ! IKPTG
+      IF(THISTASK.EQ.1) THEN
+        FLUSH(NFIL)
+        CALL FILEHANDLER$CLOSE('OVL')
+      END IF
+                          CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE WAVES$REPORTEIG(NFIL)
 !     **************************************************************************
 !     **  PRODUCES A PRINTOUT OF ONE-PARTICLE ENERGIES AS WELL AS INFORMATION **
