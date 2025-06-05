@@ -1282,6 +1282,605 @@ END IF
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE ATOMLIB$AESCFHOLE(GID,NR,KEY,RBOX,AEZ,NX,NB,LOFI,SOFI,FOFI,NNOFI &
+     &                        ,ETOT,POT,VFOCK,EOFI,PHI,SPHI)
+!     **************************************************************************
+!     ** MAKES A SELF-CONSISTENT CALCULATION OF AN ATOM IN A BOX WITH         **
+!     ** RADIUS RBOX (RADIUS IS LIMITED BY THE GRID RBOX<R(NR-3) )            **
+!     **                                                                      **
+!     ** KEY='START,REL,SO,ZORA,FOCK='                                        **
+!     **                                                                      **
+!     **************************************************************************
+      USE RADIALFOCK_MODULE
+USE PERIODICTABLE_MODULE
+      IMPLICIT NONE
+      INTEGER(4) ,INTENT(IN)     :: GID         ! GRID ID
+      INTEGER(4) ,INTENT(IN)     :: NR          ! #(GRID POINTS)
+      CHARACTER(*),INTENT(IN)    :: KEY     
+      REAL(8)    ,INTENT(IN)     :: RBOX        ! BOX RADIUS     
+      REAL(8)    ,INTENT(IN)     :: AEZ       ! ATOMIC NUMBER
+      INTEGER(4) ,INTENT(IN)     :: NX          ! X#(STATES)
+      INTEGER(4) ,INTENT(OUT)    :: NB          ! #(STATES)
+      INTEGER(4) ,INTENT(INOUT)  :: LOFI(NX)    ! ANGULAR MOMENTUM
+      INTEGER(4) ,INTENT(INOUT)  :: SOFI(NX)    ! SWITCH FOR SPIN-ORBIT COUP.
+      REAL(8)    ,INTENT(INOUT)  :: FOFI(NX)    ! OCCUPATION
+      INTEGER(4) ,INTENT(INOUT)  :: NNOFI(NX)   ! #(NODES)
+      REAL(8)    ,INTENT(OUT)    :: ETOT        ! TOTAL ENERGY
+      REAL(8)    ,INTENT(INOUT)  :: POT(NR)     ! POTENTIAL
+      TYPE(VFOCK_TYPE),INTENT(INOUT)  :: VFOCK  ! FOCK TERM
+      REAL(8)   ,INTENT(OUT)     :: EOFI(NX)    ! ONE-PARTICLE ENERGIES
+      REAL(8)   ,INTENT(OUT)     :: PHI(NR,NX)  ! ONE-PARTICLE WAVE FUNCTIONS
+      REAL(8)   ,INTENT(OUT)     :: SPHI(NR,NX) ! SMALL COMPONENT
+      REAL(8)   ,PARAMETER       :: TOL=1.D-3
+      REAL(8)   ,PARAMETER       :: PRETOL=1.D-4
+      REAL(8)   ,PARAMETER       :: XMAXTOL=1.D-8
+      REAL(8)   ,PARAMETER       :: XAVTOL=1.D-8
+      INTEGER(4),PARAMETER       :: NITER=1000
+      LOGICAL(4),PARAMETER       :: TBROYDEN=.TRUE.
+      LOGICAL(4),PARAMETER       :: TPR=.TRUE.
+      REAL(8)   ,PARAMETER       :: PI=4.D0*ATAN(1.D0)
+      REAL(8)   ,PARAMETER       :: Y0=1.D0/SQRT(4.D0*PI) !SPH. HARM. L=0
+      REAL(8)   ,PARAMETER       :: C0LL=Y0               !GAUNT COEFF
+      REAL(8)                    :: R(NR)
+      REAL(8)                    :: RHO(NR)
+      REAL(8)                    :: AUX(NR),AUX1(NR)   !AUXILIARY ARRAY
+      REAL(8)                    :: MUX(NR)   !EXCHANGE ONLY POTENTIAL
+      INTEGER(4)                 :: ITER
+      REAL(8)                    :: XAV,XMAX
+      REAL(8)                    :: XAVMIN,XMAXMIN,XDEMIN
+      INTEGER(4)                 :: NCONV
+      LOGICAL(4)                 :: CONVG
+      REAL(8)                    :: EKIN,EH,EXC
+      REAL(8)                    :: POTIN(NR)
+      REAL(8)                    :: SVAR
+      REAL(8)                    :: FMAX
+      INTEGER(4)                 :: I,IB,JB,ISO,L,IR
+      INTEGER(4)                 :: ISVAR,IARR(1)
+      LOGICAL(4)                 :: TSTART  ! CALCULATE ANGULAR MOMENTA ETC
+      LOGICAL(4)                 :: TREL    ! RELATIOVISTIC CALCULATION
+      LOGICAL(4)                 :: TSO     ! CALCULATE WITH SPIN ORBIT COUPLING
+      LOGICAL(4)                 :: TZORA   ! CALCULATE ZEROTH ORDER RELATIVISTIC CORRECTIONS
+      LOGICAL(4)                 :: TFOCK   ! CALCULATE WITH FOCK EXCHANGE
+!      INTEGER(4)          :: LMAP(19)=(/0,0,1,0,1,0,2,1,0,2,1,0,3,2,1,0,3,2,1/)
+      INTEGER(4),PARAMETER       :: ZCORES(6)=(/2,10,18,36,54,86/)
+      REAL(8)                    :: FTOT
+      INTEGER(4)                 :: NBROYDENMEM
+      REAL(8)                    :: BROYDENSTEP
+      INTEGER(4)                 :: LRHOX=4
+      INTEGER(4)                 :: IPERIOD,ISVAR1,IPOS
+      CHARACTER(128)             :: STRING,STRING1
+      REAL(8)                    :: SCALE
+      REAL(8)                    :: EFOCK,EX
+      REAL(8)                    :: EFS
+      LOGICAL                    :: TSECOND
+      REAL(8)                    :: RFOCK !EXTENT OF ORBITALS DEFINING FOCK TERM
+      REAL(8)       ,ALLOCATABLE :: EOFI_FOCK(:)
+!     **************************************************************************
+!     CALL ATOMLIB$TEST_ATOMLIB$BOUNDSTATE()
+!
+!     ==========================================================================
+!     == LMAP
+!     == H  0          Z=1-2 
+!     == LI 0,1,       Z=3-10
+!     == NA 0,1,       Z=11-18
+!     == K  0,2,1,     Z=19-36   3-D SERIES
+!     == RB 0,2,1,     Z=37-54   4-D SERIES
+!     == CS 0,3,2,1,   Z=55-86   4-F SERIES LANTHANIDES
+!     == FR 0,3,2,1    Z=87-     5-F SERIES ACTINIDES
+!     ==========================================================================
+!
+!     ==========================================================================
+!     == RESOLVE KEY                                                          ==
+!     ==========================================================================
+      TREL=.FALSE.
+      TSO=.FALSE.
+      TZORA=.FALSE.
+      TFOCK=.FALSE.
+      TSTART=.FALSE.
+      SCALE=0.D0
+!
+      STRING=KEY
+      IPOS=1
+      DO I=1,7
+        IPOS=INDEX(STRING,',')
+        IF(IPOS.NE.0) THEN
+          STRING1=STRING(1:IPOS-1)
+        ELSE
+          STRING1=STRING
+        END IF
+        STRING=STRING(IPOS+1:)
+        TREL=TREL.OR.TRIM(STRING1).EQ.'REL' 
+        TSO=TSO.OR.STRING1.EQ.'SO' 
+        TZORA=TZORA.OR.STRING1.EQ.'ZORA' 
+        TSTART=TSTART.OR.STRING1.EQ.'START' 
+        IF(STRING1(1:4).EQ.'FOCK') THEN
+          TFOCK=.TRUE.
+          IF(STRING(5:5).EQ.'=')READ(STRING1(6:),*)SCALE
+        END IF
+        IF(IPOS.EQ.0) EXIT
+      ENDDO
+      IF(TPR) THEN
+        WRITE(*,FMT='("KEY: ",A)')TRIM(KEY)
+        WRITE(*,FMT='("RELATIVISTIC EFFECTS SWITCHED ON? ",L5)')TREL
+        WRITE(*,FMT='("SPIN-ORBIT COUPLING SWITCHED ON?  ",L5)')TSO
+        WRITE(*,FMT='("ZORA SWITCHED ON?                 ",L5)')TZORA
+        WRITE(*,FMT='("FOCK CONTRIBTION ON?              ",L5)')TFOCK
+        IF(TFOCK) THEN
+          WRITE(*,FMT='("PERCENT FOCK CONTRIBUTION: ",I5)')NINT(SCALE*100.D0)
+        END IF
+        WRITE(*,FMT='("START FROM SCRATCH?                ",L5)')TSTART
+      END IF
+      IF(.NOT.TREL.AND.INDEX(KEY,'NONREL').EQ.0) THEN
+        CALL ERROR$MSG('TREL=F BUT "NONREL" NOT SPECIFIED IN KEY')
+        CALL ERROR$CHVAL('KEY',KEY)
+        CALL ERROR$STOP('ATOMLIB$AESCF')
+      END IF
+      IF(.NOT.TSO.AND.INDEX(KEY,'NONSO').EQ.0) THEN
+        CALL ERROR$MSG('TSO=F BUT "NONSO" NOT SPECIFIED IN KEY')
+        CALL ERROR$CHVAL('KEY',KEY)
+        CALL ERROR$STOP('ATOMLIB$AESCF')
+      END IF
+      IF(.NOT.TZORA.AND.INDEX(KEY,'NONZORA').EQ.0) THEN
+        CALL ERROR$MSG('TZORA=F BUT "NONZORA" NOT SPECIFIED IN KEY')
+        CALL ERROR$CHVAL('KEY',KEY)
+        CALL ERROR$STOP('ATOMLIB$AESCF')
+      END IF
+!
+!     ==========================================================================
+!     == INITIALIZATIONS                                                      ==
+!     ==========================================================================
+      NBROYDENMEM=2
+      BROYDENSTEP=5.D-1
+      CALL RADIAL$R(GID,NR,R)
+!
+      EOFI=0.D0
+      IF(TSTART) THEN
+        LOFI(:)=0
+        FOFI(:)=0.D0
+        SOFI(:)=0
+        NB=0
+        IPERIOD=0
+        DO I=1,6
+          IF(AEZ.LE.ZCORES(I)) EXIT
+          IPERIOD=I
+        ENDDO
+        IB=0
+        DO I=1,IPERIOD  ! for oxygen 2
+          ISVAR=ZCORES(I)
+          DO L=0,3
+            IF(L.EQ.0)CALL PERIODICTABLE$GET(ISVAR,'OCC(S)',ISVAR1)
+            IF(L.EQ.1)CALL PERIODICTABLE$GET(ISVAR,'OCC(P)',ISVAR1)
+            IF(L.EQ.2)CALL PERIODICTABLE$GET(ISVAR,'OCC(D)',ISVAR1)
+            IF(L.EQ.3)CALL PERIODICTABLE$GET(ISVAR,'OCC(F)',ISVAR1)
+            IF(ISVAR1.EQ.0) CYCLE
+            IB=IB+1
+            LOFI(IB)=L
+            FOFI(IB)=2.D0*REAL(2*L+1,KIND=8)
+!           REMOVE ONE ELECTRON FROM 1S SHELL
+            IF(IB.EQ.1) THEN
+              WRITE(*,FMT='(A,F8.5,A,F8.5)')'CHANGE OCCUPATION OF 1S SHELL FROM', &
+     &                             FOFI(IB),' TO ',FOFI(IB)-1.0
+              FOFI(IB)=FOFI(IB)-1.0
+            END IF
+            SOFI(IB)=0
+            IF(TSO) THEN
+              IF(L.NE.0) THEN
+                FOFI(IB)=REAL(2*L,KIND=8)
+                SOFI(IB)=-1
+                IB=IB+1
+                LOFI(IB)=L
+                FOFI(IB)=REAL(2*L+2,KIND=8)
+                SOFI(IB)=1
+              ELSE 
+                SOFI(IB)=1
+              END IF
+            END IF
+          ENDDO
+        ENDDO
+        DO L=0,3    
+          IF(L.EQ.0)CALL PERIODICTABLE$GET(NINT(AEZ),'OCC(S)',ISVAR1)
+          IF(L.EQ.1)CALL PERIODICTABLE$GET(NINT(AEZ),'OCC(P)',ISVAR1)
+          IF(L.EQ.2)CALL PERIODICTABLE$GET(NINT(AEZ),'OCC(D)',ISVAR1)
+          IF(L.EQ.3)CALL PERIODICTABLE$GET(NINT(AEZ),'OCC(F)',ISVAR1)
+          IF(ISVAR1.EQ.0) CYCLE
+          IB=IB+1
+          LOFI(IB)=L
+          FOFI(IB)=REAL(MIN(2*(2*L+1),ISVAR1),KIND=8)
+          SOFI(IB)=0
+          IF(TSO) THEN
+            IF(L.NE.0) THEN
+              SVAR=FOFI(IB)/REAL(2*(2*L+1),KIND=8)
+              FOFI(IB)=SVAR*REAL(2*L,KIND=8)
+              FOFI(IB+1)=SVAR*REAL(2*L+2,KIND=8)
+              SOFI(IB+1)=1
+              SOFI(IB)=-1
+              LOFI(IB+1)=L
+              IB=IB+1
+            ELSE
+              SOFI(IB)=1
+            END IF
+          END IF
+        ENDDO
+        NB=IB
+!
+!       ========================================================================
+!       == SPECIAL TREATMENT OR EMPTY ATOMS                                   ==
+!       ========================================================================
+        IF(NB.EQ.0) THEN
+          NB=1
+          FOFI(NB)=0.D0
+          LOFI(NB)=0
+          SOFI(NB)=0
+          IF(TSO)SOFI(NB)=1
+        END IF
+!
+!       == CORRECT FOR NON-INTEGER ATOMIC NUMBERS ==============================
+!       == OCCUPATIONS ARE FIRST FILLED ACCORDING TO NINT(AEZ). ================
+!       == THIS POSSIBILY IS USED FOR DUMMY HYDROGEN ATOMS, THAT CARRY ONLY ====
+!       == A FRACTIONAL NUCLEAR AND ELECTRONIC CHARGE ==========================
+        FTOT=SUM(FOFI(:NB))   ! =NINT(AEZ)
+        SVAR=AEZ-FTOT         ! =AEZ-NINT(AEZ)
+! WARNING: ACCOUNT FOR REMOVED CORE HOLE
+        SVAR=SVAR-1.D0
+!
+!       == REMOVE ELECTRONS ====================================================
+        IF(SVAR.LT.0.D0) THEN
+          DO IB=NB,1,-1
+            SVAR=SVAR+FOFI(IB)
+            FOFI(IB)=MAX(0.D0,SVAR)
+            SVAR=SVAR-FOFI(IB)
+            IF(SVAR.GE.0.D0) EXIT 
+          ENDDO
+
+!       == ADD ELECTRONS =======================================================
+        ELSE IF(SVAR.GT.0.D0) THEN
+          DO IB=1,NB
+            L=LOFI(IB)
+            IF(TSO.AND.L.NE.0) THEN
+              IF(SOFI(IB).EQ.-1) THEN
+                FMAX=REAL(2*L,KIND=8)
+              ELSE IF(SOFI(IB).EQ.1) THEN
+                FMAX=REAL(2*L+2,KIND=8)
+              END IF
+            ELSE
+              FMAX=REAL(2*(2*L+1),KIND=8)
+            END IF
+! WARNING: PROTECT CORE HOLE CREATED EARLIER
+            IF(IB.EQ.1) FMAX=FMAX-1.D0
+            SVAR=SVAR+FOFI(IB)
+            FOFI(IB)=MIN(FMAX,SVAR)
+            SVAR=SVAR-FOFI(IB)
+            IF(SVAR.LE.0.D0) EXIT            
+          ENDDO
+        END IF
+!
+!       == CONSISTENCY CHECK  ==================================================
+        FTOT=SUM(FOFI(:NB))
+! WARNING: ACCOUNT FOR REMOVED CORE HOLE
+        IF(ABS(FTOT+1.D0-AEZ).GT.1.D-8) THEN
+          DO IB=1,NB
+            WRITE(* &
+        &       ,'("IB=",I2," L=",I1," SOFI=",I2," F=",F8.2," SUM(F)=",F8.2)') &
+        &           IB,LOFI(IB),SOFI(IB),FOFI(IB),SUM(FOFI(:IB))
+          ENDDO
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF ELECTRONS')
+          CALL ERROR$R8VAL('AEZ ',AEZ)
+          CALL ERROR$R8VAL('#(ELECTRONS) ',FTOT)
+          CALL ERROR$R8VAL('#(ELECTRONS)-AEZ ',FTOT-AEZ)
+          CALL ERROR$STOP('ATOMLIB$AESCF')
+        END IF
+!
+        CALL RADIAL$NUCPOT(GID,NR,AEZ,POT)
+!       == USE "HARD SPHERE BOUNDARY CONDITION" FOR THE POISSON EQUATION =======
+!       == THAT IS CHOOSE THE POT(R)=0 FOR R>RBOX ==============================
+        CALL RADIAL$VALUE(GID,NR,POT,RBOX,SVAR)
+        POT(:)=POT(:)-SVAR
+        DO IR=1,NR
+          IF(R(IR).LT.RBOX) CYCLE
+          POT(IR:)=0.D0
+          EXIT
+        ENDDO
+!
+!       ========================================================================
+!       == DETERMINE NUMBER OF NODES FOR EACH SHELL                           ==
+!       ========================================================================
+        DO L=0,MAXVAL(LOFI)
+          DO ISO=-1,1
+            IF(TSO.AND.ISO.EQ.0) CYCLE
+            IF(.NOT.TSO.AND.ISO.NE.0) CYCLE
+            ISVAR=0
+            DO IB=1,NB
+              IF(LOFI(IB).NE.L.OR.SOFI(IB).NE.ISO) CYCLE
+              NNOFI(IB)=ISVAR
+              ISVAR=ISVAR+1
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+!
+!     ==========================================================================
+!     == SELF-CONSISTENCY LOOP                                                ==
+!     ==========================================================================
+      TSECOND=.FALSE.
+1000  CONTINUE
+      IF(.NOT.TSECOND) THEN
+        WRITE(*,FMT='("DOING SCF ITERATIONS FOR ATOM WITH Z=",F10.5)')AEZ
+      ELSE
+        WRITE(*,FMT='("CONTINUING WITH FOCK TERM....")')
+      END IF
+      XAVMIN=1.D+12
+      XMAXMIN=1.D+12
+      XDEMIN=1.D+12
+      NCONV=0
+      CONVG=.FALSE.
+      POTIN=POT
+      CALL BROYDEN$NEW(NR,NBROYDENMEM,BROYDENSTEP)
+      DO ITER=1,NITER
+!
+!       ========================================================================
+!       == DETERMINE BOUND STATES FOR A GIVEN POTENTIAL AND ADD TO DENSITY    ==
+!       ========================================================================
+        IF(TFOCK.AND.TSECOND) THEN
+          CALL ATOMLIB$BOUNDSTATESWITHHF(GID,NR,NB,LOFI,SOFI,NNOFI,EOFI,POT &
+     &                              ,VFOCK,TREL,TZORA,RBOX,PHI,SPHI)
+        ELSE
+          CALL ATOMLIB$BOUNDSTATES(GID,NR,NB,LOFI,SOFI,NNOFI,EOFI,POT &
+     &                            ,TREL,TZORA,RBOX,PHI,SPHI)
+        END IF
+!
+!       ========================================================================
+!       == ADD UP CHARGE DENSITY                                              ==
+!       ========================================================================
+        RHO(:)=0.D0
+        DO IB=1,NB
+          RHO(:)=RHO(:)+FOFI(IB)*C0LL*(PHI(:,IB)**2+SPHI(:,IB)**2)
+        ENDDO
+!
+!       ========================================================================
+!       ==  CALCULATE ENERGY                                                  ==
+!       ========================================================================
+        IF(TBROYDEN) POTIN=POT
+        IF(CONVG) THEN
+          POTIN=POT  ! SAVE INPUT POTENTIAL TO AVOID OVERWRITING
+!         == DETERMINE KINETIC ENERGY ==========================================
+          AUX(:)=0.D0
+          DO IB=1,NB
+            AUX(:)=AUX(:) &
+       &          +(PHI(:,IB)**2+SPHI(:,IB)**2)*(EOFI(IB)-POT(:)*Y0)*FOFI(IB)
+            IF(TFOCK.AND.TSECOND) THEN
+               CALL RADIALFOCK$VPSI(GID,NR,VFOCK,LOFI(IB),PHI(:,IB),AUX1)
+               AUX=AUX-PHI(:,IB)*AUX1(:)*FOFI(IB)
+            END IF
+          ENDDO
+          AUX(:)=AUX(:)*R(:)**2
+          CALL RADIAL$INTEGRATE(GID,NR,AUX,AUX1)
+          CALL RADIAL$VALUE(GID,NR,AUX1,RBOX,EKIN)
+          CALL ATOMLIB$BOXVOFRHO(GID,NR,RBOX,AEZ,RHO,POT,EH,EXC)
+          ETOT=EKIN+EH+EXC
+!
+!         ======================================================================
+!         == ESTIMATE THE ENERGY DUE TO THE FINITE NUCLEAR SIZE               ==
+!         ======================================================================
+          CALL ATOMLIB_EFINITENUCSIZE(GID,NR,RBOX,AEZ,RHO,EFS)
+!
+!         ======================================================================
+!         == WORK OUT FOCK EXCHANGE ENERGY =====================================
+!         ======================================================================
+          IF(TFOCK.AND.TSECOND) THEN
+            CALL DFT$SETL4('XCONLY',.TRUE.)
+            CALL ATOMLIB$BOXVOFRHO(GID,NR,RBOX,AEZ,RHO,POT,EH,EX)
+            CALL DFT$SETL4('XCONLY',.FALSE.)
+!           == SAVE SCALE AND MUX TO RESTORE VFOCK FOR LATER USE ===============
+            SCALE=VFOCK%SCALE
+            MUX(:)=VFOCK%MUX(:)
+!           ==  CHANGE VFOCK TO PURE FOCK TERM WITHOUT DOUBLE COUNTING =========
+!           ==  AND CALCULATE FOCK TERM TO THE ENERGY ==========================
+            VFOCK%SCALE=1.D0
+            VFOCK%MUX=0.D0
+            AUX(:)=0.D0
+            DO IB=1,NB
+              CALL RADIALFOCK$VPSI(GID,NR,VFOCK,LOFI(IB),PHI(:,IB),AUX1)
+              AUX=AUX+0.5D0*PHI(:,IB)*AUX1(:)*FOFI(IB)
+            ENDDO
+            AUX(:)=AUX(:)*R(:)**2
+            CALL RADIAL$INTEGRATE(GID,NR,AUX,AUX1)
+            CALL RADIAL$VALUE(GID,NR,AUX1,RBOX,EFOCK)
+!           == RESTORE VFOCK ==================================================
+            VFOCK%SCALE=SCALE
+            VFOCK%MUX(:)=MUX(:)
+          ELSE
+            EFOCK=0.D0
+            EX=0.D0
+          END IF
+!
+!         == PRINT ENERGIES ====================================================
+          ETOT=EKIN+EH+EXC+SCALE*(EFOCK-EX)
+!
+          IF(TPR) THEN
+!           __I PROVIDE RESULTS HERE WITH 10^-8 H PRECISION, BECAUSE____________
+!           __ATOMIC CODES ARE TESTED IN THE MICRO-HARTREE ACCURACY_____________
+            WRITE(*,FMT='(80("="),T20,"ENERGY REPORT OF ATOMLIB$AESCF")')
+            WRITE(*,FMT='(30("."),T1,"TOTAL ENERGY:",T30,F15.8)')ETOT
+            WRITE(*,FMT='(30("."),T1,"KINETIC ENERGY:",T30,F15.8)')EKIN
+            WRITE(*,FMT='(30("."),T1,"HARTREE ENERGY:",T30,F15.8)')EH
+            IF(TFOCK.AND.TSECOND) THEN
+              WRITE(*,FMT='(30("."),T1,"EXACT XC MIXING FACTOR:",T30,F15.6)') &
+     &                     SCALE
+              WRITE(*,FMT='(30("."),T1,"MIXED XC ENERGY:",T30,F15.6)') &
+     &                                                      EXC+SCALE*(EFOCK-EX)
+              WRITE(*,FMT='(30("."),T1,"100% DFT XC ENERGY:",T30,F15.6)')EXC
+              WRITE(*,FMT='(30("."),T1,"100% DFT EXCHANGE ENERGY:",T30' &
+     &                                                      //',F15.6)') EX
+            WRITE(*,FMT='(30("."),T1,"100% FOCK EXCHANGE ENERGY:",T30' &
+     &                                                       //',F15.6)') EFOCK
+            ELSE
+              WRITE(*,FMT='(30("."),T1,"DFT XC ENERGY:",T30,F15.6)')EXC
+            END IF
+            WRITE(*,FMT='(30("."),T1,"FINITE NUCLEUS:",T30,F15.8)')EFS
+            WRITE(*,FMT='(".... CALCULATION USES FINITE NUCLEUS")') 
+            WRITE(*,FMT='(".... DO NOT ADD FINITE NUCLEUS CORRECTION")') 
+          END IF
+
+          POT=POTIN  ! RECOVER POT AS INPUT POTENTIAL
+        END IF
+!
+!       ========================================================================
+!       ==  EXIT IF CONVERGED                                                 ==
+!       ========================================================================
+        IF(CONVG) THEN
+          IF(TFOCK.AND.(.NOT.TSECOND)) THEN
+!           == LOOP MUST NOT BE EXITED BEFORE THE FOCK POTENTIAL IS CALCULATED =
+!           == EXIT WILL BE DONE BELOW
+          ELSE
+!           == FINAL EXIT IS DONE HERE SO THAT THE POTENTIAL AND FOCK POTENTIAL
+!           == CORRESPONDS TO INPUT POTENTIAL
+            WRITE(*,FMT='("... SELFCONSISTENCY OBTAINED")')
+            EXIT
+          END IF
+        END IF
+!
+!       ========================================================================
+!       == CALCULATE OUTPUT POTENTIAL                                         ==
+!       ========================================================================
+        CALL ATOMLIB$BOXVOFRHO(GID,NR,RBOX,AEZ,RHO,POT,EH,EXC)
+!
+!       == DETERMINE WAVE FUNCTIONS FOR FOCK POTENTIAL =========================
+        IF(TFOCK.AND.(TSECOND.OR.CONVG)) THEN
+!!$! A TEST FOR HELIUM SHOWS THAT RESTRICTING RFOCK TO ONLY 1.1 OF THE COVALENT
+!!$! RADIUS AFFECTS THE RESULTS. THE RESTRICTED CUTOFF HAS BEEN INTRODUCED 
+!!$! BECAUSE OTHERWISE THE SELFCONSISTENCY OF THE PARTIAL WAVES IN 
+!!$! MAKEPARTIALWAVES DOES NOT CONVERGE
+!!$! A VALUE OF 3*RCOV GIVES MH ACCURACY FOR HE BUT NOT FOR THE HEAVIER ELEMENTS
+          RFOCK=RBOX
+          CALL PERIODICTABLE$GET(NINT(AEZ),'R(COV)',RFOCK); RFOCK=1.1D0*RFOCK   
+!         CALL PERIODICTABLE$GET(NINT(AEZ),'R(COV)',RFOCK); RFOCK=3.0D0*RFOCK   
+          RFOCK=MIN(RBOX,RFOCK)
+          IF(.NOT.TSECOND) THEN
+            ALLOCATE(EOFI_FOCK(NB))
+            EOFI_FOCK(:)=EOFI(:NB)
+            CALL ATOMLIB$BOUNDSTATES(GID,NR,NB,LOFI,SOFI,NNOFI,EOFI_FOCK,POT &
+     &                              ,TREL,TZORA,RFOCK,PHI,SPHI)
+          ELSE
+            CALL ATOMLIB$BOUNDSTATESWITHHF(GID,NR,NB,LOFI,SOFI,NNOFI,EOFI,POT &
+     &                                    ,VFOCK,TREL,TZORA,RFOCK,PHI,SPHI)
+          END IF
+          CALL RADIALFOCK$MAKEVFOCK(GID,NR,NB,LOFI,SOFI,FOFI,PHI,RFOCK &
+     &                            ,LRHOX,VFOCK)
+          RHO(:)=0.D0
+          DO IB=1,NB
+            RHO(:)=RHO(:)+FOFI(IB)*C0LL*(PHI(:,IB)**2+SPHI(:,IB)**2)
+          ENDDO
+          CALL ATOMLIB$BOXMUX(GID,NR,RFOCK,RHO,MUX)
+          VFOCK%MUX(:)=MUX(:)          
+          VFOCK%SCALE=SCALE
+        END IF
+!
+!       ========================================================================
+!       ==  EXIT IF CONVERGED (ONLY FOR TFOCK IN THE FIRST SEQUENCE)          ==
+!       ========================================================================
+        IF(CONVG) EXIT
+!
+!       ========================================================================
+!       ==  GENERATE NEXT ITERATION USING D. G. ANDERSONS METHOD              ==
+!       ========================================================================
+        XAV=SQRT(SUM(R**3*(POT-POTIN)**2)/SUM(R**3))
+        XMAX=MAXVAL(ABS(POT-POTIN))
+        IF(TPR)PRINT*,ITER,' AV(POT-POTIN)=',XAV,' MAX:(POT-POTIN)=',XMAX,NCONV,TFOCK.AND.TSECOND
+        NCONV=NCONV+1
+        IF(XAV.LT.XAVMIN) THEN
+          XAVMIN=XAV
+          NCONV=0
+        END IF
+        IF(XMAX.LT.XMAXMIN) THEN
+          XMAXMIN=XMAX
+          NCONV=0
+        END IF
+!
+!       == QUIT LOOP IF BOTH TOLERANCES ARE FULFILLED ==========================
+        CONVG=(XMAX.LT.XMAXTOL).AND.(XAV.LT.XAVTOL)
+        IF(TFOCK.AND.(.NOT.TSECOND)) THEN
+          CONVG=(XMAX.LT.PRETOL).AND.(XAV.LT.PRETOL)
+        END IF
+!       == IF PREVIOUS CONDITIONS CANNOT BE MET DO THE BEST YOU CAN AND
+!       == CECK IF MINIMUM REQUIREMENT IS FULFILLED
+        CONVG=CONVG.OR.(XMAX.LT.TOL).AND.NCONV.GT.5
+!
+!       ========================================================================
+!       ==  GENERATE NEXT ITERATION USING D. G. ANDERSONS METHOD              ==
+!       ========================================================================
+        CALL BROYDEN$STEP(NR,POTIN,POT-POTIN)
+        POT=POTIN
+      ENDDO
+
+      CALL BROYDEN$CLEAR
+      IF(.NOT.CONVG) THEN
+        CALL ERROR$MSG('SELFCONSISTENCY LOOP NOT CONVERGED')
+        CALL ERROR$R8VAL('AEZ',AEZ)
+        CALL ERROR$R8VAL('XMAX',XMAX)
+        CALL ERROR$R8VAL('TOLX',TOL)
+        CALL ERROR$I4VAL('NITER',NITER)
+        CALL ERROR$STOP('ATOMLIB$AESCF')
+      END IF
+!     == DFT CALCULATION IS CONVERGED. NOW CONVERGE WITH FOCK TERM =============
+      IF(TFOCK.AND.(.NOT.TSECOND)) THEN
+        TSECOND=.TRUE.
+        CONVG=.FALSE.
+IF(TPR) THEN
+  PRINT*,'FIRST CONVERGENCE BEFORE APPLYING FOCK TERM'
+  WRITE(*,FMT='(3A4,A10,A5,A20)')'IB','L','SO','F','#NODE','E'
+  DO I=1,NB
+    WRITE(*,FMT='(3I4,F10.2,I5,F20.3)')I,LOFI(I),SOFI(I),FOFI(I),NNOFI(I) &
+ &                                   ,EOFI(I)
+  ENDDO
+END IF
+        GOTO 1000
+      END IF
+IF(TPR) THEN
+  CALL RADIALFOCK$PRINTVFOCK('VFOCK.DAT',VFOCK)
+  WRITE(*,FMT='("FINAL ONE-PARTICLE ENERGIES FROM AESCF  ")')
+  WRITE(*,FMT='(3A4,A10,A5,A20)')'IB','L','SO','F','#NODE','E'
+  DO I=1,NB
+    WRITE(*,FMT='(3I4,F10.2,I5,F20.3)')I,LOFI(I),SOFI(I),FOFI(I) &
+ &   ,NNOFI(I),EOFI(I)
+  ENDDO
+  PRINT*,'#ITERATIONS ',ITER
+END IF
+!
+!     ==========================================================================
+!     == REORDER STATES ACCORDING TO ENERGY                                   ==
+!     ==========================================================================
+      DO IB=1,NB
+        IARR=MINLOC(EOFI(IB:NB))
+        JB=IARR(1)+IB-1
+        IF(JB.EQ.IB) CYCLE
+        ISVAR=LOFI(JB)
+        LOFI(IB+1:JB)=LOFI(IB:JB-1)
+        LOFI(IB)=ISVAR
+        ISVAR=SOFI(JB)
+        SOFI(IB+1:JB)=SOFI(IB:JB-1)
+        SOFI(IB)=ISVAR
+        ISVAR=NNOFI(JB)
+        NNOFI(IB+1:JB)=NNOFI(IB:JB-1)
+        NNOFI(IB)=ISVAR
+        SVAR=EOFI(JB)
+        EOFI(IB+1:JB)=EOFI(IB:JB-1)
+        EOFI(IB)=SVAR
+        SVAR=FOFI(JB)
+        FOFI(IB+1:JB)=FOFI(IB:JB-1)
+        FOFI(IB)=SVAR
+        AUX=PHI(:,JB)
+        PHI(:,IB+1:JB)=PHI(:,IB:JB-1)
+        PHI(:,IB)=AUX
+        AUX=SPHI(:,JB)
+        SPHI(:,IB+1:JB)=SPHI(:,IB:JB-1)
+        SPHI(:,IB)=AUX
+      ENDDO
+!STOP 'FORCED STOP IN AESCF'
+
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE ATOMLIB$BOUNDSTATES(GID,NR,NB,LOFI,SOFI,NNOFI,EOFI,POT &
      &                              ,TREL,TZORA,RBOX,PHI,SPHI)
 !     **************************************************************************
