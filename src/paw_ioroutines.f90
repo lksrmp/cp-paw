@@ -513,6 +513,11 @@ CALL TRACE$PASS('DONE')
 !     ==================================================================
       CALL READIN_ANALYSE_OPTIC(LL_CNTL)
       CALL READIN_ANALYSE_OPTEELS(LL_CNTL)
+!    
+!     ==================================================================
+!     ==  READ BLOCK !ANALYSE!OVL                                     ==
+!     ==================================================================
+      CALL READIN_ANALYSE_OVL(LL_CNTL)
       
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'CONTROL')
@@ -3425,7 +3430,40 @@ CALL ERROR$STOP('READIN_ANALYSE_OPTIC')
       RETURN
       END
 !
-
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE READIN_ANALYSE_OVL(LL_CNTL_)
+!     ******************************************************************
+!     **  READ BLOCK !CONTROL!ANALYSE!OVL                             **
+!     ******************************************************************
+      USE LINKEDLIST_MODULE
+      IMPLICIT NONE
+      TYPE(LL_TYPE),INTENT(IN) :: LL_CNTL_
+      TYPE(LL_TYPE)            :: LL_CNTL
+      LOGICAL(4)               :: TCHK
+      CHARACTER(256)           :: CVAR
+                          CALL TRACE$PUSH('READIN_ANALYSE_OVL')
+      LL_CNTL=LL_CNTL_
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'CONTROL')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'ANALYSE')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'OVL',1,TCHK)
+      IF(TCHK) THEN
+        CALL OVL$SETL4('INIT',.TRUE.)
+      ELSE
+        RETURN
+      ENDIF
+      CALL LINKEDLIST$SELECT(LL_CNTL,'OVL')
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('MISSING FILE FOR OVL')
+        CALL ERROR$STOP('READIN_ANALYSE_OVL')
+      ENDIF
+      CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,CVAR)
+      CALL OVL$SETCH('FILE',TRIM(ADJUSTL(CVAR)))
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE READIN_ANALYSE_OVL
+!
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE READIN_DIMER(LL_CNTL_)
 !     ******************************************************************
