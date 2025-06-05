@@ -113,6 +113,7 @@
       CALL GRAPHICS$SETL4('WAKE',TPRINT.AND.TLAST)
       CALL OPTEELS$SETL4('ON',TLAST)
       CALL CORE$SETL4('ON',TLAST)
+      CALL OVL$SETL4('WAKE',TPRINT.AND.TLAST)
 !
 !     ==================================================================
 !     ==   WRITE RESTART_OUT                                          ==
@@ -1183,6 +1184,14 @@ PRINT*,'CONSTANT ENERGY ',ECONS,SVAR
         CALL QMMM$REPORT(NFILO)
       ENDIF
                               CALL TRACE$PASS('AFTER STATEANALYSIS')
+!
+!     ==========================================================================
+!     ==   WRITE FILE FOR OVERLAP TOOL                                        ==
+!     ==   ONLY SWITCHED ON IN THE LAST ITERATION                             ==                         
+!     ==========================================================================
+      IF(TPRINT) THEN
+        CALL WAVES$WRITEOVL
+      ENDIF
 !   
 !     ==========================================================================
 !     ==   BANDDATA                                                           ==
