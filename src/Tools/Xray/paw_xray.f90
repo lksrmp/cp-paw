@@ -158,27 +158,70 @@
       LOGICAL(4), SAVE :: SELECTED=.FALSE. ! OVERLAP SELECTED
       LOGICAL(4) :: INITIALIZED=.FALSE. ! INITIALIZED
       END MODULE OVERLAP_MODULE
-
-
+!
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      MODULE PAW_XRAY_MODULE  ! MARK: PAW_XRAY_MODULE
-      TYPE SETTINGS_TYPE
-        CHARACTER(32) :: COREHOLE ! ATOM ID OF CORE HOLE
-        INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE IN SIM1 (FOR SIM2 USE ATOMMAP)
-        INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
-        INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
-      END TYPE SETTINGS_TYPE
+      MODULE SETTINGS_MODULE  ! MARK: SETTINGS_MODULE
+!     **************************************************************************
+!     ** SETTINGS MODULE FOR PAW XRAY TOOL                                    **
+!     **************************************************************************
+      CHARACTER(32) :: COREHOLE ! ATOM ID OF CORE HOLE
+      INTEGER(4) :: IATOM=-HUGE(1) ! ATOM INDEX WITH CORE HOLE IN SIM1 (FOR SIM2 USE ATOMMAP)
+      INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
+      INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
+      END MODULE SETTINGS_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      MODULE XAS_MODULE  ! MARK: XAS_MODULE
+!     **************************************************************************
+!     ** XAS MODULE FOR PAW XRAY TOOL                                         **
+!     **************************************************************************
+      LOGICAL(4) :: TACTIVE=.FALSE. ! XAS ACTIVE
+      INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR XAS
+      REAL(8) :: EMIN ! MINIMUM ENERGY FOR XAS
+      REAL(8) :: EMAX ! MAXIMUM ENERGY FOR XAS
+      REAL(8) :: DE ! ENERGY STEP FOR XAS SPECTRUM
+      INTEGER(4) :: NE ! NUMBER OF ENERGY POINTS FOR XAS SPECTRUM
+      ! FOLLOWING SETTINGS ARE USED AS DEFAULTS FOR SPECTRA
+      ! WILL BE OVERWRITTEN BY SPECTRA SETTINGS
+      REAL(8) :: EBROAD ! GAUSSIAN BROADENING FOR XAS SPECTRUM (REPLACES DELTA FUNCTION)
+      LOGICAL(4) :: TINITIALIZE=.FALSE.
+      END MODULE XAS_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      MODULE RIXS_MODULE  ! MARK: RIXS_MODULE
+!     **************************************************************************
+!     ** RIXS MODULE FOR PAW XRAY TOOL                                        **
+!     **************************************************************************
+      LOGICAL(4) :: TACTIVE=.FALSE. ! RIXS ACTIVE
+      INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR RIXS
+      ! ENERGY LOSS FOR WHICH FINAL STATES ARE CONSIDERED
+      REAL(8) :: EMIN=-HUGE(1.D0) ! MINIMUM ENERGY FOR RIXS
+      REAL(8) :: EMAX=HUGE(1.D0) ! MAXIMUM ENERGY FOR RIXS
+      ! FOLLOWING SETTINGS ARE USED AS DEFAULTS FOR SPECTRA
+      ! WILL BE OVERWRITTEN BY SPECTRA SETTINGS
+      REAL(8) :: GAMMA ! LIFETIME BROADENING FOR RIXS SPECTRUM
+      LOGICAL(4) :: TINITIALIZE=.FALSE.
+      END MODULE RIXS_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      ! MODULE PAW_XRAY_MODULE  ! MARK: PAW_XRAY_MODULE
+      ! TYPE SETTINGS_TYPE
+      !   CHARACTER(32) :: COREHOLE ! ATOM ID OF CORE HOLE
+      !   INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE IN SIM1 (FOR SIM2 USE ATOMMAP)
+      !   INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
+      !   INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
+      ! END TYPE SETTINGS_TYPE
 
-      TYPE(SETTINGS_TYPE) :: SETTINGS
+      ! TYPE(SETTINGS_TYPE) :: SETTINGS
 
-      REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
-      INTEGER(4), ALLOCATABLE :: ATOMMAP(:) ! (NAT) ATOM INDEX MAP BRA -> KET
+      ! REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
+      ! INTEGER(4), ALLOCATABLE :: ATOMMAP(:) ! (NAT) ATOM INDEX MAP BRA -> KET
 
-      INTEGER(4), ALLOCATABLE :: KSMAP(:,:) ! (NKPT,NSPIN) K AND S RESPONSIBILITY OF TASKS
-      INTEGER(4) :: NKPTG  ! #(KPOINTS TOTAL)
-      INTEGER(4) :: NSPING ! #(SPINS TOTAL)
-      INTEGER(4) :: RTASK  ! TASK RESPONSIBLE FOR READ/WRITE
-      END MODULE PAW_XRAY_MODULE
+      ! INTEGER(4), ALLOCATABLE :: KSMAP(:,:) ! (NKPT,NSPIN) K AND S RESPONSIBILITY OF TASKS
+      ! INTEGER(4) :: NKPTG  ! #(KPOINTS TOTAL)
+      ! INTEGER(4) :: NSPING ! #(SPINS TOTAL)
+      ! INTEGER(4) :: RTASK  ! TASK RESPONSIBLE FOR READ/WRITE
+      ! END MODULE PAW_XRAY_MODULE
 
 !     ==========================================================================
 !     ==                    PROGRAM PAW_XRAY                                  ==
@@ -1800,6 +1843,463 @@
       TASKS_(:)=KSMAP(IKPT,:)
       RETURN
       END SUBROUTINE KSMAP$WORKTASKSKPT
+!
+!     ==========================================================================
+!     ==========================================================================
+!     ==                  SETTINGS MODULE FUNCTIONS                           ==
+!     ==========================================================================
+!     ==========================================================================
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS$GETI4(ID,VAL)  ! MARK: SETTINGS$GETI4
+!     **************************************************************************
+!     ** GET INTEGER FROM SETTINGS MODULE                                     **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: NCORE,LCORE,IATOM,XAS_SET,RIXS_SET
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      ! CHARACTER(*), INTENT(IN) :: XRAY
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'NCORE') THEN
+        VAL=NCORE
+      ELSE IF(ID.EQ.'LCORE') THEN
+        VAL=LCORE
+      ELSE IF(ID.EQ.'IATOM') THEN
+        IF(IATOM.EQ.-HUGE(1)) THEN
+          CALL ERROR$MSG('SETTINGS IATOM NOT SET')
+          CALL ERROR$STOP('SETTINGS$GETI4')
+        END IF
+        VAL=IATOM
+      ! ! XAS SPECIFIC
+      ! ELSE IF(XRAY.EQ.'XAS') THEN
+      !   IF(ID.EQ.'NSPEC') THEN
+      !     VAL=XAS_SET%NSPEC
+      !   ELSE
+      !     CALL ERROR$MSG('SETTINGS GETI4 ID NOT RECOGNIZED')
+      !     CALL ERROR$CHVAL('ID: ',ID)
+      !     CALL ERROR$CHVAL('XRAY: ',XRAY)
+      !     CALL ERROR$STOP('SETTINGS$GETI4')
+      !   END IF
+      ! ! RIXS SPECIFIC
+      ! ELSE IF(XRAY.EQ.'RIXS') THEN
+      !   IF(ID.EQ.'NSPEC') THEN
+      !     VAL=RIXS_SET%NSPEC
+      !   ELSE IF(ID.EQ.'NE') THEN
+      !     VAL=RIXS_SET%NE
+      !   ELSE
+      !     CALL ERROR$MSG('SETTINGS GETI4 ID NOT RECOGNIZED')
+      !     CALL ERROR$CHVAL('ID: ',ID)
+      !     CALL ERROR$CHVAL('XRAY: ',XRAY)
+      !     CALL ERROR$STOP('SETTINGS$GETI4')
+      !   END IF
+      ELSE
+        CALL ERROR$MSG('SETTINGS GETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$CHVAL('XRAY: ',XRAY)
+        CALL ERROR$STOP('SETTINGS$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE SETTINGS$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS$SETI4(ID,VAL)  ! MARK: SETTINGS$SETI4
+!     **************************************************************************
+!     ** SET INTEGER IN SETTINGS MODULE                                       **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: NCORE,LCORE,IATOM
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'NCORE') THEN
+        NCORE=VAL
+      ELSE IF(ID.EQ.'LCORE') THEN
+        LCORE=VAL
+      ELSE IF(ID.EQ.'IATOM') THEN
+        IATOM=VAL
+      ELSE
+        CALL ERROR$MSG('SETTINGS SETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('SETTINGS$SETI4')
+      END IF
+      RETURN
+      END SUBROUTINE SETTINGS$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS$GETL4(ID,VAL)  ! MARK: SETTINGS$GETL4
+!     **************************************************************************
+!     ** GET LOGICAL FROM SETTINGS MODULE                                     **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: TXAS,TRIXS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'TXAS') THEN
+        VAL=TXAS
+      ELSE IF(ID.EQ.'TRIXS') THEN
+        VAL=TRIXS
+      ELSE
+        CALL ERROR$MSG('SETTINGS GETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('SETTINGS$GETL4')
+      END IF
+      RETURN
+      END SUBROUTINE SETTINGS$GETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS$SETL4(ID,VAL)  ! MARK: SETTINGS$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL IN SETTINGS MODULE                                       **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: TXAS,TRIXS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'TXAS') THEN
+        TXAS=VAL
+      ELSE IF(ID.EQ.'TRIXS') THEN
+        TRIXS=VAL
+      ELSE
+        CALL ERROR$MSG('SETTINGS SETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('SETTINGS$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE SETTINGS$SETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS$GETCH(ID,VAL)  ! MARK: SETTINGS$GETCH
+!     **************************************************************************
+!     ** GET CHARACTER FROM SETTINGS MODULE                                   **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: COREHOLE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+      IF(ID.EQ.'COREHOLE') THEN
+        VAL=COREHOLE
+      ELSE
+        CALL ERROR$MSG('SETTINGS GETCH ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('SETTINGS$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE SETTINGS$GETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS$SETCH(ID,VAL)  ! MARK: SETTINGS$SETCH
+!     **************************************************************************
+!     ** SET CHARACTER IN SETTINGS MODULE                                     **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: COREHOLE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(IN) :: VAL
+      IF(ID.EQ.'COREHOLE') THEN
+        COREHOLE=VAL
+      ELSE
+        CALL ERROR$MSG('SETTINGS SETCH ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('SETTINGS$SETCH')
+      END IF
+      RETURN
+      END SUBROUTINE
+!
+!     ==========================================================================
+!     ==========================================================================
+!     ==                      XAS MODULE FUNCTIONS                            ==
+!     ==========================================================================
+!     ==========================================================================
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$GETL4(ID,VAL)  ! MARK: XAS$GETL4
+!     **************************************************************************
+!     ** GET LOGICAL FROM XAS MODULE                                         **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'INITIALIZE') THEN
+        VAL=TINITIALIZE
+      ELSE IF(ID.EQ.'ACTIVE') THEN
+        IF(.NOT.TINITIALIZE) THEN
+          CALL ERROR$MSG('XAS NOT INITIALIZED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        VAL=TACTIVE
+      ELSE
+        CALL ERROR$MSG('XAS GETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XAS$GETL4')
+      END IF
+      RETURN
+      END SUBROUTINE XAS$GETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$SETL4(ID,VAL)  ! MARK: XAS$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL IN XAS MODULE                                           **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'ACTIVE') THEN
+        TACTIVE=VAL
+      ELSE IF(ID.EQ.'INITIALIZE') THEN
+        TINITIALIZE=VAL
+      ELSE
+        CALL ERROR$MSG('XAS SETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XAS$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE XAS$SETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$GETI4(ID,VAL)  ! MARK: XAS$GETI4
+!     **************************************************************************
+!     ** GET INTEGER FROM XAS MODULE                                        **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: NSPEC,NE,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('XAS NOT INITIALIZED')
+        CALL ERROR$STOP('XAS$GETI4')
+      END IF
+      IF(ID.EQ.'NSPEC') THEN
+        VAL=NSPEC
+      ELSE IF(ID.EQ.'NE') THEN
+        ! TODO: CALCULATE NE FROM EMIN, EMAX, AND DE
+        VAL=NE
+      ELSE
+        CALL ERROR$MSG('XAS GETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XAS$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE XAS$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$SETI4(ID,VAL)  ! MARK: XAS$SETI4
+!     **************************************************************************
+!     ** SET INTEGER IN XAS MODULE                                          **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: NSPEC,NE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'NSPEC') THEN
+        NSPEC=VAL
+      ELSE IF(ID.EQ.'NE') THEN
+        NE=VAL
+      ELSE
+        CALL ERROR$MSG('XAS SETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XAS$SETI4')
+      END IF
+      RETURN
+      END SUBROUTINE XAS$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$GETR8(ID,VAL)  ! MARK: XAS$GETR8
+!     **************************************************************************
+!     ** GET REAL FROM XAS MODULE                                             **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: EMIN,EMAX,DE,EBROAD,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('XAS NOT INITIALIZED')
+        CALL ERROR$STOP('XAS$GETR8')
+      END IF
+      IF(ID.EQ.'EMIN') THEN
+        VAL=EMIN
+      ELSE IF(ID.EQ.'EMAX') THEN
+        VAL=EMAX
+      ELSE IF(ID.EQ.'DE') THEN
+        VAL=DE
+      ELSE IF(ID.EQ.'EBROAD') THEN
+        VAL=EBROAD
+      ELSE
+        CALL ERROR$MSG('XAS GETR8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XAS$GETR8')
+      END IF
+      RETURN
+      END SUBROUTINE XAS$GETR8
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$SETR8(ID,VAL)  ! MARK: XAS$SETR8
+!     **************************************************************************
+!     ** SET REAL IN XAS MODULE                                               **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: EMIN,EMAX,DE,EBROAD
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(IN) :: VAL
+      IF(ID.EQ.'EMIN') THEN
+        EMIN=VAL
+      ELSE IF(ID.EQ.'EMAX') THEN
+        EMAX=VAL
+      ELSE IF(ID.EQ.'DE') THEN
+        DE=VAL
+      ELSE IF(ID.EQ.'EBROAD') THEN
+        EBROAD=VAL
+      ELSE
+        CALL ERROR$MSG('XAS SETR8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XAS$SETR8')
+      END IF
+      RETURN
+      END SUBROUTINE XAS$SETR8
+!
+!     ==========================================================================
+!     ==========================================================================
+!     ==                      RIXS MODULE FUNCTIONS                           ==
+!     ==========================================================================
+!     ==========================================================================
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETL4(ID,VAL)  ! MARK: RIXS$GETL4
+!     **************************************************************************
+!     ** GET LOGICAL FROM RIXS MODULE                                        **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'INITIALIZE') THEN
+        VAL=TINITIALIZE
+      ELSE IF(ID.EQ.'ACTIVE') THEN
+        IF(.NOT.TINITIALIZE) THEN
+          CALL ERROR$MSG('RIXS NOT INITIALIZED')
+          CALL ERROR$STOP('RIXS$GETL4')
+        END IF
+        VAL=TACTIVE
+      ELSE
+        CALL ERROR$MSG('RIXS GETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETL4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETL4(ID,VAL)  ! MARK: RIXS$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL IN RIXS MODULE                                          **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'ACTIVE') THEN
+        TACTIVE=VAL
+      ELSE IF(ID.EQ.'INITIALIZE') THEN
+        TINITIALIZE=VAL
+      ELSE
+        CALL ERROR$MSG('RIXS SETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETI4(ID,VAL)  ! MARK: RIXS$GETI4
+!     **************************************************************************
+!     ** GET INTEGER FROM RIXS MODULE                                       **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: NSPEC,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETI4')
+      END IF
+      IF(ID.EQ.'NSPEC') THEN
+        VAL=NSPEC
+      ELSE
+        CALL ERROR$MSG('RIXS GETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETI4(ID,VAL)  ! MARK: RIXS$SETI4
+!     **************************************************************************
+!     ** SET INTEGER IN RIXS MODULE                                         **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: NSPEC
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'NSPEC') THEN
+        NSPEC=VAL
+      ELSE
+        CALL ERROR$MSG('RIXS SETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETI4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETR8(ID,VAL)  ! MARK: RIXS$GETR8
+!     **************************************************************************
+!     ** GET REAL FROM RIXS MODULE                                           **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: EMIN,EMAX,GAMMA,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETR8')
+      END IF
+      IF(ID.EQ.'EMIN') THEN
+        VAL=EMIN
+      ELSE IF(ID.EQ.'EMAX') THEN
+        VAL=EMAX
+      ELSE IF(ID.EQ.'GAMMA') THEN
+        VAL=GAMMA
+      ELSE
+        CALL ERROR$MSG('RIXS GETR8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETR8')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETR8
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETR8(ID,VAL)  ! MARK: RIXS$SETR8
+!     **************************************************************************
+!     ** SET REAL IN RIXS MODULE                                              **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: EMIN,EMAX,GAMMA
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(IN) :: VAL
+      IF(ID.EQ.'EMIN') THEN
+        EMIN=VAL
+      ELSE IF(ID.EQ.'EMAX') THEN
+        EMAX=VAL
+      ELSE IF(ID.EQ.'GAMMA') THEN
+        GAMMA=VAL
+      ELSE
+        CALL ERROR$MSG('RIXS SETR8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETR8')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETR8
 !
 !     ==========================================================================
 !     ==========================================================================
