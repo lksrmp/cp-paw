@@ -303,6 +303,7 @@
       CALL XCNTL$COREHOLE
       CALL XCNTL$XAS
       ! TODO: IMPLEMENT RIXS BLOCK READ
+      CALL TIMING$CLOCKOFF('XCNTL')
 
 
       CALL FILEHANDLER$UNIT('PROT',NFIL)
@@ -334,29 +335,7 @@
 
       CALL XAS$REPORT(NFIL)
 
-      CALL XRAY$DIPOLEMATRIX
-
-      CALL XRAY$ATOMMATRIX
-
-
-
-                          CALL TIMING$CLOCKOFF('XCNTL')
-
-      ! CALCULATE OVERLAP
-
-      ! CALCULATE DIPOLE MATRIX ELEMENTS
-
-      ! ...
-
-
-
-
-
-
-
-
-
-
+      CALL XRAY$OVERLAP
 
 
                           CALL TIMING$PRINT('~',NFIL)
@@ -4752,7 +4731,27 @@
       ! TODO: DATACONSISTENCY
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XRAY$DIPOLEMATRIX  ! MARK: XRAY$DIPOLEMATRIX
+      SUBROUTINE XRAY$OVERLAP  ! MARK: XRAY$OVERLAP
+!     **************************************************************************
+!     ** CALCULATE DIPOLE MATRIX, ATOM MATRIX, AND AUGMENTATION OVERLAP       **
+!     **************************************************************************
+! TODO: IMPLEMENT HANDLING OF OVERLAP FILE  
+      IMPLICIT NONE
+                          CALL TRACE$PUSH('XRAY$OVERLAP')
+                          CALL TIMING$CLOCKON('XRAY$OVERLAP')
+      CALL XRAY_DIPOLEMATRIX
+
+      CALL XRAY_ATOMMATRIX
+
+      CALL XRAY_AUGMENTATION
+
+                          CALL TIMING$CLOCKOFF('XRAY$OVERLAP')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XRAY$OVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY_DIPOLEMATRIX  ! MARK: XRAY_DIPOLEMATRIX
 !     **************************************************************************
 !     ** CALCULATE DIPOLE MATRIX ELEMENTS FOR SIMULATION EXCITE               **
 !     **************************************************************************
@@ -4803,8 +4802,8 @@
       INTEGER(4) :: LLVAL
       REAL(8) :: GAUNT(3)
       COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NB,NPRO)
-                          CALL TRACE$PUSH('XRAY$DIPOLEMATRIX')
-                          CALL TIMING$CLOCKON('XRAY$DIPOLEMATRIX')
+                          CALL TRACE$PUSH('XRAY_DIPOLEMATRIX')
+                          CALL TIMING$CLOCKON('XRAY_DIPOLEMATRIX')
 
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       IF(TPR) THEN
@@ -4938,13 +4937,13 @@
       CALL XSETUP$UNSELECT
       CALL SIMULATION$UNSELECT
       CALL STATE$UNSELECT
-                          CALL TIMING$CLOCKOFF('XRAY$DIPOLEMATRIX')
+                          CALL TIMING$CLOCKOFF('XRAY_DIPOLEMATRIX')
                           CALL TRACE$POP
       RETURN
-      END SUBROUTINE XRAY$DIPOLEMATRIX
+      END SUBROUTINE XRAY_DIPOLEMATRIX
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XRAY$ATOMMATRIX  ! MARK: XRAY$ATOMMATRIX
+      SUBROUTINE XRAY_ATOMMATRIX  ! MARK: XRAY$ATOMMATRIX
 !     **************************************************************************
 !     ** CALCULATE ATOMIC OVERLAP MATRIX                                      **
 !     ** REAL SPHERICAL HARMONICS GIVE L1=L2 AND M1=M2                        **
@@ -4970,8 +4969,8 @@
       INTEGER(4), ALLOCATABLE :: ISPECIES1(:),ISPECIES2(:)
       INTEGER(4), ALLOCATABLE :: ATOMMAP(:)
       INTEGER(4) :: L1,L2
-                          CALL TRACE$PUSH('XRAY$ATOMMATRIX')
-                          CALL TIMING$CLOCKON('XRAY$ATOMMATRIX')
+                          CALL TRACE$PUSH('XRAY_ATOMMATRIX')
+                          CALL TIMING$CLOCKON('XRAY_ATOMMATRIX')
       ! GET DATA FROM SIMULATION GROUND
       CALL SIMULATION$SELECT('GROUND')
       CALL SIMULATION$GETI4('NAT',NAT)
@@ -5067,10 +5066,158 @@
       ! WRAPPER: S IS STORED IN SIMULATION_MODULE
       CALL OVERLAP$SETR8A('S',NAT*LNXX1*LNXX2,S)
       DEALLOCATE(S)
-                          CALL TIMING$CLOCKOFF('XRAY$ATOMMATRIX')
+                          CALL TIMING$CLOCKOFF('XRAY_ATOMMATRIX')
                           CALL TRACE$POP
       RETURN
-      END SUBROUTINE XRAY$ATOMMATRIX
+      END SUBROUTINE XRAY_ATOMMATRIX
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY_AUGMENTATION  ! MARK: XRAY_AUGMENTATION
+!     **************************************************************************
+!     ** OVERLAP CONTRIBUTION FROM PAW AUGMENTATION                           **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4) :: NTASKS,THISTASK,WTASK
+      INTEGER(4) :: NKPT,NSPIN
+      INTEGER(4) :: IKPT,ISPIN
+      COMPLEX(8), ALLOCATABLE :: AUG(:,:) ! (NB2,NB1)
+      INTEGER(4) :: NDIM1,NDIM2
+      INTEGER(4) :: NPRO1,NPRO2
+      INTEGER(4) :: NB1,NB2
+      INTEGER(4) :: IB1,IB2
+      INTEGER(4) :: NAT
+      INTEGER(4) :: IAT1,IAT2
+      INTEGER(4) :: NSP1,NSP2
+      INTEGER(4) :: ISP1,ISP2
+      INTEGER(4), ALLOCATABLE :: ISPECIES1(:),ISPECIES2(:)
+      INTEGER(4), ALLOCATABLE :: ATOMMAP(:)
+      INTEGER(4) :: LNXX1,LNXX2
+      INTEGER(4), ALLOCATABLE :: LOX1(:,:),LOX2(:,:)
+      INTEGER(4), ALLOCATABLE :: LNX1(:),LNX2(:)
+      INTEGER(4) :: LN1,LN2
+      INTEGER(4) :: L1,L2
+      INTEGER(4) :: M1,M2
+      INTEGER(4) :: IPRO1,IPRO2
+      COMPLEX(8), ALLOCATABLE :: PROJ1(:,:,:),PROJ2(:,:,:)
+      INTEGER(4), ALLOCATABLE :: MAP1(:,:),MAP2(:,:)
+      COMPLEX(8) :: OVLAP
+      COMPLEX(8) :: CVAR
+      REAL(8), ALLOCATABLE :: S(:,:,:)
+                          CALL TRACE$PUSH('XRAY_AUGMENTATION')
+                          CALL TIMING$CLOCKON('XRAY_AUGMENTATION')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      ! GET DATA FROM SIMULATION GROUND
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$GETI4('NAT',NAT)
+      ALLOCATE(ISPECIES1(NAT))
+      CALL SIMULATION$GETI4A('ISPECIES',NAT,ISPECIES1)
+      ALLOCATE(ATOMMAP(NAT))
+      CALL SIMULATION$GETI4A('ATOMMAP',NAT,ATOMMAP)
+      CALL SIMULATION$GETI4('NSP',NSP1)
+      ALLOCATE(LNX1(NSP1))
+      CALL SIMULATION$GETI4A('LNX',NSP1,LNX1)
+      CALL SIMULATION$GETI4('LNXX',LNXX1)
+      ALLOCATE(LOX1(LNXX1,NSP1))
+      CALL SIMULATION$GETI4A('LOX',LNXX1*NSP1,LOX1)
+      ALLOCATE(MAP1(NAT,LNXX1))
+      CALL SIMULATION$GETI4A('MAP',NAT*LNXX1,MAP1)
+      CALL SIMULATION$UNSELECT
+      ! GET DATA FROM SIMULATION EXCITE
+      CALL SIMULATION$SELECT('EXCITE')
+      ALLOCATE(ISPECIES2(NAT))
+      CALL SIMULATION$GETI4A('ISPECIES',NAT,ISPECIES2)
+      CALL SIMULATION$GETI4('NSP',NSP2)
+      ALLOCATE(LNX2(NSP2))
+      CALL SIMULATION$GETI4A('LNX',NSP2,LNX2)
+      CALL SIMULATION$GETI4('LNXX',LNXX2)
+      ALLOCATE(LOX2(LNXX2,NSP2))
+      CALL SIMULATION$GETI4A('LOX',LNXX2*NSP2,LOX2)
+      ALLOCATE(MAP2(NAT,LNXX2))
+      CALL SIMULATION$GETI4A('MAP',NAT*LNXX2,MAP2)
+      CALL SIMULATION$UNSELECT
+      ! GET ATOMIC OVERLAP MATRIX (WRAPPER: S IS STORED IN SIMULATION_MODULE)
+      ALLOCATE(S(NAT,LNXX1,LNXX2))
+      CALL OVERLAP$GETR8A('S',NAT*LNXX1*LNXX2,S)
+
+      ! LOOP OVER K POINTS
+      DO IKPT=1,NKPT
+        ! LOOP OVER SPIN
+        DO ISPIN=1,NSPIN
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          IF(THISTASK.NE.WTASK) CYCLE
+          ! GET DATA FROM STATE OF SIMULATION GROUND
+          CALL STATE$SELECT('GROUND')
+          CALL STATE$GETI4('NB',IKPT,ISPIN,NB1)
+          CALL STATE$GETI4('NDIM',IKPT,ISPIN,NDIM1)
+          CALL STATE$GETI4('NPRO',IKPT,ISPIN,NPRO1)
+          ALLOCATE(PROJ1(NDIM1,NB1,NPRO1))
+          CALL STATE$GETC8A('PROJ',IKPT,ISPIN,NDIM1*NB1*NPRO1,PROJ1)
+          CALL STATE$UNSELECT
+          ! GET DATA FROM STATE OF SIMULATION EXCITE
+          CALL STATE$SELECT('EXCITE')
+          CALL STATE$GETI4('NB',IKPT,ISPIN,NB2)
+          CALL STATE$GETI4('NDIM',IKPT,ISPIN,NDIM2)
+          CALL STATE$GETI4('NPRO',IKPT,ISPIN,NPRO2)
+          ALLOCATE(PROJ2(NDIM2,NB2,NPRO2))
+          CALL STATE$GETC8A('PROJ',IKPT,ISPIN,NDIM2*NB2*NPRO2,PROJ2)
+          CALL STATE$UNSELECT
+          ! ALLOCATE AUGMENTATION OVERLAP MATRIX
+          ALLOCATE(AUG(NB2,NB1))
+          DO IB1=1,NB1
+            DO IB2=1,NB2
+              ! AUG(I,J)=<PSI1(J)|PSI2(I)>
+              OVLAP=(0.D0,0.D0)
+              DO IAT1=1,NAT
+                ISP1=ISPECIES1(IAT1)
+                IAT2=ATOMMAP(IAT1)
+                ISP2=ISPECIES2(IAT2)
+                DO LN1=1,LNX1(ISP1)
+                  DO LN2=1,LNX2(ISP2)
+                    L1=LOX1(LN1,ISP1)
+                    L2=LOX2(LN2,ISP2)
+                    IF(L1.NE.L2) CYCLE  ! ONLY CALCULATE FOR SAME L
+                    IPRO1=MAP1(IAT1,LN1)
+                    DO M1=1,2*L1+1
+                      IPRO1=IPRO1+1
+                      IPRO2=MAP2(IAT2,LN2)
+                      DO M2=1,2*L2+1
+                        IPRO2=IPRO2+1
+                        IF(M1.NE.M2) CYCLE  ! ONLY CALCULATE FOR SAME M
+                        CVAR=CONJG(PROJ1(1,IB1,IPRO1))*PROJ2(1,IB2,IPRO2)
+                        OVLAP=OVLAP+CVAR*S(IAT1,LN1,LN2)
+                      ENDDO ! END M2
+                    ENDDO ! END M1
+                  ENDDO ! END LN2
+                ENDDO ! END LN1
+              ENDDO ! END IAT1
+              AUG(IB2,IB1)=OVLAP
+            ENDDO ! END IB2
+          ENDDO ! END IB1
+          DEALLOCATE(PROJ1)
+          DEALLOCATE(PROJ2)
+          ! STORE AUGMENTATION OVERLAP MATRIX IN OVERLAP_MODULE
+          CALL OVERLAP$SELECT(IKPT,ISPIN)
+          CALL OVERLAP$SETC8A('AUG',NB2*NB1,AUG)
+          CALL OVERLAP$UNSELECT
+          DEALLOCATE(AUG)
+        ENDDO ! END ISPIN
+      ENDDO ! END IKPT
+      DEALLOCATE(ISPECIES1)
+      DEALLOCATE(ATOMMAP)
+      DEALLOCATE(LNX1)
+      DEALLOCATE(LOX1)
+      DEALLOCATE(MAP1)
+      DEALLOCATE(ISPECIES2)
+      DEALLOCATE(LNX2)
+      DEALLOCATE(LOX2)
+      DEALLOCATE(MAP2)
+      DEALLOCATE(S)
+                          CALL TIMING$CLOCKOFF('XRAY_AUGMENTATION')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XRAY_AUGMENTATION
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE POLARISATION_CONVERT(K,N,POL,POLXYZ)  ! MARK: POLARISATION_CONVERT
