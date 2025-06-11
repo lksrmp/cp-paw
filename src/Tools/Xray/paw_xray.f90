@@ -136,12 +136,12 @@
 !     **************************************************************************
       ! TODO: CHECK WHAT IS ACTUALLY NECESSARY
       TYPE OVERLAP_TYPE
-      INTEGER(4) :: NB1 ! #(BANDS IN SIMULATION 1)
-      INTEGER(4) :: NB2 ! #(BANDS IN SIMULATION 2)
-      INTEGER(4) :: NOCC ! #(OCCUPIED BANDS)
+      INTEGER(4) :: NB1=-1 ! #(BANDS IN SIMULATION 1)
+      INTEGER(4) :: NB2=-1 ! #(BANDS IN SIMULATION 2)
+      INTEGER(4) :: NOCC=-1 ! #(OCCUPIED BANDS)
       COMPLEX(8), ALLOCATABLE :: PW(:,:) ! (NB2,NB1) PLANE WAVE OVERLAP MATRIX
       COMPLEX(8), ALLOCATABLE :: AUG(:,:) ! (NB2,NB1) AUGMENTATION OVERLAP MATRIX
-      COMPLEX(8), ALLOCATABLE :: OV(:,:,:) ! (NB2,NB1) OVERLAP MATRIX
+      LOGICAL(4) :: TOVERLAP=.FALSE. ! OVERLAP CALCULATED
       ! IT IS CHECKED THAT NOCC1=NOCC2
       ! OVERLAP MATRIX
       ! | A | B |
@@ -332,6 +332,8 @@
       CALL SETTINGS$REPORT(NFIL)
 
       CALL XAS$REPORT(NFIL)
+
+      CALL XRAY$DIPOLEMATRIX
 
 
 
@@ -1343,6 +1345,18 @@
           CALL ERROR$STOP('SIMULATION$GETI4A')
         END IF
         VAL=THIS%ISPECIES
+      ELSE IF(ID.EQ.'ATOMMAP') THEN
+        IF(.NOT.ALLOCATED(ATOMMAP)) THEN
+          CALL ERROR$MSG('ATOMMAP NOT ALLOCATED')
+          CALL ERROR$STOP('SIMULATION$GETI4A')
+        END IF
+        IF(LEN.NE.THIS%NAT) THEN
+          CALL ERROR$MSG('LENGTH OF ATOMMAP ARRAY MUST BE EQUAL TO NAT')
+          CALL ERROR$I4VAL('LEN OF ATOMMAP: ',LEN)
+          CALL ERROR$I4VAL('NAT: ',THIS%NAT)
+          CALL ERROR$STOP('SIMULATION$GETI4A')
+        END IF
+        VAL=ATOMMAP
       ELSE
         CALL ERROR$MSG('SIMULATION GETI4A ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -3396,13 +3410,13 @@
         !   CALL ERROR$MSG('GROUND STATE ARRAY NOT ALLOCATED')
         !   CALL ERROR$STOP('STATE$SELECT')
         ! END IF
-        THIS=GROUND
+        THIS=>GROUND
       ELSE IF(ID.EQ.'EXCITE') THEN
         ! IF(.NOT.ALLOCATED(EXCITE)) THEN
         !   CALL ERROR$MSG('EXCITE STATE ARRAY NOT ALLOCATED')
         !   CALL ERROR$STOP('STATE$SELECT')
         ! END IF
-        THIS=EXCITE
+        THIS=>EXCITE
       ELSE
         CALL ERROR$MSG('STATE SELECT ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -3513,7 +3527,7 @@
 !     ** GET INTEGER VALUE FROM SELECTED STATE                                **
 !     ** REQUIRES SELECTED STATE ARRAY                                        **
 !     **************************************************************************
-      USE STATE_MODULE, ONLY: THIS,SELECTED,NKPTG,NSPING
+      USE STATE_MODULE, ONLY: THIS,SELECTED,NKPTG,NSPING,NPRO,NDIM
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: IKPT
@@ -3540,6 +3554,10 @@
         CALL ERROR$MSG('NOCC NOT IMPLEMENTED YET')
         CALL ERROR$STOP('STATE$GETI4')
         VAL=THIS(IKPT,ISPIN)%NOCC
+      ELSE IF(ID.EQ.'NPRO') THEN
+        VAL=NPRO
+      ELSE IF(ID.EQ.'NDIM') THEN
+        VAL=NDIM
       ELSE
         CALL ERROR$MSG('STATE GETI4 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -3824,6 +3842,357 @@
       NULLIFY(THIS)
       RETURN
       END SUBROUTINE OVERLAP$UNSELECT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$GETI4(ID,VAL)  ! MARK: OVERLAP$GETI4
+!     **************************************************************************
+!     ** GET INTEGER VALUE FROM SELECTED OVERLAP                             **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED,NKPTG,NSPING
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$GETI4')
+      END IF
+      IF(ID.EQ.'NB1') THEN
+        VAL=THIS%NB1
+      ELSE IF(ID.EQ.'NB2') THEN
+        VAL=THIS%NB2
+      ELSE IF(ID.EQ.'NOCC') THEN
+        VAL=THIS%NOCC
+      ELSE IF(ID.EQ.'NKPT') THEN
+        VAL=NKPTG
+      ELSE IF(ID.EQ.'NSPIN') THEN
+        VAL=NSPING
+      ELSE
+        CALL ERROR$MSG('OVERLAP GETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE OVERLAP$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$SETI4(ID,VAL)  ! MARK: OVERLAP$SETI4
+!     **************************************************************************
+!     ** SET INTEGER VALUE IN SELECTED OVERLAP                               **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED,NKPTG,NSPING
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$SETI4')
+      END IF
+      IF(ID.EQ.'NB1') THEN
+        IF(THIS%NB1.NE.-1) THEN
+          CALL ERROR$MSG('NB1 VALUE CANNOT BE CHANGED')
+          CALL ERROR$I4VAL('OLD NB1: ',THIS%NB1)
+          CALL ERROR$I4VAL('NEW NB1: ',VAL)
+          CALL ERROR$STOP('OVERLAP$SETI4')
+        END IF
+        THIS%NB1=VAL
+      ELSE IF(ID.EQ.'NB2') THEN
+        IF(THIS%NB2.NE.-1) THEN
+          CALL ERROR$MSG('NB2 VALUE CANNOT BE CHANGED')
+          CALL ERROR$I4VAL('OLD NB2: ',THIS%NB2)
+          CALL ERROR$I4VAL('NEW NB2: ',VAL)
+          CALL ERROR$STOP('OVERLAP$SETI4')
+        END IF
+        THIS%NB2=VAL
+      ELSE IF(ID.EQ.'NOCC') THEN
+        IF(THIS%NOCC.NE.-1) THEN
+          CALL ERROR$MSG('NOCC VALUE CANNOT BE CHANGED')
+          CALL ERROR$I4VAL('OLD NOCC: ',THIS%NOCC)
+          CALL ERROR$I4VAL('NEW NOCC: ',VAL)
+          CALL ERROR$STOP('OVERLAP$SETI4')
+        END IF
+        THIS%NOCC=VAL
+      ELSE
+        CALL ERROR$MSG('OVERLAP SETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$SETI4')
+      END IF
+      RETURN
+      END SUBROUTINE OVERLAP$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$GETC8A(ID,LEN,VAL)  ! MARK: OVERLAP$GETC8A
+!     **************************************************************************
+!     ** GET COMPLEX VALUE ARRAY FROM SELECTED OVERLAP                        **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      COMPLEX(8), INTENT(OUT) :: VAL(LEN)
+      LOGICAL(4) :: NBSET
+      LOGICAL(4) :: NOCCSET
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$GETC8A')
+      END IF
+      IF(THIS%NB1.EQ.-1.OR.THIS%NB2.EQ.-1) THEN
+        CALL ERROR$MSG('OVERLAP DIMENSIONS NOT SET')
+        CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+        CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+        CALL ERROR$STOP('OVERLAP$GETC8A')
+      END IF
+      IF(ID.EQ.'PW') THEN
+        IF(.NOT.ALLOCATED(THIS%PW)) THEN
+          CALL ERROR$MSG('PW NOT ALLOCATED')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(LEN.NE.THIS%NB1*THIS%NB2) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NB1*NB2')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%PW,(/THIS%NB2*THIS%NB1/))
+      ELSE IF(ID.EQ.'AUG') THEN
+        IF(.NOT.ALLOCATED(THIS%AUG)) THEN
+          CALL ERROR$MSG('AUG NOT ALLOCATED')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(LEN.NE.THIS%NB2*THIS%NB1) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NB1*NB2')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%AUG,(/THIS%NB2*THIS%NB1/))
+      ELSE IF(ID.EQ.'A') THEN
+        IF(THIS%NOCC.EQ.-1) THEN
+          CALL ERROR$MSG('NOCC NOT SET')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(.NOT.ALLOCATED(THIS%A)) THEN
+          IF(THIS%TOVERLAP) THEN
+            ALLOCATE(THIS%A(THIS%NOCC,THIS%NOCC))
+            ! CALCULATE A FROM PW AND AUG
+            THIS%A(:,:)=THIS%PW(1:THIS%NOCC,1:THIS%NOCC) &
+     &                  +THIS%AUG(1:THIS%NOCC,1:THIS%NOCC)
+          ELSE
+            CALL ERROR$MSG('A NOT ALLOCATED, OVERLAP NOT CALCULATED YET')
+            CALL ERROR$STOP('OVERLAP$GETC8A')
+          END IF
+        END IF
+        IF(LEN.NE.THIS%NOCC*THIS%NOCC) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NOCC*NOCC')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NOCC: ',THIS%NOCC)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%A,(/THIS%NOCC*THIS%NOCC/))
+      ELSE IF(ID.EQ.'B') THEN
+        IF(THIS%NOCC.EQ.-1) THEN
+          CALL ERROR$MSG('NOCC NOT SET')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(.NOT.ALLOCATED(THIS%B)) THEN
+          IF(THIS%TOVERLAP) THEN
+            ALLOCATE(THIS%B(THIS%NOCC,THIS%NB1-THIS%NOCC))
+            ! CALCULATE B FROM PW AND AUG
+            THIS%B(:,:)=THIS%PW(1:THIS%NOCC,THIS%NOCC+1:THIS%NB1) &
+     &                 +THIS%AUG(1:THIS%NOCC,THIS%NOCC+1:THIS%NB1)
+          ELSE
+            CALL ERROR$MSG('B NOT ALLOCATED, OVERLAP NOT CALCULATED YET')
+            CALL ERROR$STOP('OVERLAP$GETC8A')
+          END IF
+        END IF
+        IF(LEN.NE.THIS%NOCC*(THIS%NB1-THIS%NOCC)) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NOCC*(NB1-NOCC)')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NOCC: ',THIS%NOCC)
+          CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%B,(/THIS%NOCC*(THIS%NB1-THIS%NOCC)/))
+      ELSE IF(ID.EQ.'C') THEN
+        IF(THIS%NOCC.EQ.-1) THEN
+          CALL ERROR$MSG('NOCC NOT SET')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(.NOT.ALLOCATED(THIS%C)) THEN
+          IF(THIS%TOVERLAP) THEN
+            ALLOCATE(THIS%C(THIS%NB2-THIS%NOCC,THIS%NOCC))
+            ! CALCULATE C FROM PW AND AUG
+            THIS%C(:,:)=THIS%PW(THIS%NOCC+1:THIS%NB2,1:THIS%NOCC) &
+     &                 +THIS%AUG(THIS%NOCC+1:THIS%NB2,1:THIS%NOCC)
+          ELSE
+            CALL ERROR$MSG('C NOT ALLOCATED, OVERLAP NOT CALCULATED YET')
+            CALL ERROR$STOP('OVERLAP$GETC8A')
+          END IF
+        END IF
+        IF(LEN.NE.(THIS%NB2-THIS%NOCC)*THIS%NOCC) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO (NB2-NOCC)*NOCC')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$I4VAL('NOCC: ',THIS%NOCC)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%C,(/(THIS%NB2-THIS%NOCC)*THIS%NOCC/))
+      ELSE IF(ID.EQ.'D') THEN
+        IF(THIS%NOCC.EQ.-1) THEN
+          CALL ERROR$MSG('NOCC NOT SET')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(.NOT.ALLOCATED(THIS%D)) THEN
+          IF(THIS%TOVERLAP) THEN
+            ALLOCATE(THIS%D(THIS%NB2-THIS%NOCC,THIS%NB1-THIS%NOCC))
+            ! CALCULATE D FROM PW AND AUG
+            THIS%D(:,:)=THIS%PW(THIS%NOCC+1:THIS%NB2,THIS%NOCC+1:THIS%NB1) &
+     &                 +THIS%AUG(THIS%NOCC+1:THIS%NB2,THIS%NOCC+1:THIS%NB1)
+          ELSE
+            CALL ERROR$MSG('D NOT ALLOCATED, OVERLAP NOT CALCULATED YET')
+            CALL ERROR$STOP('OVERLAP$GETC8A')
+          END IF
+        END IF
+        IF(LEN.NE.(THIS%NB2-THIS%NOCC)*(THIS%NB1-THIS%NOCC)) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO (NB2-NOCC)*(NB1-NOCC)')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+          CALL ERROR$I4VAL('NOCC: ',THIS%NOCC)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%D,(/(THIS%NB2-THIS%NOCC)*(THIS%NB1-THIS%NOCC)/))
+      ELSE IF(ID.EQ.'AINV') THEN
+        IF(THIS%NOCC.EQ.-1) THEN
+          CALL ERROR$MSG('NOCC NOT SET')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(.NOT.ALLOCATED(THIS%AINV)) THEN
+          IF(.NOT.ALLOCATED(THIS%A)) THEN
+            IF(THIS%TOVERLAP) THEN
+              ALLOCATE(THIS%A(THIS%NOCC,THIS%NOCC))
+              ! CALCULATE A FROM PW AND AUG
+              THIS%A(:,:)=THIS%PW(1:THIS%NOCC,1:THIS%NOCC) &
+     &                    +THIS%AUG(1:THIS%NOCC,1:THIS%NOCC)
+            ELSE
+              CALL ERROR$MSG('A NOT ALLOCATED, OVERLAP NOT CALCULATED YET')
+              CALL ERROR$MSG('CANNOT CALCULATE AINV')
+              CALL ERROR$STOP('OVERLAP$GETC8A')
+            END IF
+          END IF
+          ALLOCATE(THIS%AINV(THIS%NOCC,THIS%NOCC))
+          ! CALCULATE AINV FROM A
+          CALL LIB$INVERTC8(THIS%NOCC,THIS%A,THIS%AINV)
+        END IF
+        IF(LEN.NE.THIS%NOCC*THIS%NOCC) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NOCC*NOCC')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NOCC: ',THIS%NOCC)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%AINV,(/THIS%NOCC*THIS%NOCC/))
+      ELSE IF(ID.EQ.'DIPOLE') THEN
+        IF(.NOT.ALLOCATED(THIS%DIPOLE)) THEN
+          CALL ERROR$MSG('DIPOLE NOT ALLOCATED')
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        IF(LEN.NE.3*THIS%NB2) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO 3*NB2')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$GETC8A')
+        END IF
+        VAL(:)=RESHAPE(THIS%DIPOLE,(/3*THIS%NB2/))
+      ELSE
+        CALL ERROR$MSG('OVERLAP GETC8A ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$GETC8A')
+      END IF
+      END SUBROUTINE OVERLAP$GETC8A
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$SETC8A(ID,LEN,VAL)  ! MARK: OVERLAP$SETC8A
+!     **************************************************************************
+!     ** SET COMPLEX VALUE ARRAY IN SELECTED OVERLAP                          **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      COMPLEX(8), INTENT(IN) :: VAL(LEN)
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$SETC8A')
+      END IF
+      IF(THIS%NB1.EQ.-1.OR.THIS%NB2.EQ.-1) THEN
+        CALL ERROR$MSG('OVERLAP DIMENSIONS NOT SET')
+        CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+        CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+        CALL ERROR$STOP('OVERLAP$SETC8A')
+      END IF
+      IF(ID.EQ.'PW') THEN
+        IF(.NOT.ALLOCATED(THIS%PW)) THEN
+          ALLOCATE(THIS%PW(THIS%NB2,THIS%NB1))
+        END IF
+        IF(LEN.NE.THIS%NB1*THIS%NB2) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NB1*NB2')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$SETC8A')
+        END IF
+        THIS%PW=RESHAPE(VAL,(/THIS%NB2,THIS%NB1/))
+      ELSE IF(ID.EQ.'AUG') THEN
+        IF(.NOT.ALLOCATED(THIS%AUG)) THEN
+          ALLOCATE(THIS%AUG(THIS%NB2,THIS%NB1))
+        END IF
+        IF(LEN.NE.THIS%NB2*THIS%NB1) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO NB1*NB2')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB1: ',THIS%NB1)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$SETC8A')
+        END IF
+        THIS%AUG=RESHAPE(VAL,(/THIS%NB2,THIS%NB1/))
+      ELSE IF(ID.EQ.'DIPOLE') THEN
+        IF(THIS%NB2.EQ.-1) THEN
+          CALL ERROR$MSG('NB2 NOT SET')
+          CALL ERROR$STOP('OVERLAP$SETC8A')
+        END IF
+        IF(.NOT.ALLOCATED(THIS%DIPOLE)) THEN
+          ALLOCATE(THIS%DIPOLE(3,THIS%NB2))
+        END IF
+        IF(LEN.NE.3*THIS%NB2) THEN
+          CALL ERROR$MSG('LEN MUST BE EQUAL TO 3*NB2')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$I4VAL('NB2: ',THIS%NB2)
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('OVERLAP$SETC8A')
+        END IF
+        THIS%DIPOLE(:,:)=RESHAPE(VAL,(/3,THIS%NB2/))
+      ELSE
+        CALL ERROR$MSG('OVERLAP SETC8A ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$SETC8A')
+      END IF
+      RETURN
+      END SUBROUTINE OVERLAP$SETC8A
+      
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XRAY$READ  ! MARK: XRAY$READ
@@ -4185,6 +4554,10 @@
           CALL STATE$SETC8A('PROJ',IKPT,ISPIN,NDIM_(2)*NB(2)*NPRO(2),PROJ2)
           CALL STATE$UNSELECT
 
+          CALL OVERLAP$SELECT(IKPT,ISPIN)
+          CALL OVERLAP$SETI4('NB1',NB(1))
+          CALL OVERLAP$SETI4('NB2',NB(2))
+
           CALL TIMING$CLOCKON('XRAY$READ_SCALARPRODUCT')
           IF(THISTASK.EQ.WTASK) THEN
             CALL TRACE$I4VAL(' CALCULATING IKPT: ',IKPT)
@@ -4200,7 +4573,9 @@
               ENDDO ! END IB1
             ENDDO ! END IB2
             PW=PW*VCELL
+            CALL OVERLAP$SETC8A('PW',NB(2)*NB(1),PW)
           END IF
+          CALL OVERLAP$UNSELECT
           CALL TIMING$CLOCKOFF('XRAY$READ_SCALARPRODUCT')
           ! MISSING: DETECTION OF OCCUPIED BANDS BASED ON FERMI ENERGY
         ENDDO ! END ISPIN
@@ -4273,9 +4648,200 @@
         END SUBROUTINE TESTKPT
       END SUBROUTINE XRAY$READ
 
-
-      ! TODO: ATOMMAPPING
       ! TODO: DATACONSISTENCY
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY$DIPOLEMATRIX  ! MARK: XRAY$DIPOLEMATRIX
+!     **************************************************************************
+!     ** CALCULATE DIPOLE MATRIX ELEMENTS FOR SIMULATION EXCITE               **
+!     **************************************************************************
+      ! TODO: SKIP IF START FROM OVERLAP FILE
+      IMPLICIT NONE
+      LOGICAL(4), PARAMETER :: TPR=.FALSE.
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,WTASK
+      INTEGER(4) :: IATOM ! ATOM INDEX OF COREHOLE
+      INTEGER(4) :: ISP ! SPECIES OF COREHOLE ATOM
+      INTEGER(4) :: NAT
+      INTEGER(4) :: NBATOM
+      INTEGER(4), ALLOCATABLE :: ATOMMAP(:)  ! (NAT)
+      INTEGER(4), ALLOCATABLE :: ISPECIES(:)  ! (NAT)
+      INTEGER(4) :: GID
+      INTEGER(4) :: NR
+      REAL(8), ALLOCATABLE :: AEPSI(:,:)  ! (NR,NBATOM)
+      REAL(8), ALLOCATABLE :: AEPHI(:,:)  ! (NR,LNX(ISP))
+      REAL(8), ALLOCATABLE :: R(:) ! (NR)
+      REAL(8), ALLOCATABLE :: WORK(:)
+      INTEGER(4) :: N
+      INTEGER(4) :: IBCORE
+      INTEGER(4) :: IB
+      INTEGER(4), ALLOCATABLE :: LATOM(:)
+      INTEGER(4) :: NCORE
+      INTEGER(4) :: LCORE
+      INTEGER(4) :: LLCORE
+      REAL(8), ALLOCATABLE :: RADINT(:)
+      INTEGER(4) :: NSP
+      INTEGER(4) :: LNXX
+      INTEGER(4), ALLOCATABLE :: LNX(:)  ! (NSP)
+      INTEGER(4), ALLOCATABLE :: LOX(:,:) ! (LNXX,NSP) 
+      INTEGER(4) :: LN
+      INTEGER(4) :: L
+      INTEGER(4) :: M
+      INTEGER(4), ALLOCATABLE :: MAP(:,:) ! (NAT,LNXX)
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: NB
+      COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:) ! (3,NB)
+      COMPLEX(8) :: CVAR(3)
+      INTEGER(4) :: IPRO
+      INTEGER(4) :: NPRO
+      INTEGER(4) :: NDIM
+      INTEGER(4) :: LLVAL
+      REAL(8) :: GAUNT(3)
+      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NB,NPRO)
+      INTEGER(4) :: IERR=0
+                          CALL TRACE$PUSH('XRAY$DIPOLEMATRIX')
+                          CALL TIMING$CLOCKON('XRAY$DIPOLEMATRIX')
+
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(TPR) THEN
+        CALL FILEHANDLER$UNIT('PROT',NFIL)
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A)')'DIPOLE MATRIX CALCULATION'
+        WRITE(NFIL,'(80("#"))')
+      END IF
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL XSETUP$SELECT('EXCITE')
+      CALL STATE$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$GETI4('NAT',NAT)
+      ALLOCATE(ATOMMAP(NAT))
+      ALLOCATE(ISPECIES(NAT))
+      CALL SIMULATION$GETI4A('ATOMMAP',NAT,ATOMMAP)
+      CALL SIMULATION$GETI4A('ISPECIES',NAT,ISPECIES)
+      CALL SIMULATION$GETI4('NSP',NSP)
+      CALL SIMULATION$GETI4('LNXX',LNXX)
+      ALLOCATE(LNX(NSP))
+      ALLOCATE(LOX(LNXX,NSP))
+      ALLOCATE(MAP(NAT,LNXX))
+      CALL SIMULATION$GETI4A('LNX',NSP,LNX)
+      CALL SIMULATION$GETI4A('LOX',LNXX*NSP,LOX)
+      CALL SIMULATION$GETI4A('MAP',NAT*LNXX,MAP)
+      ! GET ATOM INDEX OF COREHOLE FOR SIMULATION GROUND
+      CALL SETTINGS$GETI4('IATOM',IATOM)
+      CALL SETTINGS$GETI4('NCORE',NCORE)
+      CALL SETTINGS$GETI4('LCORE',LCORE)
+      ! CONVERT TO INDEX IN SIMULATION EXCITE
+      IATOM=ATOMMAP(IATOM)
+      ISP=ISPECIES(IATOM)
+      CALL XSETUP$GETI4('GID',ISP,GID)
+      CALL XSETUP$GETI4('NBATOM',ISP,NBATOM)
+      CALL RADIAL$GETI4(GID,'NR',NR)
+      ALLOCATE(AEPSI(NR,NBATOM))
+      ALLOCATE(AEPHI(NR,LNX(ISP)))
+      ALLOCATE(R(NR))
+      ALLOCATE(WORK(NR))
+      ALLOCATE(LATOM(NBATOM))
+      CALL XSETUP$GETI4A('LATOM',ISP,NBATOM,LATOM)
+      CALL XSETUP$GETR8A('AEPSI',ISP,NR*NBATOM,AEPSI)
+      CALL XSETUP$GETR8A('AEPHI',ISP,NR*LNX(ISP),AEPHI)
+      CALL RADIAL$R(GID,NR,R)
+      ! ========================================================================
+      ! == SELECT CORRECT RADIAL PART FOR CORE ORBITAL                        ==
+      ! == NOTE: THIS ASSUME THE FOLLOWING STRUCTURE                          ==
+      ! ==       |IB | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |10 |                ==
+      ! ==       |---|---|---|---|---|---|---|---|---|---|---|                ==
+      ! ==       | N | 1 | 2 | 2 | 3 | 3 | 3 | 4 | 4 | 4 | 4 |                ==
+      ! ==       | L | 0 | 0 | 1 | 0 | 1 | 2 | 0 | 1 | 2 | 3 |                ==
+      ! ========================================================================
+      N=0
+      DO IB=1,NBATOM
+        IF(LATOM(IB).EQ.0) N=N+1
+        IF(N.EQ.NCORE.AND.LATOM(IB).EQ.LCORE) THEN
+          ! FOUND CORE ORBITAL
+          IBCORE=IB
+          IF(TPR) WRITE(NFIL,FMT='(A10,I10)')'INDEX RAD:',IBCORE
+          EXIT
+        END IF
+      ENDDO ! END IB
+      ! WARING: THIS ASSUMES THAT THE CORE ORBITAL IS AN S ORBITAL
+      ! TODO: GENERALISE TO ARBITRARY ORBITALS
+      ! ERROR: DOES IT REQUIRE A PHASE ON THE CORE ORBITAL?
+      CALL LLOFLM(LCORE,0,LLCORE)
+      IF(TPR) WRITE(NFIL,FMT='(A10,I10)')'LLCORE:',LLCORE
+      ! PRE-CALCULATE RADIAL INTEGRALS
+      ALLOCATE(RADINT(LNX(ISP)))
+      DO LN=1,LNX(ISP)
+        WORK=AEPHI(:,LN)*R**3*AEPSI(:,IBCORE)
+        CALL RADIAL$INTEGRAL(GID,NR,WORK,RADINT(LN))
+      ENDDO ! END LN
+      ! LOOP OVER K POINTS
+      DO IKPT=1,NKPT
+        ! LOOP OVER SPIN
+        DO ISPIN=1,NSPIN
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          IF(THISTASK.NE.WTASK) CYCLE
+          CALL OVERLAP$SELECT(IKPT,ISPIN)
+          CALL STATE$GETI4('NB',IKPT,ISPIN,NB)
+          CALL STATE$GETI4('NDIM',IKPT,ISPIN,NDIM)
+          CALL STATE$GETI4('NPRO',IKPT,ISPIN,NPRO)
+          ALLOCATE(PROJ(NDIM,NB,NPRO))
+          CALL STATE$GETC8A('PROJ',IKPT,ISPIN,NDIM*NB*NPRO,PROJ)
+          ALLOCATE(DIPOLE(3,NB))
+          IF(TPR) WRITE(NFIL,FMT='(A10,I10,A10,I10)')'IKPT:',IKPT,'ISPIN:',ISPIN
+          ! LOOP OVER BANDS
+          DO IB=1,NB
+            CVAR=(0.D0,0.D0)
+            DO LN=1,LNX(ISP)
+              L=LOX(LN,ISP)
+              IPRO=MAP(IATOM,LN)
+              DO M=-L,L
+                IPRO=IPRO+1
+                CALL LLOFLM(L,M,LLVAL)
+                ! CALCULATE GAUNT COEFFICIENT VECTOR
+                ! X COMPONENT
+                CALL SPHERICAL$GAUNT(LLVAL,2,LLCORE,GAUNT(1))
+                ! Y COMPONENT
+                CALL SPHERICAL$GAUNT(LLVAL,4,LLCORE,GAUNT(2))
+                ! Z COMPONENT
+                CALL SPHERICAL$GAUNT(LLVAL,3,LLCORE,GAUNT(3))
+                CVAR=CVAR+CONJG(PROJ(1,IB,IPRO))*RADINT(LN)*GAUNT            
+              ENDDO ! END M
+            ENDDO ! END LN
+            CVAR=SQRT(4.D0*PI/3.D0)*CVAR
+            DIPOLE(:,IB)=CVAR
+            IF(TPR) WRITE(NFIL,FMT='(A10,3(F8.5,SP,F8.5,"I ",S))')'DIPOLE:',CVAR(:)
+          ENDDO ! END IB
+          CALL OVERLAP$SETC8A('DIPOLE',3*NB,DIPOLE)
+          CALL OVERLAP$UNSELECT
+          DEALLOCATE(DIPOLE)
+          DEALLOCATE(PROJ)
+        ENDDO ! END ISPIN
+      ENDDO ! END IKPT
+
+      DEALLOCATE(ATOMMAP)
+      DEALLOCATE(ISPECIES)
+      DEALLOCATE(LNX)
+      DEALLOCATE(LOX)
+      DEALLOCATE(MAP)
+      DEALLOCATE(AEPSI)
+      DEALLOCATE(AEPHI)
+      DEALLOCATE(R)
+      DEALLOCATE(WORK)
+      DEALLOCATE(LATOM)
+      DEALLOCATE(RADINT)
+
+      CALL XSETUP$UNSELECT
+      CALL SIMULATION$UNSELECT
+      CALL STATE$UNSELECT
+                          CALL TIMING$CLOCKOFF('XRAY$DIPOLEMATRIX')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XRAY$DIPOLEMATRIX
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE POLARISATION_CONVERT(K,N,POL,POLXYZ)  ! MARK: POLARISATION_CONVERT
@@ -4343,3 +4909,16 @@
       END IF
       CALL CROSS_PROD(A,VECVAR,B)
       END SUBROUTINE VEC_ORTHO
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LLOFLM(L,M,LL)  ! MARK: LLOFLM
+!     **************************************************************************
+!     ** CALCULATE LL=L*L+L-M+1                                               **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: L
+      INTEGER(4), INTENT(IN) :: M
+      INTEGER(4), INTENT(OUT) :: LL
+      LL=L*L+L-M+1
+      RETURN
+      END SUBROUTINE LLOFLM
