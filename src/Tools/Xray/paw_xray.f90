@@ -192,6 +192,12 @@
       REAL(8) :: EBROAD ! GAUSSIAN BROADENING FOR XAS SPECTRUM (REPLACES DELTA FUNCTION)
       CHARACTER(1) :: BROADMODE ! BROADENING MODE: 'G' GAUSSIAN, 'L' LORENTZIAN,
                                 ! 'N' NONE
+      
+      REAL(8), ALLOCATABLE :: E(:) ! (NE) ENERGY GRID FOR SPECTRUM
+      REAL(8), ALLOCATABLE :: SPECTRUM(:,:,:) ! (NKPT,NSPIN,NE) SPECTRUM
+      ! ERROR: FORMAT FOR RAW SPECTRUM FAILES IF NB2-NOCC IS NOT THE SAME FOR ALL KPOINTS
+      REAL(8), ALLOCATABLE :: ERAW(:,:,:) ! (NKPT,NSPIN,NB2-NOCC) RAW ENERGY
+      REAL(8), ALLOCATABLE :: SPECTRUMRAW(:,:,:) ! (NKPT,NSPIN,NB2-NOCC) RAW SPECTRUM
       END TYPE XAS_SPEC_TYPE
 
       LOGICAL(4) :: TACTIVE=.FALSE. ! XAS ACTIVE
@@ -342,6 +348,8 @@
       CALL XAS$REPORT(NFIL)
 
       CALL XRAY$OVERLAP
+
+      CALL XAS$CALCULATE
 
 
                           CALL TIMING$PRINT('~',NFIL)
@@ -2737,6 +2745,129 @@
 !     ==========================================================================
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$CALCULATE  ! MARK: XAS$CALCULATE
+!     **************************************************************************
+!     ** CALCULATE XAS SPECTRA                                                **
+!     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,DE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: ISPIN
+      REAL(8) :: EMIN
+      REAL(8) :: EMAX
+      INTEGER(4) :: NE
+      INTEGER(4) :: I
+      INTEGER(4) :: NB2
+      INTEGER(4) :: NOCC
+      REAL(8) :: EEXCITE
+      REAL(8) :: EGROUND
+      INTEGER(4) :: IEMP
+      COMPLEX(8) :: AMPL(3)
+      COMPLEX(8), ALLOCATABLE :: KMAT(:,:)
+      COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:)
+      REAL(8), ALLOCATABLE :: EIG(:)
+      REAL(8), ALLOCATABLE :: WKPT(:)
+      REAL(8) :: EFINAL
+      REAL(8) :: EDIFF ! EFINAL - EGROUND
+      COMPLEX(8) :: CVAR
+      REAL(8) :: SIGMA
+      IF(.NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('XAS$CALCULATE')
+                          CALL TIMING$CLOCKON('XAS$CALCULATE')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('XAS NOT INITIALIZED')
+        CALL ERROR$STOP('XAS$CALCULATE')
+      END IF
+      
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      ALLOCATE(WKPT(NKPT))
+      CALL SIMULATION$GETR8A('WKPT',NKPT,WKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$GETR8('ETOT',EGROUND)
+      CALL SIMULATION$UNSELECT
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETR8('ETOT',EEXCITE)
+      CALL SIMULATION$UNSELECT
+
+      CALL XAS$GETR8('EMIN',EMIN)
+      CALL XAS$GETR8('EMAX',EMAX)
+      CALL XAS$GETI4('NE',NE)
+
+      ! ALLOCATE STORAGE
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        ALLOCATE(THIS%E(NE))
+        ALLOCATE(THIS%SPECTRUM(NKPT,NSPIN,NE))
+        THIS%SPECTRUM(:,:,:)=0.D0
+        ! TODO: ALLOCATE RAW SPECTRUM
+        DO I=1,NE
+          THIS%E(I)=EMIN+REAL(I-1,KIND=8)*DE
+        ENDDO
+        CALL XAS$UNSELECT
+      ENDDO
+
+      CALL STATE$SELECT('EXCITE')
+      DO IKPT=1,NKPT
+        DO ISPIN=1,NSPIN
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          IF(THISTASK.NE.WTASK) CYCLE
+          CALL OVERLAP$SELECT(IKPT,ISPIN)
+          CALL OVERLAP$GETI4('NB2',NB2)
+          ALLOCATE(EIG(NB2))
+          CALL STATE$GETR8A('EIG',IKPT,ISPIN,NB2,EIG)
+          CALL OVERLAP$GETI4('NOCC',NOCC)
+          ALLOCATE(DIPOLE(3,NB2))
+          CALL OVERLAP$GETC8A('DIPOLE',3*NB2,DIPOLE)
+          ALLOCATE(KMAT(NB2-NOCC,NOCC))
+          CALL OVERLAP$K(NB2-NOCC,NOCC,KMAT)
+          DO IEMP=1,NB2-NOCC
+            CALL AMPLITUDE(NB2,NOCC,IEMP,KMAT,DIPOLE,AMPL)
+            EFINAL=EEXCITE+EIG(NOCC+IEMP)
+            EDIFF=EFINAL-EGROUND
+
+            DO ISPEC=1,NSPEC
+              CALL XAS$ISELECT(ISPEC)
+              ! DOT_PRODUCT IS SUM_I CONJG(POLXYZ(I))*AMPL(I)
+              ! THEREFORE, POLXYZ MUST BE CONJUGATED TO COMPENSATE
+              CVAR=DOT_PRODUCT(CONJG(THIS%POLXYZ),AMPL)
+              ! ABSOLUTE SQUARE AND WEIGHT OF K POINT
+              ! ERROR: CHECK IMPLEMENTATION WEIGHT OF K POINT AND ROLE OF INVERSION SYMMETRY
+              SIGMA=WKPT(IKPT)*REAL(CONJG(CVAR)*CVAR,KIND=8)
+              ! TODO: SAVE RAW SPECTRUM
+              ! MAP TO SPECTRUM
+              CALL MAPGRID(EDIFF,SIGMA,NE,THIS%SPECTRUM(IKPT,ISPIN,:),EMIN,DE)
+              CALL XAS$UNSELECT
+            ENDDO ! END ISPEC
+          ENDDO ! END IEMP
+          DEALLOCATE(EIG)
+          DEALLOCATE(KMAT)
+          DEALLOCATE(DIPOLE)
+          CALL OVERLAP$UNSELECT
+        ENDDO ! END ISPIN
+      ENDDO ! END IKPT
+      CALL STATE$UNSELECT
+      DEALLOCATE(WKPT)
+
+      ! COMBINE SPECTRA (MAKES IT AVAILABLE AND SAME ON EVERY TASK)
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        CALL MPE$COMBINE('~','+',THIS%SPECTRUM)
+        CALL XAS$UNSELECT
+      ENDDO ! END ISPEC
+                          CALL TIMING$CLOCKOFF('XAS$CALCULATE')
+                          CALL TRACE$POP
+      END SUBROUTINE XAS$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$REPORT(NFIL)  ! MARK: XAS$REPORT
 !     **************************************************************************
 !     ** REPORT XAS MODULE TO FILE                                            **
@@ -3537,6 +3668,7 @@
           CALL ERROR$I4VAL('NEW NPRO: ',NPRO_)
           CALL ERROR$STOP('STATE$INIT')
         END IF
+        CALL TRACE$POP
         RETURN
       END IF
       NKPTG=NKPT_
@@ -3654,6 +3786,9 @@
               NOCC=NB
             END IF
             THIS(IKPT,ISPIN)%NOCC=NOCC
+            CALL OVERLAP$SELECT(IKPT,ISPIN)
+            CALL OVERLAP$SETI4('NOCC',NOCC)
+            CALL OVERLAP$UNSELECT()
           ENDDO
         ENDDO
         CALL STATE$UNSELECT()
@@ -4066,6 +4201,49 @@
       END SUBROUTINE OVERLAP$INIT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$K(NB2NOCC,NOCC,KMAT)  ! MARK: OVERLAP$K
+!     **************************************************************************
+!     ** GET OVERLAP K-MATRIX                                                **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NB2NOCC ! NB2-NOCC
+      INTEGER(4), INTENT(IN) :: NOCC    ! NOCC
+      COMPLEX(8), INTENT(OUT) :: KMAT(NB2NOCC,NOCC)
+      COMPLEX(8), ALLOCATABLE :: WORK(:,:)
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$K')
+      END IF
+      IF(NB2NOCC.NE.THIS%NB2-THIS%NOCC) THEN
+        CALL ERROR$MSG('NB2-NOCC MISMATCH')
+        CALL ERROR$I4VAL('EXPECTED NB2-NOCC: ',THIS%NB2-THIS%NOCC)
+        CALL ERROR$I4VAL('GIVEN NB2-NOCC: ',NB2NOCC)
+        CALL ERROR$STOP('OVERLAP$K')
+      END IF
+      IF(NOCC.NE.THIS%NOCC) THEN
+        CALL ERROR$MSG('NOCC MISMATCH')
+        CALL ERROR$I4VAL('EXPECTED NOCC: ',THIS%NOCC)
+        CALL ERROR$I4VAL('GIVEN NOCC: ',NOCC)
+        CALL ERROR$STOP('OVERLAP$K')
+      END IF
+      IF(.NOT.ALLOCATED(THIS%AINV)) THEN
+        ALLOCATE(WORK(NOCC,NOCC))
+        CALL OVERLAP$GETC8A('AINV',NOCC*NOCC,WORK)
+        DEALLOCATE(WORK)
+      END IF
+      IF(.NOT.ALLOCATED(THIS%C)) THEN
+        ALLOCATE(WORK(NB2NOCC,NOCC))
+        CALL OVERLAP$GETC8A('C',NB2NOCC*NOCC,WORK)
+        DEALLOCATE(WORK)
+      END IF
+      ! KMAT=C*AINV
+      CALL LIB$MATMULC8(NB2NOCC,NOCC,NOCC,THIS%C,THIS%AINV,KMAT)
+      RETURN
+      END SUBROUTINE OVERLAP$K
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP$SELECT(IKPT,ISPIN)  ! MARK: OVERLAP$SELECT
 !     **************************************************************************
 !     ** SELECT OVERLAP FOR KPOINT AND SPIN                                   **
@@ -4175,10 +4353,12 @@
         THIS%NB2=VAL
       ELSE IF(ID.EQ.'NOCC') THEN
         IF(THIS%NOCC.NE.-1) THEN
-          CALL ERROR$MSG('NOCC VALUE CANNOT BE CHANGED')
-          CALL ERROR$I4VAL('OLD NOCC: ',THIS%NOCC)
-          CALL ERROR$I4VAL('NEW NOCC: ',VAL)
-          CALL ERROR$STOP('OVERLAP$SETI4')
+          IF(VAL.NE.THIS%NOCC) THEN
+            CALL ERROR$MSG('NOCC VALUE CANNOT BE CHANGED')
+            CALL ERROR$I4VAL('OLD NOCC: ',THIS%NOCC)
+            CALL ERROR$I4VAL('NEW NOCC: ',VAL)
+            CALL ERROR$STOP('OVERLAP$SETI4')
+          END IF
         END IF
         THIS%NOCC=VAL
       ELSE
@@ -4188,6 +4368,30 @@
       END IF
       RETURN
       END SUBROUTINE OVERLAP$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$SETL4(ID,VAL)  ! MARK: OVERLAP$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL VALUE IN SELECTED OVERLAP                                **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$SETL4')
+      END IF
+      IF(ID.EQ.'TOVERLAP') THEN
+        THIS%TOVERLAP=VAL
+      ELSE
+        CALL ERROR$MSG('OVERLAP SETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE OVERLAP$SETL4
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP$GETR8A(ID,LEN,VAL)  ! MARK: OVERLAP$GETR8A
@@ -5434,6 +5638,7 @@
           ! STORE AUGMENTATION OVERLAP MATRIX IN OVERLAP_MODULE
           CALL OVERLAP$SELECT(IKPT,ISPIN)
           CALL OVERLAP$SETC8A('AUG',NB2*NB1,AUG)
+          CALL OVERLAP$SETL4('TOVERLAP',.TRUE.)
           CALL OVERLAP$UNSELECT
           DEALLOCATE(AUG)
         ENDDO ! END ISPIN
@@ -5532,3 +5737,129 @@
       LL=L*L+L-M+1
       RETURN
       END SUBROUTINE LLOFLM
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AMPLITUDE(NB,NOCC,IEMP,LINMAT,DIPOLE,AMPL)  ! MARK: AMPLITUDE
+!     **************************************************************************
+!     ** CALCULATE TRANSITION AMPLITUDE FOR A GIVEN INTERMEDIATE              **
+!     **    STATE (IKPT,ISPIN,K) WITH A GIVEN LINEAR DEPENDENCY MATRIX        **
+!     ** THREE COMPONENTS ARE FOR THE THREE CARTESIAN DIRECTIONS              **
+!     ** AMPL=DIPOLE(IEMP) - SUM_M CONJG(LINMAT(IEMP,M))*DIPOLE(M)            **
+!     **************************************************************************
+      IMPLICIT NONE
+      LOGICAL(4), PARAMETER :: SINGLEPARTICLE=.FALSE.
+      INTEGER(4), INTENT(IN) :: NB ! NUMBER OF BANDS
+      INTEGER(4), INTENT(IN) :: NOCC ! NUMBER OF OCCUPIED BANDS
+      INTEGER(4), INTENT(IN) :: IEMP ! INDEX OF EMPTY BAND WITH THE FIRST EMPTY BAND=1
+      COMPLEX(8), INTENT(IN) :: LINMAT(NB-NOCC,NOCC) ! LINEAR DEPENDENCE MATRIX
+      COMPLEX(8), INTENT(IN) :: DIPOLE(3,NB) ! DIPOLE MATRIX
+      COMPLEX(8), INTENT(OUT) :: AMPL(3) ! AMPLITUDE VECTOR
+      INTEGER(4) :: IFINAL ! INDEX OF EMPTY BAND WITHIN ALL BANDS
+      INTEGER(4) :: IB
+      IFINAL=IEMP+NOCC
+      IF(IFINAL.GT.NB) THEN
+        CALL ERROR$MSG('INDEX OF EMPTY BAND IS OUT OF RANGE')
+        CALL ERROR$I4VAL('IEMP',IEMP)
+        CALL ERROR$I4VAL('NOCC',NOCC)
+        CALL ERROR$I4VAL('IFINAL',IFINAL)
+        CALL ERROR$I4VAL('NB',NB)
+        CALL ERROR$STOP('AMPLITUDE')
+      END IF
+      IF(IFINAL.LE.NOCC) THEN
+        CALL ERROR$MSG('FINAL STATE ORBITAL INDEX OCCUPIED')
+        CALL ERROR$I4VAL('IEMP',IEMP)
+        CALL ERROR$I4VAL('NOCC',NOCC)
+        CALL ERROR$I4VAL('IFINAL',IFINAL)
+        CALL ERROR$STOP('AMPLITUDE')
+      END IF
+      AMPL=(0.D0,0.D0)
+      IF(SINGLEPARTICLE) THEN
+        AMPL(:)=DIPOLE(:,IFINAL)
+        RETURN
+      END IF
+      DO IB=1,NOCC
+        AMPL(:)=AMPL(:)+CONJG(LINMAT(IEMP,IB))*DIPOLE(:,IB)
+      ENDDO ! END IB
+      AMPL(:)=DIPOLE(:,IFINAL)-AMPL(:)
+      RETURN
+      END SUBROUTINE AMPLITUDE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE MAPGRID(X,Y,N,GRID,XMIN,DE)  ! MARK: MAPGRID
+!     **************************************************************************
+!     ** MAP VALUE Y AT POSITION X ONTO GRID                                  **
+!     ** SPLIT BETWEEN THE TWO NEIGHBORING POINTS DEPENDING ON DISTANCE       **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), INTENT(IN) :: X
+      REAL(8), INTENT(IN) :: Y
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(INOUT) :: GRID(N)
+      REAL(8), INTENT(IN) :: XMIN
+      REAL(8), INTENT(IN) :: DE
+      INTEGER(4) :: I1,I2
+      REAL(8) :: X0
+      REAL(8) :: W1,W2
+      X0=(X-XMIN)/DE+1.D0
+      I1=INT(X0)
+      I2=I1+1
+      W2=(X0-REAL(I1,KIND=8))
+      W1=1.D0-W2
+      IF(I1.GT.0.AND.I1.LE.N) GRID(I1)=GRID(I1)+Y*W1
+      IF(I2.GT.0.AND.I2.LE.N) GRID(I2)=GRID(I2)+Y*W2
+      RETURN
+      END SUBROUTINE MAPGRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LORENTZCONV(N,X,Y,GAMMA)  ! MARK: LORENTZCONV
+!     **************************************************************************
+!     ** CALCULATE CONVOLUTION WITH LORENTZIAN FUNCTION                       **
+!     ** L(X,X0,GAMMA)=(Y/2)/(PI*((X-X0)**2+(GAMMA/2)**2))                    **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(IN) :: X(N)
+      REAL(8), INTENT(INOUT) :: Y(N)
+      REAL(8), INTENT(IN) :: GAMMA
+      REAL(8) :: WORK(N)
+      INTEGER(4) :: I,J
+      REAL(8) :: GAMMA2
+      REAL(8) :: SVAR
+      DO I=1,N
+        WORK(I)=0.D0
+        GAMMA2=0.25D0*GAMMA*GAMMA
+        DO J=1,N
+          SVAR=GAMMA/(2.D0*PI*((X(I)-X(J))**2+GAMMA2))
+          WORK(I)=WORK(I)+Y(J)*SVAR
+        ENDDO
+      ENDDO
+      Y=WORK
+      RETURN
+      END SUBROUTINE LORENTZCONV
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE GAUSSCONV(N,X,Y,SIGMA)
+!     **************************************************************************
+!     ** CALCULATE CONVOLUTION WITH GAUSSIAN FUNCTION                         **
+!     ** G(X,X0,SIGMA)=(1/(SIGMA*SQRT(2*PI)))*EXP(-0.5*((X-X0)/SIGMA)**2)     **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(IN) :: X(N)
+      REAL(8), INTENT(INOUT) :: Y(N)
+      REAL(8), INTENT(IN) :: SIGMA
+      REAL(8) :: WORK(N)
+      INTEGER(4) :: I,J
+      REAL(8) :: SVAR
+      DO I=1,N
+        WORK(I)=0.D0
+        DO J=1,N
+          SVAR=EXP(-0.5D0*((X(I)-X(J))/SIGMA)**2)/(SIGMA*SQRT(2.D0*PI))
+          WORK(I)=WORK(I)+Y(J)*SVAR
+        ENDDO
+      ENDDO
+      Y=WORK
+      RETURN
+      END SUBROUTINE GAUSSCONV
