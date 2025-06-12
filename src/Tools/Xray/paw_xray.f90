@@ -351,6 +351,8 @@
 
       CALL XAS$CALCULATE
 
+      CALL XAS$OUTPUT
+
 
                           CALL TIMING$PRINT('~',NFIL)
       CALL MPE$CLOCKREPORT(NFIL)
@@ -2769,6 +2771,7 @@
       REAL(8) :: EGROUND
       INTEGER(4) :: IEMP
       COMPLEX(8) :: AMPL(3)
+      COMPLEX(8) :: POLXYZ(3)
       COMPLEX(8), ALLOCATABLE :: KMAT(:,:)
       COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:)
       REAL(8), ALLOCATABLE :: EIG(:)
@@ -2833,9 +2836,9 @@
             CALL AMPLITUDE(NB2,NOCC,IEMP,KMAT,DIPOLE,AMPL)
             EFINAL=EEXCITE+EIG(NOCC+IEMP)
             EDIFF=EFINAL-EGROUND
-
             DO ISPEC=1,NSPEC
               CALL XAS$ISELECT(ISPEC)
+              CALL XAS$GETC8A('POLXYZ',3,POLXYZ)
               ! DOT_PRODUCT IS SUM_I CONJG(POLXYZ(I))*AMPL(I)
               ! THEREFORE, POLXYZ MUST BE CONJUGATED TO COMPENSATE
               CVAR=DOT_PRODUCT(CONJG(THIS%POLXYZ),AMPL)
@@ -2866,6 +2869,95 @@
                           CALL TIMING$CLOCKOFF('XAS$CALCULATE')
                           CALL TRACE$POP
       END SUBROUTINE XAS$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$OUTPUT  ! MARK: XAS$OUTPUT
+!     **************************************************************************
+!     ** OUTPUT XAS SPECTRA TO FILES                                          **
+!     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: NE
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPEC
+      REAL(8) :: EV
+      CHARACTER(6) :: ID
+      REAL(8), ALLOCATABLE :: SUMK(:,:) ! (3,NE) 
+      INTEGER(4) :: I
+
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XAS$OUTPUT')
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('XAS NOT INITIALIZED')
+        CALL ERROR$STOP('XAS$OUTPUT')
+      END IF
+      CALL CONSTANTS('EV',EV)
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+      CALL XAS$GETI4('NE',NE)
+      ALLOCATE(SUMK(3,NE))
+
+      ID=+'XASOUT'
+      CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XAS')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
+
+      ! TODO: ADD MULTIPLICATION BY OMEGA
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(ADJUSTL(THIS%FILE)))
+        CALL FILEHANDLER$UNIT(ID,NFIL)
+        CALL XAS_OUTPUTHEADER(NFIL)
+        ! SUM OVER KPOINTS FOR SPIN 1
+        SUMK(1,:)=SUM(THIS%SPECTRUM(:,1,:),DIM=1)
+        IF(NSPIN.EQ.2) THEN
+          ! SUM OVER KPOINTS FOR SPIN 2
+          SUMK(2,:)=SUM(THIS%SPECTRUM(:,2,:),DIM=1)
+        ELSE IF(NSPIN.EQ.1) THEN
+          ! IF NSPIN=1, COPY SPIN 1 TO SPIN 2
+          SUMK(2,:)=SUMK(1,:)
+        ELSE
+          CALL ERROR$MSG('INVALID NUMBER OF SPINS')
+          CALL ERROR$I4VAL('NSPIN: ',NSPIN)
+          CALL ERROR$STOP('XAS$OUTPUT')
+        END IF
+        ! SUM OVER SPINS
+        SUMK(3,:)=SUM(SUMK(1:2,:),DIM=1)
+        IF(THIS%BROADMODE.EQ.'G') THEN
+          ! GAUSSIAN BROADENING
+          DO I=1,3
+            CALL GAUSSCONV(NE,THIS%E,SUMK(I,:),THIS%EBROAD)
+          ENDDO
+        ELSE IF(THIS%BROADMODE.EQ.'L') THEN
+          ! LORENTZIAN BROADENING
+          DO I=1,3
+            CALL LORENTZCONV(NE,THIS%E,SUMK(I,:),THIS%EBROAD)
+          ENDDO
+        END IF
+
+        DO I=1,NE
+          WRITE(NFIL,*) THIS%E(I)/EV,SUMK(3,I),SUMK(1,I),SUMK(2,I)
+        ENDDO
+        CALL FILEHANDLER$CLOSE(ID)
+        CALL XAS$UNSELECT
+      ENDDO ! END ISPEC
+      DEALLOCATE(SUMK)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XAS$OUTPUT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$REPORT(NFIL)  ! MARK: XAS$REPORT
@@ -3047,6 +3139,61 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS_AUTOMATICENERGYWINDOW
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS_OUTPUTHEADER(NFIL)  ! MARK: XAS_OUTPUTHEADER
+!     **************************************************************************
+!     ** OUTPUT HEADER FOR XAS SPECTRUM                                       **
+!     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
+!     ** REQUIRES XAS SPECTRUM SELECTED                                      **
+!     **************************************************************************
+! TODO: FIND WAY OF GETTING GIT COMMIT
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS
+      USE CLOCK_MODULE
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      CHARACTER(32) :: DATETIME
+      REAL(8) :: EV
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      IF(.NOT.TACTIVE) RETURN
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('XAS NOT INITIALIZED')
+        CALL ERROR$STOP('XAS_OUTPUTHEADER')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('XAS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('XAS_OUTPUTHEADER')
+      END IF
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XAS_OUTPUTHEADER')
+      CALL CONSTANTS('EV',EV)
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='("# ",A)')'XAS OUTPUT'
+      CALL CLOCK$NOW(DATETIME)
+      WRITE(NFIL,FMT='("# ",A12,X,A32)')'DATE:',DATETIME
+
+      IF(THIS%BROADMODE.EQ.'N') THEN
+        WRITE(NFIL,FMT='("# ",A12,X,A)')'BROADEN:','NONE'
+      ELSE IF(THIS%BROADMODE.EQ.'G') THEN
+        WRITE(NFIL,FMT='("# ",A12,X,A)')'BROADEN:','GAUSSIAN'
+      ELSE IF(THIS%BROADMODE.EQ.'L') THEN
+        WRITE(NFIL,FMT='("# ",A12,X,A)')'BROADEN:','LORENTZIAN'
+      END IF      
+      IF(THIS%BROADMODE.NE.'N') THEN
+        WRITE(NFIL,FMT='("# ",A12,F10.4)')'EBROAD[EV]:',THIS%EBROAD/EV
+      END IF
+      WRITE(NFIL,FMT='("# ",A12,3F10.4)')'NORMAL:',THIS%NORMAL(:)
+      WRITE(NFIL,FMT='("# ",A12,3F10.4)')'KDIR:',THIS%KDIR(:)
+      WRITE(NFIL,FMT=-'("# ",A12,2(F8.5,SP,F8.5,"I ",S))')'POL:',THIS%POL(:)
+      WRITE(NFIL,FMT=-'("# ",A12,3(F8.5,SP,F8.5,"I ",S))')'POLXYZ:',THIS%POLXYZ(:)
+      WRITE(NFIL,'(80("#"))')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XAS_OUTPUTHEADER
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS$ISELECT(ISPEC)  ! MARK: XAS$ISELECT
