@@ -8,6 +8,8 @@
 !     **************************************************************************
         USE LINKEDLIST_MODULE, ONLY: LL_TYPE
         TYPE(LL_TYPE) :: LL_CNTL
+        LOGICAL(4) :: TOVERLAP=.FALSE. ! OVERLAP INPUT FILE PRESENT
+        CHARACTER(256) :: OVERLAPFILE ! FILENAME FOR OVERLAP INPUT FILE
         SAVE
       END MODULE XCNTL_MODULE
 !
@@ -32,7 +34,7 @@
       TYPE SIMULATION_TYPE
       CHARACTER(6) :: ID ! SIMULATION ID
       LOGICAL(4) :: INITIALIZED=.FALSE. ! INITIALIZED
-      CHARACTER(256) :: FILE ! FILENAME
+      CHARACTER(256) :: FILE ! FILENAME                                        X
       INTEGER(4) :: NAT ! #(ATOMS)
       INTEGER(4) :: NSP ! #(SETUPS)
       INTEGER(4) :: NKPT ! #(KPOINTS)
@@ -41,10 +43,10 @@
       INTEGER(4) :: NPRO ! #(PROJECTIONS)
       INTEGER(4) :: LNXX
       CHARACTER(6) :: FLAG
-      INTEGER(4), ALLOCATABLE :: LMNX(:) ! (NSP)
-      INTEGER(4), ALLOCATABLE :: LNX(:) ! (NSP)
-      INTEGER(4), ALLOCATABLE :: LOX(:,:) ! (LNXX,NSP)
-      INTEGER(4), ALLOCATABLE :: MAP(:,:) ! (NAT,LNXX) INDEX-1 OF ATOM AND LN
+      INTEGER(4), ALLOCATABLE :: LMNX(:) ! (NSP)                               X
+      INTEGER(4), ALLOCATABLE :: LNX(:) ! (NSP)                                X
+      INTEGER(4), ALLOCATABLE :: LOX(:,:) ! (LNXX,NSP)                         X
+      INTEGER(4), ALLOCATABLE :: MAP(:,:) ! (NAT,LNXX) INDEX-1 OF ATOM AND LN  X
       LOGICAL(4) :: TINV ! INVERSION SYMMETRY
       INTEGER(4) :: NKDIV(3) ! K-POINT DIVISIONS
       INTEGER(4) :: ISHIFT(3) ! K-POINT SHIFTS
@@ -53,7 +55,7 @@
       REAL(8) :: ETOT=HUGE(1.D0)  ! TOTAL ENERGY
       REAL(8) :: EDFT=HUGE(1.D0)  ! TOTAL DFT ENERGY
       REAL(8) :: ECORE=HUGE(1.D0)  ! TOTAL CORE ENERGY
-      INTEGER(4) :: SPACEGROUP
+      INTEGER(4) :: SPACEGROUP !                                               X
       LOGICAL(4) :: TSHIFT
       REAL(8) :: RBAS(3,3) ! BASIS VECTORS
       REAL(8) :: VCELL=-HUGE(1.D0) ! CELL VOLUME
@@ -62,11 +64,13 @@
       INTEGER(4), ALLOCATABLE :: ISPECIES(:) ! (NAT) SPECIES INDEX
       REAL(8), ALLOCATABLE :: XK(:,:) ! (3,NKPT) K-POINTS IN REL. COORD.
       REAL(8), ALLOCATABLE :: WKPT(:) ! (NKPT) K-POINT WEIGHTS
-      COMPLEX(8), ALLOCATABLE :: DENMAT(:,:,:,:) ! (LMNXX,LMNXX,NDIM,NAT) DENSITY MATRIX
+      ! COMPLEX(8), ALLOCATABLE :: DENMAT(:,:,:,:) ! (LMNXX,LMNXX,NDIM,NAT) DENSITY MATRIX
       END TYPE SIMULATION_TYPE
       
-      INTEGER(4), ALLOCATABLE :: ATOMMAP(:) ! (NAT) ATOM INDEX MAP GROUND->EXCITE
-      REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
+      INTEGER(4), ALLOCATABLE :: ATOMMAP(:) 
+      ! (NAT) ATOM INDEX MAP GROUND->EXCITE
+      REAL(8), ALLOCATABLE :: S(:,:,:) 
+      ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX                                X
       TYPE(SIMULATION_TYPE), TARGET :: GROUND ! GROUND STATE SIMULATION (1)
       TYPE(SIMULATION_TYPE), TARGET :: EXCITE ! EXCITED STATE SIMULATION (2)
       TYPE(SIMULATION_TYPE), POINTER :: THIS ! POINTER TO CURRENT SIMULATION
@@ -84,7 +88,7 @@
       REAL(8), ALLOCATABLE :: EIG(:) ! (NB) EIGENVALUES
       REAL(8), ALLOCATABLE :: OCC(:) ! (NB) OCCUPATIONS
       INTEGER(4)          :: NOCC=-HUGE(1) ! #(OCCUPIED STATES)
-      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NB,NPRO) PROJECTIONS
+      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NB,NPRO) PROJECTIONS      X
       END TYPE STATE_TYPE
       
       INTEGER(4) :: NKPTG
@@ -105,7 +109,7 @@
       MODULE XSETUP_MODULE  ! MARK: XSETUP_MODULE
 !     **************************************************************************
 !     ** XSETUP MODULE FOR PAW XRAY TOOL                                      **
-!     ** NOT AVAILABLE IF START FROM RESTART FILE                             **
+!     ** NOT AVAILABLE IF START FROM OVERLAP FILE                             **
 !     **************************************************************************
       TYPE XSETUP_TYPE
       INTEGER(4) :: GID ! GRID ID FOR RADIAL MESH
@@ -127,7 +131,6 @@
       TYPE(XSETUP_TYPE), POINTER :: THIS(:) ! POINTER TO CURRENT SETUP ARRAY
       INTEGER(4) :: THISNSP
       LOGICAL(4), SAVE :: SELECTED=.FALSE. ! SETUP SELECTED
-      LOGICAL(4), SAVE :: TRSTRT=.FALSE. ! START FROM RESTART FILE
       END MODULE XSETUP_MODULE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -283,6 +286,7 @@
       CHARACTER(32) :: DATIME
       INTEGER(4) :: NTASKS
       INTEGER(4) :: THISTASK
+      LOGICAL(4) :: TOVERLAP
 !     **************************************************************************
       CALL MPE$INIT
                           CALL TRACE$PUSH('PAW_XRAY')
@@ -317,9 +321,10 @@
       ! IF(THISTASK.EQ.1) CALL LINKEDLIST$REPORT(LL_CNTL,NFIL)
       IF(THISTASK.EQ.1) CALL LINKEDLIST$REPORT_UNUSED(LL_CNTL,NFIL)
 
-
-      ! TODO: IMPLEMENT READING OF OVERLAP FILE
+      ! READ SIMULATION DATA
       CALL XRAY$READ
+      ! READ OVERLAP FILE
+      CALL XRAY$READOVERLAP
 
       
       CALL KSMAP$REPORT(NFIL)
@@ -348,6 +353,8 @@
       CALL XAS$REPORT(NFIL)
 
       CALL XRAY$OVERLAP
+
+      CALL XRAY$WRITEOVERLAP
 
       CALL XAS$CALCULATE
 
@@ -486,10 +493,9 @@
 !     **************************************************************************
 !     ** READ FILES GROUND AND EXCITE OR RESTART FROM CNTL FILE               **
 !     **************************************************************************
-      USE XCNTL_MODULE, ONLY: LL_CNTL
+      USE XCNTL_MODULE, ONLY: LL_CNTL,TOVERLAP,OVERLAPFILE
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
-      LOGICAL(4) :: TOVERLAP
       LOGICAL(4) :: TCHK
       LOGICAL(4) :: TCHK1
       LOGICAL(4) :: TCHK2
@@ -561,9 +567,14 @@
         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
       END IF
       IF(TOVERLAP) THEN
-        ! TODO: IMPLEMENT HANDLING OF OVERLAP FILE
-        CALL ERROR$MSG('OVERLAP NOT IMPLEMENTED YET')
-        CALL ERROR$STOP('XCNTL$FILES')
+        CALL LINKEDLIST$SELECT(LL_CNTL,'OVERLAP')
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('!OVERLAP:FILE NOT FOUND')
+          CALL ERROR$STOP('XCNTL$FILES')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
+        OVERLAPFILE=TRIM(ADJUSTL(FILENAME))
       END IF
                           CALL TRACE$POP
       RETURN
@@ -574,14 +585,14 @@
 !     **************************************************************************
 !     ** READ !COREHOLE FROM CONTROL FILE                                     **
 !     **************************************************************************
-      ! TODO: MIGHT NOT BE NESSARY IF STARTING FROM OVERLAP FILE
-      USE XCNTL_MODULE, ONLY: LL_CNTL
+      USE XCNTL_MODULE, ONLY: LL_CNTL,TOVERLAP
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
       CHARACTER(32) :: ATOM
       INTEGER(4) :: NCORE
       INTEGER(4) :: LCORE
+      IF(TOVERLAP) RETURN
                           CALL TRACE$PUSH('XCNTL$COREHOLE')
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
@@ -872,6 +883,48 @@
       RETURN
       END SUBROUTINE XCNTL$XAS
 !
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XCNTL$GETL4(ID,VAL)  ! MARK: XCNTL$GETL4
+!     **************************************************************************
+!     ** GET LOGICAL VALUE FROM XCNTL MODULE                                  **
+!     **************************************************************************
+      USE XCNTL_MODULE, ONLY: TOVERLAP
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'TOVERLAP') THEN
+        VAL=TOVERLAP
+      ELSE
+        CALL ERROR$MSG('XCNTL$GETL4: ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XCNTL$GETL4')
+      END IF
+      RETURN
+      END SUBROUTINE XCNTL$GETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XCNTL$GETCH(ID,VAL)  ! MARK: XCNTL$GETCH
+!     **************************************************************************
+!     ** GET CHARACTER VALUE FROM XCNTL MODULE                               **
+!     **************************************************************************
+      USE XCNTL_MODULE, ONLY: OVERLAPFILE,TOVERLAP
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+      IF(.NOT.TOVERLAP) THEN
+        CALL ERROR$MSG('XCNTL$GETCH: OVERLAP NOT ACTIVE')
+        CALL ERROR$STOP('XCNTL$GETCH')
+      END IF
+      IF(ID.EQ.'OVERLAPFILE') THEN
+        VAL=TRIM(ADJUSTL(OVERLAPFILE))
+      ELSE
+        CALL ERROR$MSG('XCNTL$GETCH: ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('XCNTL$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE XCNTL$GETCH
+!
 !     ==========================================================================
 !     ==========================================================================
 !     ==                 SIMULATION MODULE FUNCTIONS                          ==
@@ -1078,6 +1131,8 @@
       INTEGER(4), ALLOCATABLE :: DUMMY(:,:)
       CHARACTER(256) :: FORMAT
       REAL(8) :: SVAR
+      LOGICAL(4) :: TOVERLAP
+      LOGICAL(4) :: TPR
 
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
@@ -1092,11 +1147,13 @@
         CALL ERROR$CHVAL('SELECTED SIMULATION ID: ',THIS%ID)
         CALL ERROR$STOP('SIMULATION$REPORT')
       END IF
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      TPR=.NOT.TOVERLAP
       CALL CONSTANTS('EV',EV)
       WRITE(NFIL,'(80("#"))')
       WRITE(NFIL,FMT='(A20,A14)')'SIMULATION REPORT',THIS%ID
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A10,X,A)')'FILE:',TRIM(THIS%FILE)
+      IF(TPR) WRITE(NFIL,FMT='(A10,X,A)')'FILE:',TRIM(THIS%FILE)
       WRITE(NFIL,FMT='(A10,I10)')'NAT:',THIS%NAT
       WRITE(NFIL,FMT='(A10,I10)')'NSP:',THIS%NSP
       WRITE(NFIL,FMT='(A10,I10)')'NKPT:',THIS%NKPT
@@ -1114,7 +1171,7 @@
       WRITE(NFIL,FMT='(A10,F20.8)')'ETOT [EV]:',THIS%ETOT/EV
       WRITE(NFIL,FMT='(A10,F20.8)')'EDFT [EV]:',THIS%EDFT/EV
       WRITE(NFIL,FMT='(A10,F20.8)')'ECORE [EV]:',THIS%ECORE/EV
-      WRITE(NFIL,FMT='(A10,I10)')'SPACEGR.:',THIS%SPACEGROUP
+      IF(TPR) WRITE(NFIL,FMT='(A10,I10)')'SPACEGR.:',THIS%SPACEGROUP
       WRITE(NFIL,FMT='(A10,L10)')'TSHIFT:',THIS%TSHIFT
       WRITE(NFIL,FMT='(A10,3F10.4)')'RBAS:',THIS%RBAS(:,1)
       DO IAT=2,3
@@ -1125,17 +1182,19 @@
       DO IAT=1,THIS%NAT
         WRITE(NFIL,FMT='(A10,3F10.4,I10)')THIS%ATOMID(IAT),THIS%R(:,IAT),THIS%ISPECIES(IAT)
       ENDDO
-      ! MAP IS ONLY CALCULATED ON FIRST CALL TO SIMULATION$GETI4A
-      ! HERE IT IS CALLED IN CASE IT WAS NOT CALLED BEFORE
-      ALLOCATE(DUMMY(THIS%NAT,THIS%LNXX))
-      CALL SIMULATION$GETI4A('MAP',THIS%NAT*THIS%LNXX,DUMMY)
-      DEALLOCATE(DUMMY)
-      WRITE(NFIL,FMT='(A)')'MAPPING OF PROJECTIONS (INDEX-1)'
-      WRITE(NFIL,FMT='(A10,A10)')'ATOM','MAP'
-      WRITE(FORMAT,'("(I10,",I0,"I10)")')THIS%LNXX
-      DO IAT=1,THIS%NAT
-        WRITE(NFIL,FMT=FORMAT)IAT,THIS%MAP(IAT,:)
-      ENDDO
+      IF(TPR) THEN
+        ! MAP IS ONLY CALCULATED ON FIRST CALL TO SIMULATION$GETI4A
+        ! HERE IT IS CALLED IN CASE IT WAS NOT CALLED BEFORE
+        ALLOCATE(DUMMY(THIS%NAT,THIS%LNXX))
+        CALL SIMULATION$GETI4A('MAP',THIS%NAT*THIS%LNXX,DUMMY)
+        DEALLOCATE(DUMMY)
+        WRITE(NFIL,FMT='(A)')'MAPPING OF PROJECTIONS (INDEX-1)'
+        WRITE(NFIL,FMT='(A10,A10)')'ATOM','MAP'
+        WRITE(FORMAT,'("(I10,",I0,"I10)")')THIS%LNXX
+        DO IAT=1,THIS%NAT
+          WRITE(NFIL,FMT=FORMAT)IAT,THIS%MAP(IAT,:)
+        ENDDO
+      END IF
       WRITE(NFIL,'(A)')'K-POINT REPORT'
       WRITE(NFIL,FMT='(6A10)')'IKPT','ISPIN','XK1','XK2','XK3','WKPT'
       DO IKPT=1,THIS%NKPT
@@ -1259,6 +1318,7 @@
         CALL ERROR$STOP('SIMULATION$GETI4A')
       END IF
       IF(ID.EQ.'LMNX') THEN
+        CALL OVERLAPCHECK
         IF(LEN.NE.THIS%NSP) THEN
           CALL ERROR$MSG('LENGTH OF LMNX ARRAY MUST BE EQUAL TO NSP')
           CALL ERROR$I4VAL('LENGTH OF LMNX: ',LEN)
@@ -1276,6 +1336,7 @@
         END IF
         VAL=THIS%LMNX
       ELSE IF(ID.EQ.'LNX') THEN
+        CALL OVERLAPCHECK
         IF(LEN.NE.THIS%NSP) THEN
           CALL ERROR$MSG('LENGTH OF LNX ARRAY MUST BE EQUAL TO NSP')
           CALL ERROR$I4VAL('LENGTH OF LNX: ',LEN)
@@ -1284,6 +1345,7 @@
         END IF
         VAL=THIS%LNX
       ELSE IF(ID.EQ.'LOX') THEN
+        CALL OVERLAPCHECK
         IF(LEN.NE.THIS%LNXX*THIS%NSP) THEN
           CALL ERROR$MSG('LENGTH OF LOX ARRAY MUST BE EQUAL TO LNXX*NSP')
           CALL ERROR$I4VAL('LENGTH OF LOX: ',LEN)
@@ -1293,6 +1355,7 @@
         END IF
         VAL(:)=RESHAPE(THIS%LOX,(/THIS%LNXX*THIS%NSP/))
       ELSE IF(ID.EQ.'MAP') THEN
+        CALL OVERLAPCHECK
         IF(LEN.NE.THIS%NAT*THIS%LNXX) THEN
           CALL ERROR$MSG('LENGTH OF MAP ARRAY MUST BE EQUAL TO NAT*LNXX')
           CALL ERROR$I4VAL('LENGTH OF MAP: ',LEN)
@@ -1356,6 +1419,18 @@
         CALL ERROR$STOP('SIMULATION$GETI4A')
       END IF
       RETURN
+      CONTAINS 
+        SUBROUTINE OVERLAPCHECK
+        LOGICAL(4) :: TOVERLAP
+        CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+        IF(TOVERLAP) THEN
+          CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+          CALL ERROR$MSG('ID NOT AVAILABLE WHEN OVERLAP IS ACTIVE')
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('SIMULATION$GETI4A')
+        END IF
+        RETURN
+        END SUBROUTINE OVERLAPCHECK
       END SUBROUTINE SIMULATION$GETI4A
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -1421,6 +1496,7 @@
       ELSE IF(ID.EQ.'LNXX') THEN
         VAL=THIS%LNXX
       ELSE IF(ID.EQ.'SPACEGROUP') THEN
+        CALL OVERLAPCHECK
         VAL=THIS%SPACEGROUP
       ELSE
         CALL ERROR$MSG('SIMULATION GETI4 ID NOT RECOGNIZED')
@@ -1428,6 +1504,18 @@
         CALL ERROR$STOP('SIMULATION$GETI4')
       END IF
       RETURN
+      CONTAINS 
+        SUBROUTINE OVERLAPCHECK
+        LOGICAL(4) :: TOVERLAP
+        CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+        IF(TOVERLAP) THEN
+          CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+          CALL ERROR$MSG('ID NOT AVAILABLE WHEN OVERLAP IS ACTIVE')
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('SIMULATION$GETI4A')
+        END IF
+        RETURN
+        END SUBROUTINE OVERLAPCHECK
       END SUBROUTINE SIMULATION$GETI4
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -1539,6 +1627,7 @@
       REAL(8), INTENT(OUT) :: VAL(LEN)
       ! GETTING S REQUIRES NO SELECTED SIMULATION
       IF(ID.EQ.'S') THEN
+        CALL OVERLAPCHECK
         IF(SELECTED) THEN
           CALL ERROR$MSG('SAFEGUARD FUNCTION:')
           CALL ERROR$MSG('CANNOT GET S WHEN SIMULATION IS SELECTED')
@@ -1607,6 +1696,18 @@
         END IF
       END IF
       RETURN
+      CONTAINS 
+        SUBROUTINE OVERLAPCHECK
+        LOGICAL(4) :: TOVERLAP
+        CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+        IF(TOVERLAP) THEN
+          CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+          CALL ERROR$MSG('ID NOT AVAILABLE WHEN OVERLAP IS ACTIVE')
+          CALL ERROR$CHVAL('ID: ',ID)
+          CALL ERROR$STOP('SIMULATION$GETI4A')
+        END IF
+        RETURN
+        END SUBROUTINE OVERLAPCHECK
       END SUBROUTINE SIMULATION$GETR8A
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -1919,6 +2020,178 @@
       RETURN
       END SUBROUTINE SIMULATION_ECORE
 !
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SIMULATION_WRITEOVERLAP(NFIL)
+!     **************************************************************************
+!     ** WRITE SIMULATION MODULE TO OVERLAP FILE WHICH SERVES AS A RESTART    **
+!     ** FILE FOR THE SIMULATION                                              **
+!     ** REQUIRES NO SELECTED SIMULATION                                      **
+!     **************************************************************************
+      USE SIMULATION_MODULE, ONLY: THIS,SELECTED,S,ATOMMAP
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      INTEGER(4), PARAMETER :: NSIM=2
+      INTEGER(4) :: ISIM
+      INTEGER(4) :: ILOGICAL
+
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(RTASK.NE.THISTASK) RETURN
+                          CALL TRACE$PUSH('SIMULATION_WRITEOVERLAP')
+      IF(SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('CANNOT WRITEOVERLAP WHEN SIMULATION IS SELECTED')
+        CALL ERROR$CHVAL('SELECTED SIMULATION ID: ',THIS%ID)
+        CALL ERROR$STOP('SIMULATION_WRITEOVERLAP')
+      END IF
+      DO ISIM=1,NSIM
+        CALL SIMULATION$ISELECT(ISIM)
+        IF(.NOT.THIS%INITIALIZED) THEN
+          CALL ERROR$MSG('SIMULATION NOT INITIALIZED')
+          CALL ERROR$CHVAL('SELECTED SIMULATION ID: ',THIS%ID)
+          CALL ERROR$STOP('SIMULATION_WRITEOVERLAP')
+        END IF
+        ! ID,NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
+        WRITE(NFIL)THIS%ID,THIS%NAT,THIS%NSP,THIS%NKPT,THIS%NSPIN,THIS%NDIM, &
+     &             THIS%NPRO,THIS%LNXX,THIS%FLAG
+        ILOGICAL=0
+        IF(THIS%TINV) ILOGICAL=1
+        ! TINV,NKDIV,ISHIFT,RNTOT,NEL,ETOT,EDFT,ECORE
+        WRITE(NFIL)ILOGICAL,THIS%NKDIV,THIS%ISHIFT,THIS%RNTOT,THIS%NEL, &
+     &             THIS%ETOT,THIS%EDFT,THIS%ECORE
+        ILOGICAL=0
+        IF(THIS%TSHIFT) ILOGICAL=1
+        ! TSHIFT,RBAS,R,ATOMID,ISPECIES
+        WRITE(NFIL)ILOGICAL,THIS%RBAS,THIS%R,THIS%ATOMID,THIS%ISPECIES
+        ! XK,WKPT
+        WRITE(NFIL)THIS%XK,THIS%WKPT
+        ! ATOMMAP
+        WRITE(NFIL)ATOMMAP
+        CALL SIMULATION$UNSELECT
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE SIMULATION_WRITEOVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SIMULATION_READOVERLAP(NFIL)
+!     **************************************************************************
+!     ** READ SIMULATION MODULE FROM OVERLAP FILE WHICH SERVES AS A RESTART   **
+!     ** FILE FOR THE SIMULATION                                              **
+!     ** REQUIRES NO SELECTED SIMULATION                                      **
+!     **************************************************************************
+      USE SIMULATION_MODULE, ONLY: THIS,SELECTED
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      INTEGER(4), PARAMETER :: NSIM=2
+      INTEGER(4) :: ISIM
+      INTEGER(4) :: ILOGICAL
+      CHARACTER(6) :: ID,FLAG
+      INTEGER(4) :: NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX
+      INTEGER(4) :: NKDIV(3),ISHIFT(3)
+      LOGICAL(4) :: TINV,TSHIFT
+      REAL(8) :: RNTOT,NEL,ETOT,EDFT,ECORE
+      REAL(8) :: RBAS(3,3)
+      REAL(8), ALLOCATABLE :: R(:,:)
+      REAL(8), ALLOCATABLE :: XK(:,:)
+      REAL(8), ALLOCATABLE :: WKPT(:)
+      CHARACTER(16), ALLOCATABLE :: ATOMID(:)
+      INTEGER(4), ALLOCATABLE :: ISPECIES(:)
+      INTEGER(4), ALLOCATABLE :: ATOMMAP(:)
+      REAL(8) :: VCELL
+
+                          CALL TRACE$PUSH('SIMULATION_READOVERLAP')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+
+      DO ISIM=1,NSIM
+        CALL SIMULATION$ISELECT(ISIM)
+        IF(THISTASK.EQ.1) THEN
+          ! ID,NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
+          READ(NFIL)ID,NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
+          ! TINV,NKDIV,ISHIFT,RNTOT,NEL,ETOT,EDFT,ECORE
+          READ(NFIL)ILOGICAL,NKDIV,ISHIFT,RNTOT,NEL,ETOT,EDFT,ECORE
+          TINV=.FALSE.
+          IF(ILOGICAL.EQ.1) TINV=.TRUE.
+        END IF
+        CALL MPE$BROADCAST('~',1,ID)
+        CALL SIMULATION$SETCH('ID',ID)
+        CALL MPE$BROADCAST('~',1,NAT)
+        CALL MPE$BROADCAST('~',1,NSP)
+        CALL MPE$BROADCAST('~',1,NKPT)
+        CALL MPE$BROADCAST('~',1,NSPIN)
+        CALL MPE$BROADCAST('~',1,NDIM)
+        CALL MPE$BROADCAST('~',1,NPRO)
+        CALL MPE$BROADCAST('~',1,LNXX)
+        CALL MPE$BROADCAST('~',1,FLAG)
+        CALL SIMULATION$INIT(NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG)
+        ! DISTRIBUTE WORKLOAD FOR K-POINT AND SPIN LOOPS WHILE READING
+        CALL KSMAP$INIT(NKPT,NSPIN)
+        CALL KSMAP$READTASK(RTASK)
+
+        CALL MPE$BROADCAST('~',1,TINV)
+        CALL MPE$BROADCAST('~',1,NKDIV)
+        CALL MPE$BROADCAST('~',1,ISHIFT)
+        CALL MPE$BROADCAST('~',1,RNTOT)
+        CALL MPE$BROADCAST('~',1,NEL)
+        CALL MPE$BROADCAST('~',1,ETOT)
+        CALL MPE$BROADCAST('~',1,EDFT)
+        CALL MPE$BROADCAST('~',1,ECORE)
+        CALL SIMULATION$SETL4('TINV',TINV)
+        CALL SIMULATION$SETI4A('NKDIV',3,NKDIV)
+        CALL SIMULATION$SETI4A('ISHIFT',3,ISHIFT)
+        CALL SIMULATION$SETR8('RNTOT',RNTOT)
+        CALL SIMULATION$SETR8('NEL',NEL)
+        CALL SIMULATION$SETR8('ETOT',ETOT)
+        CALL SIMULATION$SETR8('EDFT',EDFT)
+        CALL SIMULATION$SETR8('ECORE',ECORE)
+
+        ALLOCATE(R(3,NAT))
+        ALLOCATE(ATOMID(NAT))
+        ALLOCATE(ISPECIES(NAT))
+        ALLOCATE(XK(3,NKPT))
+        ALLOCATE(WKPT(NKPT))
+        ALLOCATE(ATOMMAP(NAT))
+        IF(THISTASK.EQ.RTASK) THEN
+          ! TSHIFT,RBAS,R,ATOMID,ISPECIES
+          READ(NFIL)ILOGICAL,RBAS,R,ATOMID,ISPECIES
+          TSHIFT=.FALSE.
+          IF(ILOGICAL.EQ.1) TSHIFT=.TRUE.
+          ! XK,WKPT
+          READ(NFIL)XK,WKPT
+          ! ATOMMAP
+          READ(NFIL)ATOMMAP
+        END IF
+        CALL MPE$BROADCAST('~',RTASK,TSHIFT)
+        CALL MPE$BROADCAST('~',RTASK,RBAS)
+        CALL MPE$BROADCAST('~',RTASK,R)
+        CALL MPE$BROADCAST('~',RTASK,ATOMID)
+        CALL MPE$BROADCAST('~',RTASK,ISPECIES)
+        CALL MPE$BROADCAST('~',RTASK,XK)
+        CALL MPE$BROADCAST('~',RTASK,WKPT)
+        CALL MPE$BROADCAST('~',RTASK,ATOMMAP)
+        CALL SIMULATION$SETL4('TSHIFT',TSHIFT)
+        CALL SIMULATION$SETR8A('RBAS',9,RBAS)
+        CALL SIMULATION$SETR8A('R',3*NAT,R)
+        CALL SIMULATION$SETCHA('ATOMID',NAT,ATOMID)
+        CALL SIMULATION$SETI4A('ISPECIES',NAT,ISPECIES)
+        CALL SIMULATION$SETR8A('XK',3*NKPT,XK)
+        CALL SIMULATION$SETR8A('WKPT',NKPT,WKPT)
+        DEALLOCATE(R)
+        DEALLOCATE(ATOMID)
+        DEALLOCATE(ISPECIES)
+        DEALLOCATE(XK)
+        DEALLOCATE(WKPT)
+        DEALLOCATE(ATOMMAP)
+        CALL SIMULATION$UNSELECT
+      ENDDO
+      CALL SIMULATION_ATOMMAP
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE SIMULATION_READOVERLAP
+!
 !     ==========================================================================
 !     ==========================================================================
 !     ==                   XSETUP MODULE FUNCTIONS                            ==
@@ -1937,9 +2210,12 @@
       INTEGER(4) :: ISP
       CHARACTER(256) :: FORMAT
       INTEGER(4) :: NTASKS,THISTASK,RTASK
+      LOGICAL(4) :: TOVERLAP
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(RTASK.NE.THISTASK) RETURN
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
                           CALL TRACE$PUSH('XSETUP$REPORT')
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO XSETUP SELECTED')
@@ -1968,6 +2244,9 @@
      &                         NSPGROUND,NSPEXCITE,THISNSP
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT SETUP WHEN ALREADY SELECTED')
@@ -2003,6 +2282,9 @@
 !     **************************************************************************
       USE XSETUP_MODULE, ONLY: SELECTED,THIS,THISNSP
       IMPLICIT NONE
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT UNSELECT SETUP ARRAY WHEN NOT SELECTED')
@@ -2023,6 +2305,9 @@
      &                         NSPGROUND,NSPEXCITE,THISNSP
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT SETUP WHEN ALREADY SELECTED')
@@ -2061,6 +2346,9 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
       INTEGER(4), INTENT(IN) :: NSP
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
       IF(NSP.LE.0) THEN
         CALL ERROR$MSG('INVALID NUMBER OF SPECIES')
         CALL ERROR$I4VAL('NUMBER OF SPECIES: ',NSP)
@@ -2104,6 +2392,9 @@
       INTEGER(4), INTENT(IN) :: L(LNXX)
       INTEGER(4), INTENT(IN) :: NBATOM
       INTEGER(4) :: NR
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$INIT')
@@ -2140,6 +2431,12 @@
       INTEGER(4), INTENT(IN) :: ISP
       INTEGER(4), INTENT(IN) :: LEN
       INTEGER(4), INTENT(OUT) :: VAL(LEN)
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP GETI4A NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$GETI4A')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$GETI4A')
@@ -2177,6 +2474,12 @@
       INTEGER(4), INTENT(IN) :: ISP
       INTEGER(4), INTENT(IN) :: LEN
       INTEGER(4), INTENT(IN) :: VAL(LEN)
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP SETI4A NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$SETI4A')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$SETI4A')
@@ -2213,6 +2516,12 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: ISP
       INTEGER(4), INTENT(OUT) :: VAL
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP GETI4 NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$GETI4')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$GETI4')
@@ -2247,6 +2556,12 @@
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(OUT) :: VAL(LEN)
       INTEGER(4) :: NR
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP GETR8A NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$GETR8A')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$GETR8A')
@@ -2302,6 +2617,12 @@
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(IN) :: VAL(LEN)
       INTEGER(4) :: NR
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP SETR8A NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$SETR8A')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$SETR8A')
@@ -2355,6 +2676,12 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: ISP
       REAL(8), INTENT(OUT) :: VAL
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP GETR8 NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$GETR8')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$GETR8')
@@ -2385,6 +2712,12 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: ISP
       REAL(8), INTENT(IN) :: VAL
+      LOGICAL(4) :: TOVERLAP
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) THEN
+        CALL ERROR$MSG('XSETUP SETR8 NOT ALLOWED IN OVERLAP MODE')
+        CALL ERROR$STOP('XSETUP$SETR8')
+      END IF
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SETUP SELECTED')
         CALL ERROR$STOP('XSETUP$SETR8')
@@ -2740,6 +3073,44 @@
       RETURN
       END SUBROUTINE
 !
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS_WRITEOVERLAP(NFIL)  ! MARK: SETTINGS_WRITEOVERLAP
+!     **************************************************************************
+!     ** WRITE SETTINGS MODULE TO OVERLAP FILE WHICH SERVES AS RESTART FILE   **
+!     ** FOR THE SIMULATION                                                   **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: NCORE,LCORE,IATOM,COREHOLE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('SETTINGS_WRITEOVERLAP')
+      WRITE(NFIL)COREHOLE,IATOM,NCORE,LCORE
+                           CALL TRACE$POP
+      RETURN
+      END SUBROUTINE SETTINGS_WRITEOVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SETTINGS_READOVERLAP(NFIL)  ! MARK: SETTINGS_READOVERLAP
+!     **************************************************************************
+!     ** READ SETTINGS MODULE FROM OVERLAP FILE WHICH SERVES AS RESTART FILE  **
+!     ** FOR THE SIMULATION                                                   **
+!     **************************************************************************
+      USE SETTINGS_MODULE, ONLY: NCORE,LCORE,IATOM,COREHOLE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('SETTINGS_READOVERLAP')
+      READ(NFIL)COREHOLE,IATOM,NCORE,LCORE
+                           CALL TRACE$POP
+      RETURN
+      END SUBROUTINE SETTINGS_READOVERLAP
+!
 !     ==========================================================================
 !     ==========================================================================
 !     ==                      XAS MODULE FUNCTIONS                            ==
@@ -2947,9 +3318,9 @@
             CALL LORENTZCONV(NE,THIS%E,SUMK(I,:),THIS%EBROAD)
           ENDDO
         END IF
-
+        ! ERROR: CHECK THE FACTOR OMEGA, HOW TO DEAL WITH IT?
         DO I=1,NE
-          WRITE(NFIL,*) THIS%E(I)/EV,SUMK(3,I),SUMK(1,I),SUMK(2,I)
+          WRITE(NFIL,*) THIS%E(I)/EV,THIS%E(I)/EV*SUMK(3,I),THIS%E(I)/EV*SUMK(1,I),THIS%E(I)/EV*SUMK(2,I)
         ENDDO
         CALL FILEHANDLER$CLOSE(ID)
         CALL XAS$UNSELECT
@@ -4319,6 +4690,36 @@
       RETURN
       END SUBROUTINE STATE$GETC8A
 !
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE STATE_WRITEOVERLAP(NFIL)  ! MARK: STATE_WRITEOVERLAP
+!     **************************************************************************
+!     ** WRITE OVERLAP_MODULE TO OVERLAP FILE WHICH SERVES AS A RESTART FILE  **
+!     ** FOR THE SIMULATION                                                   **
+!     ** REQUIRES NOT SELECTED STATE                                          **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+
+      CALL ERROR$MSG('STATE_WRITEOVERLAP NOT IMPLEMENTED')
+      CALL ERROR$STOP('STATE_WRITEOVERLAP')
+
+      END SUBROUTINE STATE_WRITEOVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE STATE_READOVERLAP(NFIL)  ! MARK: STATE_READOVERLAP
+!     **************************************************************************
+!     ** READ OVERLAP_MODULE FROM OVERLAP FILE WHICH SERVES AS A RESTART FILE **
+!     ** FOR THE SIMULATION                                                   **
+!     ** REQUIRES NOT SELECTED STATE                                          **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+
+      CALL ERROR$MSG('STATE_READOVERLAP NOT IMPLEMENTED')
+      CALL ERROR$STOP('STATE_READOVERLAP')
+
+      END SUBROUTINE STATE_READOVERLAP
+!
 !     ==========================================================================
 !     ==========================================================================
 !     ==                    OVERLAP MODULE FUNCTIONS                          ==
@@ -4855,7 +5256,36 @@
       END IF
       RETURN
       END SUBROUTINE OVERLAP$SETC8A
-      
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP_WRITEOVERLAP(NFIL)  ! MARK: OVERLAP_WRITEOVERLAP
+!     **************************************************************************
+!     ** WRITE OVERLAP MODULE TO OVERLAP FILE WHICH SERVES AS A RESTART       **
+!     ** FILE FOR THE SIMULATION                                              **
+!     ** REQUIRES NO SELECTED OVERLAP                                         **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+
+      CALL ERROR$MSG('OVERLAP WRITEOVERLAP NOT IMPLEMENTED')
+      CALL ERROR$STOP('OVERLAP_WRITEOVERLAP')
+      RETURN
+      END SUBROUTINE OVERLAP_WRITEOVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP_READOVERLAP(NFIL)  ! MARK: OVERLAP_READOVERLAP
+!     **************************************************************************
+!     ** READ OVERLAP MODULE FROM OVERLAP FILE WHICH SERVES AS A RESTART      **
+!     ** FILE FOR THE SIMULATION                                              **
+!     ** REQUIRES NO SELECTED OVERLAP                                         **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+
+      CALL ERROR$MSG('OVERLAP READOVERLAP NOT IMPLEMENTED')
+      CALL ERROR$STOP('OVERLAP_READOVERLAP')
+      RETURN
+      END SUBROUTINE OVERLAP_READOVERLAP
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XRAY$READ  ! MARK: XRAY$READ
@@ -4868,6 +5298,7 @@
       ! CHANGING THIS WILL LIKELY BREAK THINGS
       INTEGER(4), PARAMETER :: NSIM=2
       LOGICAL(4), PARAMETER :: TPR=.TRUE.
+      LOGICAL(4) :: TOVERLAP
       INTEGER(4) :: NFIL(2)
       CHARACTER(6) :: ID
       INTEGER(4) :: NAT,NSP,NKPT,NSPIN,NDIM,LNXX
@@ -4931,7 +5362,8 @@
       INTEGER(4) :: IB2
       INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
       INTEGER(4), ALLOCATABLE :: WTASKSKPT(:) ! (NSPING)
-
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
                           CALL TRACE$PUSH('XRAY$READ')
                           CALL TIMING$CLOCKON('XRAY$READ')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -5314,6 +5746,95 @@
       END SUBROUTINE XRAY$READ
 
       ! TODO: DATACONSISTENCY
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY$WRITEOVERLAP  ! MARK: XRAY$WRITEOVERLAP
+!     **************************************************************************
+!     ** WRITE OVERLAP FILES FOR XRAY SIMULATION                              **
+!     ** SERVES AS A RESTART FILE TO AVOID RE-CALCULATING OVERLAP             **
+!     ** CERTAIN VALUES ARE NOT WRITTEN TO THE FILE, AS THEY ARE NOT REQUIRED **
+!     ** THIS MIGHT LEAD TO SOME VALUES NOT BEING AVAILABLE WHEN STARTING     **
+!     ** FROM THE OVERLAP FILE                                                **
+!     **************************************************************************
+! TODO: INTRODUCE PROPER LOGIC
+      ! SIMULATION MODULE CAN ESSENTIALLY BE COMPLETELY WRITTEN
+      ! STATE MODULE CAN BE WRITTEN WITHOUT THE PROJECTIONS
+      ! XSETUP_MODULE CAN BE SKIPPED
+      ! OVERLAP MODULE SHOULD WRITE PW, AUG, DIPOLE, AND LENGTH NUMBERS
+      ! WRITE SETTINGS MODULE AS IT IS TINY
+      ! XAS_MODULE IS SKIPPED AS IT NEEDS TO BE FILLED BY THE CONTROL FILE
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TOVERLAP
+      INTEGER(4) :: NFIL
+      CHARACTER(256) :: FILENAME
+
+      ! DON'T WRITE OVERLAP IF OVERLAP FILE IS READ
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(TOVERLAP) RETURN
+                          CALL TRACE$PUSH('XRAY$WRITEOVERLAP')
+                          CALL TIMING$CLOCKON('XRAY$WRITEOVERLAP')
+      ! OPEN FILE FOR WRITING
+      CALL FILEHANDLER$SETFILE('OVERLAP',.TRUE.,-'.OVERLAP')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','ACTION','WRITE')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','FORM','UNFORMATTED')
+      CALL FILEHANDLER$UNIT('OVERLAP',NFIL)
+
+      CALL SIMULATION_WRITEOVERLAP(NFIL)
+
+      ! MIGHT NEED TO GATHER DATA ON RTASK?
+      ! CALL STATE_WRITEOVERLAP(NFIL)
+
+      ! CALL OVERLAP_WRITEOVERLAP(NFIL)
+
+      CALL SETTINGS_WRITEOVERLAP(NFIL)
+
+                          CALL TIMING$CLOCKOFF('XRAY$WRITEOVERLAP')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XRAY$WRITEOVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY$READOVERLAP
+!     **************************************************************************
+!     ** READ OVERLAP FILE FOR XRAY SIMULATION                               **
+!     ** SERVES AS A RESTART FILE TO AVOID RE-CALCULATING OVERLAP             **
+!     ** CERTAIN VALUES ARE NOT WRITTEN TO THE FILE, AS THEY ARE NOT REQUIRED **
+!     ** THIS MIGHT LEAD TO SOME VALUES NOT BEING AVAILABLE WHEN STARTING     **
+!     ** FROM THE OVERLAP FILE                                                **
+!     ** FROM THE OVERLAP FILE                                                **
+!     **************************************************************************
+! TODO: INTRODUCE PROPER LOGIC
+      LOGICAL(4) :: TOVERLAP
+      INTEGER(4) :: NFIL
+      CHARACTER(256) :: FILENAME
+
+      ! DON'T READ OVERLAP IF OVERLAP IS NOT ACTIVE
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      IF(.NOT.TOVERLAP) RETURN
+                          CALL TRACE$PUSH('XRAY$READOVERLAP')
+      CALL XCNTL$GETCH('OVERLAPFILE',FILENAME)
+      ! OPEN FILE FOR WRITING
+      CALL FILEHANDLER$SETFILE('OVERLAP',.FALSE.,TRIM(ADJUSTL(FILENAME)))
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','STATUS','OLD')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','ACTION','READ')
+      CALL FILEHANDLER$SETSPECIFICATION('OVERLAP','FORM','UNFORMATTED')
+      CALL FILEHANDLER$UNIT('OVERLAP',NFIL)
+
+      CALL SIMULATION_READOVERLAP(NFIL)
+
+      CALL STATE_READOVERLAP(NFIL)
+
+      CALL OVERLAP_READOVERLAP(NFIL)
+
+      CALL SETTINGS_READOVERLAP(NFIL)
+
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XRAY$READOVERLAP
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XRAY$OVERLAP  ! MARK: XRAY$OVERLAP
