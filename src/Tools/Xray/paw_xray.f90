@@ -138,7 +138,6 @@
 !     **************************************************************************
 !     ** OVERLAP MODULE FOR PAW XRAY TOOL                                     **
 !     **************************************************************************
-      ! TODO: CHECK WHAT IS ACTUALLY NECESSARY
       TYPE OVERLAP_TYPE
       INTEGER(4) :: NB1=-1 ! #(BANDS IN SIMULATION 1)
       INTEGER(4) :: NB2=-1 ! #(BANDS IN SIMULATION 2)
@@ -361,6 +360,8 @@
 
       CALL XAS$OUTPUT
 
+      ! CALCULATE RIXS
+
 
                           CALL TIMING$PRINT('~',NFIL)
       CALL MPE$CLOCKREPORT(NFIL)
@@ -432,7 +433,6 @@
       ! ==  PROTOCOL FILE ======================================================
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       ID=+'PROT'
-      ! TODO: THIS ASSUMES THAT TASKS 1 IS ALWAYS READTASK
       IF(THISTASK.GT.1) THEN
         CALL FILEHANDLER$SETFILE(ID,.FALSE.,-'/DEV/NULL')
       ELSE
@@ -494,6 +494,8 @@
 !     **************************************************************************
 !     ** READ FILES GROUND AND EXCITE OR RESTART FROM CNTL FILE               **
 !     **************************************************************************
+! TODO: REWORK INTO !FILES!FILE STRUCTURE 
+!       WITH ID='GROUND', 'EXCITE', 'OVERLAP', 'PROT', 'OVERLAP_OUT'
       USE XCNTL_MODULE, ONLY: LL_CNTL,TOVERLAP,OVERLAPFILE
       USE LINKEDLIST_MODULE
       IMPLICIT NONE
@@ -3324,7 +3326,6 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
 
-      ! TODO: ADD MULTIPLICATION BY OMEGA
       DO ISPEC=1,NSPEC
         CALL XAS$ISELECT(ISPEC)
         CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(ADJUSTL(THIS%FILE)))
@@ -3356,7 +3357,7 @@
             CALL LORENTZCONV(NE,THIS%E,SUMK(I,:),THIS%EBROAD)
           ENDDO
         END IF
-        ! ERROR: CHECK THE FACTOR OMEGA, HOW TO DEAL WITH IT?
+        ! ERROR: CHECK THE FACTOR OMEGA, HOW TO DEAL WITH IT? UNIT CONVERSION?
         DO I=1,NE
           WRITE(NFIL,*) THIS%E(I)/EV,THIS%E(I)/EV*SUMK(3,I),THIS%E(I)/EV*SUMK(1,I),THIS%E(I)/EV*SUMK(2,I)
         ENDDO
@@ -4299,7 +4300,7 @@
 !     ** REQUIRES NO STATE ARRAY SELECTED                                     **
 !     **************************************************************************
 ! TODO: NOT PROTECTED AGAINST ALLOCATED BUT EMPTY EIG AND OCC ARRAYS
-! ERROR: CHOOSE BETTER METHOD
+! ERROR: CHOOSE BETTER METHOD OF DETECTING OCCUPATION NUMBER
 ! TODO: IMPLEMENT FERMI LEVEL DETECTION
       USE STATE_MODULE, ONLY: THIS,SELECTED,INITIALIZED,NKPTG,NSPING, &
      &                        OCCPERCENT
@@ -4498,7 +4499,7 @@
       THIS(IKPT,ISPIN)%NB=NB
       ALLOCATE(THIS(IKPT,ISPIN)%EIG(NB))
       ALLOCATE(THIS(IKPT,ISPIN)%OCC(NB))
-      ! TODO: PROJ IS NOT ALLOCATED HERE AS IT MIGHT NOT BE USED WITH A RESTART FILE
+      ! PROJ IS NOT ALLOCATED HERE AS IT IS NOT USED WHEN STARTING FROM OVERLAP
       RETURN
       END SUBROUTINE STATE$NEW
 !
@@ -5676,11 +5677,10 @@
 
       DO ISIM=1,NSIM
         CALL SIMULATION$ISELECT(ISIM)
-        ! ERROR: ID AND FILE MUST HAVE BEEN SET BEFORE
+        ! ID AND FILE MUST HAVE BEEN SET BEFORE
         CALL SIMULATION$GETCH('ID',ID)
         IF(THISTASK.EQ.1) THEN
           IF(TPR) CALL TRACE$PASS('READING GENERAL QUANTITIES')
-          ! ERROR: FILEHANDLING FOR SIMULATION FILES MISSING
           CALL FILEHANDLER$UNIT(ID,NFIL(ISIM))
           REWIND(NFIL(ISIM))
           ! ======================================================================
@@ -6062,20 +6062,13 @@
 !     ** THIS MIGHT LEAD TO SOME VALUES NOT BEING AVAILABLE WHEN STARTING     **
 !     ** FROM THE OVERLAP FILE                                                **
 !     **************************************************************************
-! TODO: INTRODUCE PROPER LOGIC
-      ! SIMULATION MODULE CAN ESSENTIALLY BE COMPLETELY WRITTEN
-      ! STATE MODULE CAN BE WRITTEN WITHOUT THE PROJECTIONS
-      ! XSETUP_MODULE CAN BE SKIPPED
-      ! OVERLAP MODULE SHOULD WRITE PW, AUG, DIPOLE, AND LENGTH NUMBERS
-      ! WRITE SETTINGS MODULE AS IT IS TINY
-      ! XAS_MODULE IS SKIPPED AS IT NEEDS TO BE FILLED BY THE CONTROL FILE
       USE STRINGS_MODULE
       IMPLICIT NONE
       LOGICAL(4) :: TOVERLAP
       INTEGER(4) :: NFIL
       CHARACTER(256) :: FILENAME
 
-      ! DON NOT WRITE OVERLAP IF OVERLAP FILE IS READ
+      ! DO NOT WRITE OVERLAP IF OVERLAP FILE IS READ
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
                           CALL TRACE$PUSH('XRAY$WRITEOVERLAP')
@@ -6111,12 +6104,11 @@
 !     ** FROM THE OVERLAP FILE                                                **
 !     ** FROM THE OVERLAP FILE                                                **
 !     **************************************************************************
-! TODO: INTRODUCE PROPER LOGIC
       LOGICAL(4) :: TOVERLAP
       INTEGER(4) :: NFIL
       CHARACTER(256) :: FILENAME
 
-      ! DON NOT READ OVERLAP IF OVERLAP IS NOT ACTIVE
+      ! DO NOT READ OVERLAP IF OVERLAP IS NOT ACTIVE
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(.NOT.TOVERLAP) RETURN
                           CALL TRACE$PUSH('XRAY$READOVERLAP')
