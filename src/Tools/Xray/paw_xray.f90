@@ -1,6 +1,6 @@
 !     ==  OPEN QUESTIONS  ======================================================
 ! WHAT HAPPENS FOR DIFFERENT AMOUNT OF BANDS AT DIFFERENT K-POINTS?
-
+! TODO: DEALLOCATE WHAT IS NOT NEEDED DURING RUNTIME
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       MODULE XCNTL_MODULE  ! MARK: XCNTL_MODULE
 !     **************************************************************************
@@ -226,53 +226,51 @@
       ! INCOMING LIGHT
       REAL(8) :: KDIRI(3) ! DIRECTION OF K VECTOR
       COMPLEX(8) :: POLI(2) ! POLARIZATION VECTOR
-      COMPLEX(8) :: POLIXYZ(3) ! POLARIZATION VECTOR IN CARTESIAN COORDINATES
-      LOGICAL(4) :: TPOLIXYZ ! CHECK IF POLIXYZ IS SET
+      COMPLEX(8) :: POLXYZI(3) ! POLARIZATION VECTOR IN CARTESIAN COORDINATES
+      LOGICAL(4) :: TPOLXYZI ! CHECK IF POLIXYZ IS SET
       ! OUTGOING LIGHT
       REAL(8) :: KDIRO(3) ! DIRECTION OF K VECTOR
       COMPLEX(8) :: POLO(2) ! POLARIZATION VECTOR
       COMPLEX(8) :: POLXYZO(3) ! POLARIZATION VECTOR IN CARTESIAN COORDINATES
+      LOGICAL(4) :: TPOLXYZO ! CHECK IF POLXYZO IS SET
 
+      REAL(8) :: ELIGHT=-HUGE(ELIGHT) ! ENERGY OF INCIDENT LIGHT
       REAL(8) :: GAMMA ! LIFETIME BROADENING FOR RIXS SPECTRUM
+
+      ! MIGHT NOT BE NECESSARY IF ONLY AMPLITUDE IS CALCULATED AND WRITTEN TO FILE
       REAL(8) :: EBROAD ! GAUSSIAN BROADENING FOR XAS SPECTRUM (REPLACES DELTA FUNCTION)
       CHARACTER(1) :: BROADMODE ! BROADENING MODE: 'G' GAUSSIAN, 'L' LORENTZIAN,
                                 ! 'N' NONE
+
+      LOGICAL(4) :: TKPTSHIFT ! CHECK IF KPT SHIFT IS USED
+      REAL(8) :: KI(3) ! K VECTOR OF INCIDENT LIGHT
+      REAL(8) :: KO(3) ! K VECTOR OF OUTGOING LIGHT
+      REAL(8) :: Q(3) ! MOMENTUM TRANSFER
+      ! RELATIVE COORDINATES
+      REAL(8) :: XKI(3) ! K VECTOR OF INCIDENT LIGHT IN RELATIVE COORDINATES
+      REAL(8) :: XKO(3) ! K VECTOR OF OUTGOING LIGHT IN RELATIVE COORDINATES
+      REAL(8) :: XQ(3) ! MOMENTUM TRANSFER IN RELATIVE COORDINATES
+      ! APPROXIMATE MOMENTUM TRANSFER FROM AVAILABLE K-POINTS
+      REAL(8) :: QAPPROX(3) ! APPROXIMATE MOMENTUM TRANSFER
+      REAL(8) :: XQAPPROX(3) ! APPROXIMATE MOMENTUM TRANSFER IN RELATIVE COORDINATES
       END TYPE RIXS_SPEC_TYPE
 
       LOGICAL(4) :: TACTIVE=.FALSE. ! RIXS ACTIVE
       LOGICAL(4) :: TINITIALIZE=.FALSE.
       INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR RIXS
       ! ENERGY LOSS FOR WHICH FINAL STATES ARE CONSIDERED
-      REAL(8) :: EMIN=-HUGE(1.D0) ! MINIMUM ENERGY FOR RIXS
-      REAL(8) :: EMAX=HUGE(1.D0) ! MAXIMUM ENERGY FOR RIXS
-      ! FOLLOWING SETTINGS ARE USED AS DEFAULTS FOR SPECTRA
-      ! WILL BE OVERWRITTEN BY SPECTRA SETTINGS
+      REAL(8) :: EMIN=-HUGE(1.D0) ! MINIMUM ENERGY LOSS FOR RIXS
+      REAL(8) :: EMAX=HUGE(1.D0) ! MAXIMUM ENERGY LOSS FOR RIXS
 
-      TYPE(RIXS_SPEC_TYPE), ALLOCATABLE :: SPECTRA(:) ! (NSPEC) SPECTRA
+      ! MIGHT NOT BE NECESSARY IF ONLY AMPLITUDE IS CALCULATED AND WRITTEN TO FILE
+      REAL(8) :: DE ! ENERGY STEP FOR RIXS SPECTRUM
+      INTEGER(4) :: NE ! NUMBER OF ENERGY POINTS FOR RIXS SPECTRUM
+
+      TYPE(RIXS_SPEC_TYPE), ALLOCATABLE, TARGET :: SPECTRA(:) ! (NSPEC) SPECTRA
       TYPE(RIXS_SPEC_TYPE), POINTER :: THIS ! POINTER TO CURRENT SPECTRUM
       LOGICAL(4), SAVE :: SELECTED=.FALSE. ! SPECTRUM SELECTED
       END MODULE RIXS_MODULE
 !
-!     ...1.........2.........3.........4.........5.........6.........7.........8
-      ! MODULE PAW_XRAY_MODULE  ! MARK: PAW_XRAY_MODULE
-      ! TYPE SETTINGS_TYPE
-      !   CHARACTER(32) :: COREHOLE ! ATOM ID OF CORE HOLE
-      !   INTEGER(4) :: IATOM ! ATOM INDEX WITH CORE HOLE IN SIM1 (FOR SIM2 USE ATOMMAP)
-      !   INTEGER(4) :: NCORE ! N QUANTUM NUMBER OF CORE HOLE
-      !   INTEGER(4) :: LCORE ! L QUANTUM NUMBER OF CORE HOLE
-      ! END TYPE SETTINGS_TYPE
-
-      ! TYPE(SETTINGS_TYPE) :: SETTINGS
-
-      ! REAL(8), ALLOCATABLE :: S(:,:,:) ! (NAT,LNXX1,LNXX2) ATOMIC OVERLAP MATRIX
-      ! INTEGER(4), ALLOCATABLE :: ATOMMAP(:) ! (NAT) ATOM INDEX MAP BRA -> KET
-
-      ! INTEGER(4), ALLOCATABLE :: KSMAP(:,:) ! (NKPT,NSPIN) K AND S RESPONSIBILITY OF TASKS
-      ! INTEGER(4) :: NKPTG  ! #(KPOINTS TOTAL)
-      ! INTEGER(4) :: NSPING ! #(SPINS TOTAL)
-      ! INTEGER(4) :: RTASK  ! TASK RESPONSIBLE FOR READ/WRITE
-      ! END MODULE PAW_XRAY_MODULE
-
 !     ==========================================================================
 !     ==                    PROGRAM PAW_XRAY                                  ==
 !     ==========================================================================
@@ -311,6 +309,7 @@
       CALL XCNTL$FILES
       CALL XCNTL$COREHOLE
       CALL XCNTL$XAS
+      CALL XCNTL$RIXS
       ! TODO: IMPLEMENT RIXS BLOCK READ
       CALL TIMING$CLOCKOFF('XCNTL')
 
@@ -360,7 +359,8 @@
 
       CALL XAS$OUTPUT
 
-      ! CALCULATE RIXS
+      CALL RIXS$CALCULATE
+
 
 
                           CALL TIMING$PRINT('~',NFIL)
@@ -885,6 +885,309 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XCNTL$XAS
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XCNTL$RIXS  ! MARK: XCNTL$RIXS
+!     **************************************************************************
+!     ** READ !XCNTL!RIXS FROM CONTROL FILE                                   **
+!     **************************************************************************
+      USE LINKEDLIST_MODULE
+      USE XCNTL_MODULE, ONLY: LL_CNTL
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      LOGICAL(4) :: TCHK1
+      LOGICAL(4) :: TCHK2
+      LOGICAL(4) :: TCHK3
+      CHARACTER(256) :: FILENAME
+      INTEGER(4) :: NSPEC
+      INTEGER(4) :: ISPEC
+      REAL(8) :: EMIN
+      REAL(8) :: EMAX
+
+      REAL(8) :: ELIGHT
+      LOGICAL(4) :: TELIGHTDEF
+      LOGICAL(4) :: TELIGHT
+
+      REAL(8) :: GAMMA
+      LOGICAL(4) :: TGAMMADEF
+      LOGICAL(4) :: TGAMMA
+      
+      REAL(8) :: NORMAL(3)
+      LOGICAL(4) :: TNORMALDEF
+      LOGICAL(4) :: TNORMAL
+      
+      REAL(8) :: KDIRI(3)
+      LOGICAL(4) :: TKDIRIDEF
+      LOGICAL(4) :: TKDIRI
+      
+      REAL(8) :: KDIRO(3)
+      LOGICAL(4) :: TKDIRODEF
+      LOGICAL(4) :: TKDIRO
+      
+      REAL(8) :: REALPOL(4)
+
+      COMPLEX(8) :: POLI(2)
+      LOGICAL(4) :: TPOLIDEF
+      LOGICAL(4) :: TPOLI
+
+      COMPLEX(8) :: POLO(2)
+      LOGICAL(4) :: TPOLODEF
+      LOGICAL(4) :: TPOLO
+
+      REAL(8) :: RVAR
+      REAL(8) :: RVAR3(3)
+      COMPLEX(8) :: CVAR2(2)
+
+
+      REAL(8) :: EV
+      ! ONLY READ IF RIXS IS ACTIVE
+      CALL RIXS$GETL4('ACTIVE',TCHK)
+      IF(.NOT.TCHK) RETURN
+                          CALL TRACE$PUSH('XCNTL$RIXS')
+      CALL CONSTANTS('EV',EV)
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'RIXS')
+
+      ! EMIN[EV]
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EMIN[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'EMIN[EV]',1,EMIN)
+        EMIN=EMIN*EV
+      ELSE
+        EMIN=-HUGE(1.D0) ! MINIMUM ENERGY NOT SET
+      END IF
+      CALL RIXS$SETR8('EMIN',EMIN)
+
+      ! EMAX[EV]
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EMAX[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'EMAX[EV]',1,EMAX)
+        EMAX=EMAX*EV
+      ELSE
+        EMAX=HUGE(1.D0) ! MAXIMUM ENERGY NOT SET
+      END IF
+      CALL RIXS$SETR8('EMAX',EMAX)
+
+      ! GAMMA[EV] (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'GAMMA[EV]',1,TGAMMADEF)
+      IF(TGAMMADEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'GAMMA[EV]',1,GAMMA)
+        GAMMA=GAMMA*EV
+        IF(GAMMA.LT.0.D0) THEN
+          CALL ERROR$MSG('GAMMA[EV] CANNOT BE NEGATIVE')
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+      END IF
+
+      ! ELIGHT[EV] (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'ELIGHT[EV]',1,TELIGHTDEF)
+      IF(TELIGHTDEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'ELIGHT[EV]',1,ELIGHT)
+        ELIGHT=ELIGHT*EV
+        IF(ELIGHT.LT.0.D0) THEN
+          CALL ERROR$MSG('ELIGHT[EV] CANNOT BE NEGATIVE')
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+      END IF
+
+      ! NORMAL VECTOR (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'NORMAL',1,TNORMALDEF)
+      IF(TNORMALDEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'NORMAL',1,NORMAL)
+        IF(NORM2(NORMAL).LT.1.D-6) THEN
+          CALL ERROR$MSG('NORMAL VECTOR CANNOT BE ZERO')
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+      END IF
+
+      ! KDIRI VECTOR (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'KDIRI',1,TKDIRIDEF)
+      IF(TKDIRIDEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'KDIRI',1,KDIRI)
+        IF(NORM2(KDIRI).LT.1.D-6) THEN
+          CALL ERROR$MSG('KDIRI VECTOR CANNOT BE ZERO')
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+      END IF
+
+      ! KDIRO VECTOR (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'KDIRO',1,TKDIRODEF)
+      IF(TKDIRODEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'KDIRO',1,KDIRO)
+        IF(NORM2(KDIRO).LT.1.D-6) THEN
+          CALL ERROR$MSG('KDIRO VECTOR CANNOT BE ZERO')
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+      END IF
+
+      ! POLI VECTOR (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'POLI',1,TPOLIDEF)
+      IF(TPOLIDEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'POLI',1,REALPOL)
+        POLI(1)=CMPLX(REALPOL(1),REALPOL(2),KIND=8)
+        POLI(2)=CMPLX(REALPOL(3),REALPOL(4),KIND=8)
+      END IF
+
+      ! POLO VECTOR (DEFAULT)
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'POLO',1,TPOLODEF)
+      IF(TPOLODEF) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'POLO',1,REALPOL)
+        POLO(1)=CMPLX(REALPOL(1),REALPOL(2),KIND=8)
+        POLO(2)=CMPLX(REALPOL(3),REALPOL(4),KIND=8)
+      END IF
+
+      ! READ NUMBER OF SPECTRA
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'SPECTRUM',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('CONTROL FILE DOES NOT CONTAIN !RIXS!SPECTRUM BLOCK')
+        CALL ERROR$MSG('AT LEAST ONE SPECTRUM IS REQUIRED')
+        CALL ERROR$STOP('XCNTL$RIXS')
+      END IF
+
+      CALL LINKEDLIST$NLISTS(LL_CNTL,'SPECTRUM',NSPEC)
+      CALL RIXS$SETI4('NSPEC',NSPEC)
+      CALL RIXS$SETL4('INITIALIZE',.TRUE.) ! INITIALIZE RIXS MODULE
+
+      ! READ ALL SPECTRA
+      DO ISPEC=1,NSPEC
+        CALL RIXS$ISELECT(ISPEC)
+        CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+        CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+        CALL LINKEDLIST$SELECT(LL_CNTL,'RIXS')
+        CALL LINKEDLIST$SELECT(LL_CNTL,'SPECTRUM',ISPEC)
+
+        ! READ FILENAME
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('!RIXS:SPECTRUM:FILE NOT FOUND')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
+        CALL RIXS$SETCH('FILE',TRIM(ADJUSTL(FILENAME)))
+
+        ! GAMMA[EV]
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'GAMMA[EV]',1,TGAMMA)
+        IF(TGAMMA) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'GAMMA[EV]',1,RVAR)
+          RVAR=RVAR*EV
+          CALL RIXS$SETR8('GAMMA',RVAR)
+        ELSE
+          IF(TGAMMADEF) THEN
+            CALL RIXS$SETR8('GAMMA',GAMMA)
+          ELSE
+            CALL ERROR$MSG('GAMMA[EV] MUST BE SET')
+            CALL ERROR$I4VAL('ISPEC',ISPEC)
+            CALL ERROR$STOP('XCNTL$RIXS')
+          END IF
+        END IF
+
+        ! ELIGHT[EV]
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'ELIGHT[EV]',1,TELIGHT)
+        IF(TELIGHT) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'ELIGHT[EV]',1,RVAR)
+          RVAR=RVAR*EV
+          CALL RIXS$SETR8('ELIGHT',RVAR)
+        ELSE
+          IF(TELIGHTDEF) THEN
+            CALL RIXS$SETR8('ELIGHT',ELIGHT)
+          ELSE
+            CALL ERROR$MSG('ELIGHT[EV] MUST BE SET')
+            CALL ERROR$I4VAL('ISPEC',ISPEC)
+            CALL ERROR$STOP('XCNTL$RIXS')
+          END IF
+        END IF
+
+        ! NORMAL VECTOR
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'NORMAL',1,TNORMAL)
+        IF(TNORMAL) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'NORMAL',1,RVAR3)
+          IF(NORM2(RVAR3).LT.1.D-6) THEN
+            CALL ERROR$MSG('NORMAL VECTOR CANNOT BE ZERO')
+            CALL ERROR$I4VAL('ISPEC',ISPEC)
+            CALL ERROR$STOP('XCNTL$RIXS')
+          END IF
+          CALL RIXS$SETR8A('NORMAL',3,RVAR3)
+        ELSE IF(TNORMALDEF) THEN
+          CALL RIXS$SETR8A('NORMAL',3,NORMAL)
+        ELSE
+          CALL ERROR$MSG('NORMAL VECTOR MUST BE SET')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+
+        ! KDIRI VECTOR
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'KDIRI',1,TKDIRI)
+        IF(TKDIRI) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'KDIRI',1,RVAR3)
+          IF(NORM2(RVAR3).LT.1.D-6) THEN
+            CALL ERROR$MSG('KDIRI VECTOR CANNOT BE ZERO')
+            CALL ERROR$I4VAL('ISPEC',ISPEC)
+            CALL ERROR$STOP('XCNTL$RIXS')
+          END IF
+          CALL RIXS$SETR8A('KDIRI',3,RVAR3)
+        ELSE IF(TKDIRIDEF) THEN
+          CALL RIXS$SETR8A('KDIRI',3,KDIRI)
+        ELSE
+          CALL ERROR$MSG('KDIRI VECTOR MUST BE SET')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+
+        ! KDIRO VECTOR
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'KDIRO',1,TKDIRO)
+        IF(TKDIRO) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'KDIRO',1,RVAR3)
+          IF(NORM2(RVAR3).LT.1.D-6) THEN
+            CALL ERROR$MSG('KDIRO VECTOR CANNOT BE ZERO')
+            CALL ERROR$I4VAL('ISPEC',ISPEC)
+            CALL ERROR$STOP('XCNTL$RIXS')
+          END IF
+          CALL RIXS$SETR8A('KDIRO',3,RVAR3)
+        ELSE IF(TKDIRODEF) THEN
+          CALL RIXS$SETR8A('KDIRO',3,KDIRO)
+        ELSE
+          CALL ERROR$MSG('KDIRO VECTOR MUST BE SET')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+
+        ! POLI VECTOR
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'POLI',1,TPOLI)
+        IF(TPOLI) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'POLI',1,REALPOL)
+          CVAR2(1)=CMPLX(REALPOL(1),REALPOL(2),KIND=8)
+          CVAR2(2)=CMPLX(REALPOL(3),REALPOL(4),KIND=8)
+          CALL RIXS$SETC8A('POLI',2,CVAR2)
+        ELSE IF(TPOLIDEF) THEN
+          CALL RIXS$SETC8A('POLI',2,POLI)
+        ELSE
+          CALL ERROR$MSG('POLI VECTOR MUST BE SET')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+
+        ! POLO VECTOR
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'POLO',1,TPOLO)
+        IF(TPOLO) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,'POLO',1,REALPOL)
+          CVAR2(1)=CMPLX(REALPOL(1),REALPOL(2),KIND=8)
+          CVAR2(2)=CMPLX(REALPOL(3),REALPOL(4),KIND=8)
+          CALL RIXS$SETC8A('POLO',2,CVAR2)
+        ELSE IF(TPOLODEF) THEN
+          CALL RIXS$SETC8A('POLO',2,POLO)
+        ELSE
+          CALL ERROR$MSG('POLO VECTOR MUST BE SET')
+          CALL ERROR$I4VAL('ISPEC',ISPEC)
+          CALL ERROR$STOP('XCNTL$RIXS')
+        END IF
+
+        CALL RIXS$UNSELECT
+      ENDDO ! END ISPEC
+                          CALL TRACE$POP  
+      RETURN
+      END SUBROUTINE XCNTL$RIXS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XCNTL$GETL4(ID,VAL)  ! MARK: XCNTL$GETL4
@@ -4072,38 +4375,258 @@
 !     ==========================================================================
 !     ==========================================================================
 ! TODO: UPDATE RIXS FUNCTIONS
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE RIXS$GETL4(ID,VAL)  ! MARK: RIXS$GETL4
-! !     **************************************************************************
-! !     ** GET LOGICAL FROM RIXS MODULE                                        **
-! !     **************************************************************************
-!       USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE
-!       IMPLICIT NONE
-!       CHARACTER(*), INTENT(IN) :: ID
-!       LOGICAL(4), INTENT(OUT) :: VAL
-!       IF(ID.EQ.'INITIALIZE') THEN
-!         VAL=TINITIALIZE
-!       ELSE IF(ID.EQ.'ACTIVE') THEN
-!         IF(.NOT.TINITIALIZE) THEN
-!           CALL ERROR$MSG('RIXS NOT INITIALIZED')
-!           CALL ERROR$STOP('RIXS$GETL4')
-!         END IF
-!         VAL=TACTIVE
-!       ELSE
-!         CALL ERROR$MSG('RIXS GETL4 ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID: ',ID)
-!         CALL ERROR$STOP('RIXS$GETL4')
-!       END IF
-!       RETURN
-!       END SUBROUTINE RIXS$GETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$CALCULATE  ! MARK: RIXS$CALCULATE
+!     **************************************************************************
+!     ** CALCULATE RIXS AMPLITUDE                                             **
+!     ** REQUIRES RIXS ACTIVE AND INITIALIZED                                 **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      IF(.NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('RIXS$CALCULATE')
+                          CALL TIMING$CLOCKON('RIXS$CALCULATE')
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$CALCULATE')
+      END IF
+      ! CALCULATE K VECTORS, RELATIVE K VECTORS AND Q VECTOR
+      CALL RIXS_KVECTORS
+      ! CALCULATE CLOSEST K POINT FULFILLING THE MOMENTUM CONSERVATION (IN REAL COORDINATES, NOT FRACTIONAL)
+
+      ! DIFFERENTIATE BETWEEN SPECTRA THAT ARE AT ONE KPT AND ONES THAT ARE AT TWO
+
+      ! WORK OUT EFFICIENT ORDER TO AVOID REPEATED CALCULATIONS
+
+      ! CALCULATE SPECTRA AT ONE KPT
+
+      ! CALCULATE SPECTRA AT TWO KPTS
+
+      ! FIGURE OUT HOW TO STORE SPECTRA AND HOW TO OUTPUT THEM
+
+
+
+
+                          CALL TIMING$CLOCKOFF('RIXS$CALCULATE')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE RIXS$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_KVECTORS  ! MARK: RIXS_KVECTORS
+!     **************************************************************************
+!     ** CALCULATE K-VECTORS FOR RIXS MODULE                                  **
+!     ** REQUIRES RIXS INITIALIZED                                            **
+!     ** REQUIRES RIXS SPECTRUM UNSELECTED                                    **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS,NSPEC
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      REAL(8) :: RBAS(3,3)
+                          CALL TRACE$PUSH('RIXS_KVECTORS')
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETR8A('RBAS',9,RBAS)
+      CALL SIMULATION$UNSELECT
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS_KVECTORS')
+      END IF
+      IF(SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('RIXS SPECTRUM ALREADY SELECTED')
+        CALL ERROR$STOP('RIXS_KVECTORS')
+      END IF
+      DO ISPEC=1,NSPEC
+        CALL RIXS$ISELECT(ISPEC)
+        CALL KVEC(THIS%ELIGHT,THIS%KDIRI,THIS%KI)
+        ! WARNING: APPROXIMATION KF IS CALCULATED WITH THE EXCITATION ENERGY 
+        !          AND NOT THE EMISSION ENERGY
+        CALL KVEC(THIS%ELIGHT,THIS%KDIRO,THIS%KO)
+        THIS%Q=THIS%KI-THIS%KO
+        CALL KTOXK(THIS%KI,RBAS,THIS%XKI)
+        CALL KTOXK(THIS%KO,RBAS,THIS%XKO)
+        CALL KTOXK(THIS%Q,RBAS,THIS%XQ)
+        ! CALCULATE KPOINT SHIFT AND SET QAPPROX, XQAPPROX, AND TKPTSHIFT
+        CALL RIXS$UNSELECT
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE RIXS_KVECTORS
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS_QTRANSFER  ! MARK: RIXS_QTRANSFER
+!     **************************************************************************
+!     ** CALCULATE Q TRANSFER FOR RIXS MODULE                                 **
+!     ** REQUIRES RIXS INITIALIZED AND NOT SELECTED                           **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS,NSPEC
+      IMPLICIT NONE
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: IKPT
+      REAL(8), ALLOCATABLE :: XK(:,:)
+      REAL(8), ALLOCATABLE :: K(:,:)
+      REAL(8) :: RBAS(3,3)
+      REAL(8) :: XQ1(3)
+      REAL(8) :: Q1(3)
+      REAL(8) :: QAPPROX(3)
+      REAL(8) :: DISTANCE
+      REAL(8) :: SVAR
+      INTEGER(4) :: ISPEC
+                          CALL TRACE$PUSH('RIXS_QTRANSFER')
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS_QTRANSFER')
+      END IF
+      IF(SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('RIXS SPECTRUM ALREADY SELECTED')
+        CALL ERROR$STOP('RIXS_QTRANSFER')
+      END IF
+
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETR8A('RBAS',9,RBAS)
+      ALLOCATE(K(3,NKPT))
+      ALLOCATE(XK(3,NKPT))
+      CALL SIMULATION$GETR8A('XK',3*NKPT,XK)
+      CALL SIMULATION$UNSELECT
+
+      ! TRANSFORM RELATIVE COORDINATES TO REAL COORDINATES
+      DO IKPT=1,NKPT
+        CALL XKTOKPT(XK(:,IKPT),RBAS,K(:,IKPT))
+      ENDDO ! END IKPT
+
+      DO ISPEC=1,NSPEC
+        CALL RIXS$ISELECT(ISPEC)
+        XQ1(:)=THIS%XQ(:)
+        ! REDUCE XQ TO FIRST BRILLUIN ZONE
+        XQ1(:)=MODULO(XQ1(:),1.D0)
+        ! TRANSFORM TO REAL COORDINATES
+        CALL XKTOKPT(XQ1,RBAS,Q1)
+        ! FIND CLOSEST K POINT TO Q1
+        ! THIS IS THE APPROXIMATION FOR Q TRANSFER
+        DISTANCE=HUGE(1.D0)
+        DO IKPT=1,NKPT
+          ! CALCULATE DISTANCE BETWEEN Q1 AND K
+          SVAR=NORM2(Q1-K(:,IKPT))
+          IF(SVAR.LT.DISTANCE) THEN
+            DISTANCE=SVAR
+            QAPPROX(:)=K(:,IKPT)
+          END IF
+        ENDDO ! END IKPT
+
+
+
+! CONTINUE HERE
+
+
+        CALL RIXS$UNSELECT
+      ENDDO ! END ISPEC
+      DEALLOCATE(XK)
+      DEALLOCATE(K)
+
+                          CALL TRACE$POP
+      END SUBROUTINE RIXS_QTRANSFER
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$ISELECT(ISPEC)  ! MARK: RIXS$ISELECT
+!     **************************************************************************
+!     ** SELECT SPECTRUM FOR RIXS MODULE                                      **
+!     ** REQUIRES RIXS INITIALIZED                                            **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TINITIALIZE,NSPEC,SELECTED,SPECTRA,THIS
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: ISPEC
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$ISELECT')
+      END IF
+      IF(SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('RIXS SPECTRUM ALREADY SELECTED')
+        CALL ERROR$STOP('RIXS$ISELECT')
+      END IF
+      IF(ISPEC.LE.0.OR.ISPEC.GT.NSPEC) THEN
+        CALL ERROR$MSG('INVALID SPECTRUM INDEX')
+        CALL ERROR$I4VAL('SPECTRUM INDEX: ',ISPEC)
+        CALL ERROR$STOP('RIXS$ISELECT')
+      END IF
+      THIS=>SPECTRA(ISPEC)
+      SELECTED=.TRUE.
+      RETURN
+      END SUBROUTINE RIXS$ISELECT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$UNSELECT  ! MARK: RIXS$UNSELECT
+!     **************************************************************************
+!     ** UNSELECT SPECTRUM FOR RIXS MODULE                                    **
+!     ** REQUIRES RIXS INITIALIZED AND SELECTED                               **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS
+      IMPLICIT NONE
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$UNSELECT')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('CANNOT UNSELECT SPECTRUM IF NONE SELECTED')
+        CALL ERROR$STOP('RIXS$UNSELECT')
+      END IF
+      NULLIFY(THIS)
+      SELECTED=.FALSE.
+      RETURN
+      END SUBROUTINE RIXS$UNSELECT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETL4(ID,VAL)  ! MARK: RIXS$GETL4
+!     **************************************************************************
+!     ** GET LOGICAL FROM RIXS MODULE                                        **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'INITIALIZE') THEN
+        VAL=TINITIALIZE
+      ELSE IF(ID.EQ.'ACTIVE') THEN
+        VAL=TACTIVE
+      ELSE IF(ID.EQ.'TPOLXYZI') THEN
+        IF(.NOT.TINITIALIZE) THEN
+          CALL ERROR$MSG('XAS NOT INITIALIZED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('XAS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        VAL=THIS%TPOLXYZI
+      ELSE IF(ID.EQ.'TPOLXYZO') THEN
+        IF(.NOT.TINITIALIZE) THEN
+          CALL ERROR$MSG('XAS NOT INITIALIZED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('XAS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        VAL=THIS%TPOLXYZO
+      ELSE
+        CALL ERROR$MSG('RIXS GETL4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETL4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETL4
 ! !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS$SETL4(ID,VAL)  ! MARK: RIXS$SETL4
 !     **************************************************************************
 !     ** SET LOGICAL IN RIXS MODULE                                          **
 !     **************************************************************************
-      USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE
+      USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
@@ -4111,6 +4634,18 @@
         TACTIVE=VAL
       ELSE IF(ID.EQ.'INITIALIZE') THEN
         TINITIALIZE=VAL
+      ELSE IF(ID.EQ.'TPOLXYZI') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('RIXS$SETL4')
+        END IF
+        THIS%TPOLXYZI=VAL
+      ELSE IF(ID.EQ.'TPOLXYZO') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('RIXS$SETL4')
+        END IF
+        THIS%TPOLXYZO=VAL
       ELSE
         CALL ERROR$MSG('RIXS SETL4 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -4118,99 +4653,506 @@
       END IF
       RETURN
       END SUBROUTINE RIXS$SETL4
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE RIXS$GETI4(ID,VAL)  ! MARK: RIXS$GETI4
-! !     **************************************************************************
-! !     ** GET INTEGER FROM RIXS MODULE                                       **
-! !     **************************************************************************
-!       USE RIXS_MODULE, ONLY: NSPEC,TINITIALIZE
-!       IMPLICIT NONE
-!       CHARACTER(*), INTENT(IN) :: ID
-!       INTEGER(4), INTENT(OUT) :: VAL
-!       IF(.NOT.TINITIALIZE) THEN
-!         CALL ERROR$MSG('RIXS NOT INITIALIZED')
-!         CALL ERROR$STOP('RIXS$GETI4')
-!       END IF
-!       IF(ID.EQ.'NSPEC') THEN
-!         VAL=NSPEC
-!       ELSE
-!         CALL ERROR$MSG('RIXS GETI4 ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID: ',ID)
-!         CALL ERROR$STOP('RIXS$GETI4')
-!       END IF
-!       RETURN
-!       END SUBROUTINE RIXS$GETI4
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE RIXS$SETI4(ID,VAL)  ! MARK: RIXS$SETI4
-! !     **************************************************************************
-! !     ** SET INTEGER IN RIXS MODULE                                         **
-! !     **************************************************************************
-!       USE RIXS_MODULE, ONLY: NSPEC
-!       IMPLICIT NONE
-!       CHARACTER(*), INTENT(IN) :: ID
-!       INTEGER(4), INTENT(IN) :: VAL
-!       IF(ID.EQ.'NSPEC') THEN
-!         NSPEC=VAL
-!       ELSE
-!         CALL ERROR$MSG('RIXS SETI4 ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID: ',ID)
-!         CALL ERROR$STOP('RIXS$SETI4')
-!       END IF
-!       RETURN
-!       END SUBROUTINE RIXS$SETI4
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE RIXS$GETR8(ID,VAL)  ! MARK: RIXS$GETR8
-! !     **************************************************************************
-! !     ** GET REAL FROM RIXS MODULE                                           **
-! !     **************************************************************************
-!       USE RIXS_MODULE, ONLY: EMIN,EMAX,GAMMA,TINITIALIZE
-!       IMPLICIT NONE
-!       CHARACTER(*), INTENT(IN) :: ID
-!       REAL(8), INTENT(OUT) :: VAL
-!       IF(.NOT.TINITIALIZE) THEN
-!         CALL ERROR$MSG('RIXS NOT INITIALIZED')
-!         CALL ERROR$STOP('RIXS$GETR8')
-!       END IF
-!       IF(ID.EQ.'EMIN') THEN
-!         VAL=EMIN
-!       ELSE IF(ID.EQ.'EMAX') THEN
-!         VAL=EMAX
-!       ELSE IF(ID.EQ.'GAMMA') THEN
-!         VAL=GAMMA
-!       ELSE
-!         CALL ERROR$MSG('RIXS GETR8 ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID: ',ID)
-!         CALL ERROR$STOP('RIXS$GETR8')
-!       END IF
-!       RETURN
-!       END SUBROUTINE RIXS$GETR8
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE RIXS$SETR8(ID,VAL)  ! MARK: RIXS$SETR8
-! !     **************************************************************************
-! !     ** SET REAL IN RIXS MODULE                                              **
-! !     **************************************************************************
-!       USE RIXS_MODULE, ONLY: EMIN,EMAX,GAMMA
-!       IMPLICIT NONE
-!       CHARACTER(*), INTENT(IN) :: ID
-!       REAL(8), INTENT(IN) :: VAL
-!       IF(ID.EQ.'EMIN') THEN
-!         EMIN=VAL
-!       ELSE IF(ID.EQ.'EMAX') THEN
-!         EMAX=VAL
-!       ELSE IF(ID.EQ.'GAMMA') THEN
-!         GAMMA=VAL
-!       ELSE
-!         CALL ERROR$MSG('RIXS SETR8 ID NOT RECOGNIZED')
-!         CALL ERROR$CHVAL('ID: ',ID)
-!         CALL ERROR$STOP('RIXS$SETR8')
-!       END IF
-!       RETURN
-!       END SUBROUTINE RIXS$SETR8
-! !
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETI4(ID,VAL)  ! MARK: RIXS$GETI4
+!     **************************************************************************
+!     ** GET INTEGER FROM RIXS MODULE                                       **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: NSPEC,TINITIALIZE
+      IMPLICIT NONE
+      ! NE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETI4')
+      END IF
+      IF(ID.EQ.'NSPEC') THEN
+        VAL=NSPEC
+      ELSE
+        CALL ERROR$MSG('RIXS GETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETI4(ID,VAL)  ! MARK: RIXS$SETI4
+!     **************************************************************************
+!     ** SET INTEGER IN RIXS MODULE                                         **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: NSPEC,SPECTRA
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'NSPEC') THEN
+        NSPEC=VAL
+        IF(.NOT.ALLOCATED(SPECTRA)) THEN
+          ALLOCATE(SPECTRA(NSPEC))
+        ELSE
+          CALL ERROR$MSG('RIXS SETI4 NSPEC ALREADY ALLOCATED')
+          CALL ERROR$I4VAL('OLD NSPEC: ',SIZE(SPECTRA))
+          CALL ERROR$I4VAL('NEW NSPEC: ',VAL)
+          CALL ERROR$STOP('RIXS$SETI4')
+        END IF
+      ELSE
+        CALL ERROR$MSG('RIXS SETI4 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETI4')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETR8(ID,VAL)  ! MARK: RIXS$GETR8
+!     **************************************************************************
+!     ** GET REAL FROM RIXS MODULE                                           **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: EMIN,EMAX,TINITIALIZE,SELECTED,THIS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETR8')
+      END IF
+      IF(ID.EQ.'EMIN') THEN
+        VAL=EMIN
+      ELSE IF(ID.EQ.'EMAX') THEN
+        VAL=EMAX
+      ELSE IF(ID.EQ.'GAMMA') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('RIXS$GETR8')
+        END IF
+        VAL=THIS%GAMMA
+      ELSE IF(ID.EQ.'ELIGHT') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('RIXS$GETR8')
+        END IF
+        VAL=THIS%ELIGHT
+      ELSE
+        CALL ERROR$MSG('RIXS GETR8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETR8')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETR8
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETR8(ID,VAL)  ! MARK: RIXS$SETR8
+!     **************************************************************************
+!     ** SET REAL IN RIXS MODULE                                              **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: EMIN,EMAX,SELECTED,THIS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      REAL(8), INTENT(IN) :: VAL
+      IF(ID.EQ.'EMIN') THEN
+        EMIN=VAL
+      ELSE IF(ID.EQ.'EMAX') THEN
+        EMAX=VAL
+      ELSE IF(ID.EQ.'ELIGHT') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('RIXS$SETR8')
+        END IF
+        THIS%ELIGHT=VAL
+      ELSE IF(ID.EQ.'GAMMA') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+          CALL ERROR$STOP('RIXS$SETR8')
+        END IF
+        THIS%GAMMA=VAL
+      ELSE
+        CALL ERROR$MSG('RIXS SETR8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETR8')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETR8
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETCH(ID,VAL)  ! MARK: RIXS$GETCH
+!     **************************************************************************
+!     ** GET CHARACTER FROM RIXS MODULE                                       **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETCH')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('RIXS$GETCH')
+      END IF
+      IF(ID.EQ.'FILE') THEN
+        VAL=THIS%FILE
+      ELSE
+        CALL ERROR$MSG('RIXS GETCH ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETCH(ID,VAL)  ! MARK: RIXS$SETCH
+!     **************************************************************************
+!     ** SET CHARACTER IN RIXS MODULE                                         **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: SELECTED,THIS
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(IN) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('RIXS$SETCH')
+      END IF
+      IF(ID.EQ.'FILE') THEN
+        THIS%FILE=VAL
+      ELSE
+        CALL ERROR$MSG('RIXS SETCH ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETCH')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETR8A(ID,LEN,VAL)  ! MARK: RIXS$GETR8A
+!     **************************************************************************
+!     ** GET REAL ARRAY FROM RIXS MODULE                                      **
+!     ** REQUIRES RIXS INITIALIZED AND SELECTED                               **
+!     **************************************************************************
+! TODO: IMPLEMENT ON THE FLY CALCULATION OF CERTAIN VALUES
+      USE RIXS_MODULE, ONLY: SELECTED,THIS,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      REAL(8), INTENT(OUT) :: VAL(LEN)
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETR8A')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('RIXS$GETR8A')
+      END IF
+      IF(ID.EQ.'NORMAL') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A NORMAL LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%NORMAL(:)
+      ELSE IF(ID.EQ.'KDIRI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A KDIRI LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%KDIRI(:)
+      ELSE IF(ID.EQ.'KDIRO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A KDIRO LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%KDIRO(:)
+      ELSE IF(ID.EQ.'KI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A KI LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%KI(:)
+      ELSE IF(ID.EQ.'KO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A KO LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%KO(:)
+      ELSE IF(ID.EQ.'Q') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A Q LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%Q(:)
+      ELSE IF(ID.EQ.'XKI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A XKI LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%XKI(:)
+      ELSE IF(ID.EQ.'XKO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A XKO LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%XKO(:)
+      ELSE IF(ID.EQ.'XQ') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A XQ LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%XQ(:)
+      ELSE IF(ID.EQ.'QAPPROX') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A QAPPROX LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%QAPPROX(:)
+      ELSE IF(ID.EQ.'XQAPPROX') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETR8A XQAPPROX LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$GETR8A')
+        END IF
+        VAL(:)=THIS%XQAPPROX(:)
+      ELSE
+        CALL ERROR$MSG('RIXS GETR8A ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETR8A')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETR8A
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETR8A(ID,LEN,VAL)  ! MARK: RIXS$SETR8A
+!     **************************************************************************
+!     ** SET REAL ARRAY IN RIXS MODULE                                        **
+!     ** REQUIRES RIXS INITIALIZED AND SELECTED                               **
+!     **************************************************************************
+! TODO: CHECK WHICH ONES ACTUALLY NEED TO BE SET
+      USE RIXS_MODULE, ONLY: SELECTED,THIS,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      REAL(8), INTENT(IN) :: VAL(LEN)
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$SETR8A')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('RIXS$SETR8A')
+      END IF
+      IF(ID.EQ.'NORMAL') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A NORMAL LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%NORMAL(:)=VAL(:)
+      ELSE IF(ID.EQ.'KDIRI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A KDIRI LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%KDIRI(:)=VAL(:)
+      ELSE IF(ID.EQ.'KDIRO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A KDIRO LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%KDIRO(:)=VAL(:)
+      ELSE IF(ID.EQ.'KI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A KI LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%KI(:)=VAL(:)
+      ELSE IF(ID.EQ.'KO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A KO LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%KO(:)=VAL(:)
+      ELSE IF(ID.EQ.'Q') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A Q LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%Q(:)=VAL(:)
+      ELSE IF(ID.EQ.'XKI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A XKI LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%XKI(:)=VAL(:)
+      ELSE IF(ID.EQ.'XKO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A XKO LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%XKO(:)=VAL(:)
+      ELSE IF(ID.EQ.'XQ') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A XQ LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%XQ(:)=VAL(:)
+      ELSE IF(ID.EQ.'QAPPROX') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A QAPPROX LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%QAPPROX(:)=VAL(:)
+      ELSE IF(ID.EQ.'XQAPPROX') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS SETR8A XQAPPROX LEN NOT 3')
+          CALL ERROR$I4VAL('LEN: ',LEN)
+          CALL ERROR$STOP('RIXS$SETR8A')
+        END IF
+        THIS%XQAPPROX(:)=VAL(:)
+      ELSE
+        CALL ERROR$MSG('RIXS SETR8A ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETR8A')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETR8A
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$GETC8A(ID,LEN,VAL)  ! MARK: RIXS$GETC8A
+!     **************************************************************************
+!     ** GET COMPLEX ARRAY FROM RIXS MODULE                                   **
+!     ** REQUIRES RIXS INITIALIZED AND SELECTED                               **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: SELECTED,THIS,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      COMPLEX(8), INTENT(OUT) :: VAL(LEN)
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$GETC8A')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('RIXS$GETC8A')
+      END IF
+      IF(ID.EQ.'POLI') THEN
+        IF(LEN.NE.2) THEN
+          CALL ERROR$MSG('RIXS GETC8A POLI SIZE NOT 2')
+          CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+          CALL ERROR$STOP('RIXS$GETC8A')
+        END IF
+        VAL(:)=THIS%POLI(:)
+      ELSE IF(ID.EQ.'POLXYZI') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETC8A POLXYZI SIZE NOT 3')
+          CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+          CALL ERROR$STOP('RIXS$GETC8A')
+        END IF
+        IF(.NOT.THIS%TPOLXYZI) THEN
+          CALL POLARISATION_CONVERT(THIS%KDIRI,THIS%NORMAL,THIS%POLI,THIS%POLXYZI)
+          THIS%TPOLXYZI=.TRUE.
+        END IF
+        VAL(:)=THIS%POLXYZI(:)
+      ELSE IF(ID.EQ.'POLO') THEN
+        IF(LEN.NE.2) THEN
+          CALL ERROR$MSG('RIXS GETC8A POLO SIZE NOT 2')
+          CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+          CALL ERROR$STOP('RIXS$GETC8A')
+        END IF
+        VAL(:)=THIS%POLO(:)
+      ELSE IF(ID.EQ.'POLXYZO') THEN
+        IF(LEN.NE.3) THEN
+          CALL ERROR$MSG('RIXS GETC8A POLXYZO SIZE NOT 3')
+          CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+          CALL ERROR$STOP('RIXS$GETC8A')
+        END IF
+        IF(.NOT.THIS%TPOLXYZO) THEN
+          CALL POLARISATION_CONVERT(THIS%KDIRO,THIS%NORMAL,THIS%POLO,THIS%POLXYZO)
+          THIS%TPOLXYZO=.TRUE.
+        END IF
+        VAL(:)=THIS%POLXYZO(:)
+      ELSE
+        CALL ERROR$MSG('RIXS GETC8A ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$GETC8A')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$GETC8A
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXS$SETC8A(ID,LEN,VAL)  ! MARK: RIXS$SETC8A
+!     **************************************************************************
+!     ** SET COMPLEX ARRAY IN RIXS MODULE                                     **
+!     ** REQUIRES RIXS INITIALIZED AND SELECTED                               **
+!     **************************************************************************
+      USE RIXS_MODULE, ONLY: SELECTED,THIS,TINITIALIZE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: LEN
+      COMPLEX(8), INTENT(IN) :: VAL(LEN)
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('RIXS NOT INITIALIZED')
+        CALL ERROR$STOP('RIXS$SETC8A')
+      END IF
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
+        CALL ERROR$STOP('RIXS$SETC8A')
+      END IF
+      IF(ID.EQ.'POLI') THEN
+        IF(LEN.NE.2) THEN
+          CALL ERROR$MSG('RIXS SETC8A POLI SIZE NOT 2')
+          CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+          CALL ERROR$STOP('RIXS$SETC8A')
+        END IF
+        THIS%POLI(:)=VAL(:)
+      ! ELSE IF(ID.EQ.'POLXYZI') THEN
+      !   IF(LEN.NE.3) THEN
+      !     CALL ERROR$MSG('RIXS SETC8A POLXYZI SIZE NOT 3')
+      !     CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+      !     CALL ERROR$STOP('RIXS$SETC8A')
+      !   END IF
+      !   THIS%POLXYZI(:)=VAL(:)
+      ELSE IF(ID.EQ.'POLO') THEN
+        IF(LEN.NE.2) THEN
+          CALL ERROR$MSG('RIXS SETC8A POLO SIZE NOT 2')
+          CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+          CALL ERROR$STOP('RIXS$SETC8A')
+        END IF
+        THIS%POLO(:)=VAL(:)
+      ! ELSE IF(ID.EQ.'POLXYZO') THEN
+      !   IF(LEN.NE.3) THEN
+      !     CALL ERROR$MSG('RIXS SETC8A POLXYZO SIZE NOT 3')
+      !     CALL ERROR$I4VAL('SIZE: ',SIZE(VAL))
+      !     CALL ERROR$STOP('RIXS$SETC8A')
+      !   END IF
+      !   THIS%POLXYZO(:)=VAL(:)
+      ELSE
+        CALL ERROR$MSG('RIXS SETC8A ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('RIXS$SETC8A')
+      END IF
+      RETURN
+      END SUBROUTINE RIXS$SETC8A
+!
 !     ==========================================================================
 !     ==========================================================================
 !     ==                    STATE MODULE FUNCTIONS                            ==
@@ -6846,3 +7788,264 @@
       Y=WORK
       RETURN
       END SUBROUTINE GAUSSCONV
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE KVEC(E,N,K)  !MARK: KVEC
+!     **************************************************************************
+!     **  CALCULATE K VECTOR IN RECIPROCAL BOHRRADIUS                         **            
+!     **  FROM ENERGY AND DIRECTION                                           **
+!     **************************************************************************
+      IMPLICIT NONE
+      ! |K|=E/HBAR/C
+      REAL(8), INTENT(IN) :: E  ! ENERGY OF LIGHT IN HARTREE ATOMIC UNITS
+      REAL(8), INTENT(IN) :: N(3)  ! DIRECTION OF K VECTOR
+      REAL(8), INTENT(OUT) :: K(3)  ! K VECTOR IN BOHRRADIUS^-1
+      REAL(8) :: SVAR
+      REAL(8) :: HBAR
+      REAL(8) :: C
+      CALL CONSTANTS('HBAR',HBAR)
+      CALL CONSTANTS('C',C)
+      K=N/NORM2(N)  ! NORMALISE DIRECTION
+      SVAR=E/HBAR/C
+      K=K*SVAR
+      END SUBROUTINE KVEC
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE KTOXK(K,RBAS,XK)  ! MARK: KTOXK
+!     **************************************************************************
+!     **  CONVERT K-POINT VECTOR INTO RELATIVE K-POINT COORDINATES            **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8)   ,INTENT(IN)  :: K(3)  ! K-POINT VECTOR IN REAL SPACE
+      REAL(8)   ,INTENT(IN)  :: RBAS(3,3)  ! REAL SPACE LATTICE VECTORS
+      REAL(8)   ,INTENT(OUT) :: XK(3)  ! VECTOR IN RELATIVE K-POINT COORDINATES
+      REAL(8) :: GBAS(3,3)
+      REAL(8) :: INVGBAS(3,3)
+      REAL(8) :: VOL
+      INTEGER(4) :: I
+      CALL GBASS(RBAS,GBAS,VOL)
+      CALL LIB$INVERTR8(3,GBAS,INVGBAS)
+      DO I=1,3
+! TODO: CHECK IF COLUMN OR ROW VECTOR
+        XK(I)=DOT_PRODUCT(INVGBAS(I,:),K)
+      ENDDO
+      RETURN
+      END SUBROUTINE KTOXK
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XKTOKPT(XK,RBAS,K)  ! MARK: XKTOKPT
+!     **************************************************************************
+!     **  CONVERT RELATIVE K-POINT COORDINATES INTO K-POINT VECTOR            **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8)   ,INTENT(IN)  :: XK(3)  ! VECTOR IN RELATIVE K-POINT COORDINATES
+      REAL(8)   ,INTENT(IN)  :: RBAS(3,3)  ! REAL SPACE LATTICE VECTORS
+      REAL(8)   ,INTENT(OUT) :: K(3)  ! K-POINT VECTOR IN REAL SPACE
+      REAL(8) :: GBAS(3,3)
+      REAL(8) :: VOL
+      INTEGER(4) :: I
+      CALL GBASS(RBAS,GBAS,VOL)
+      DO I=1,3
+        K(I)=DOT_PRODUCT(GBAS(I,:),XK)
+      ENDDO
+      RETURN
+      END SUBROUTINE XKTOKPT
+
+! SUBROUTINES TAKEN FROM OTHER PROGRAMS THAT MIGHT BE USEFUL IN THE FUTURE
+
+! !
+! !     ...1.........2.........3.........4.........5.........6.........7.........8
+! ! TODO: ADAPT FOR STATE MODULE
+!       SUBROUTINE ENERGYWRITE  !MARK: ENERGYWRITE
+!       USE PDOS_MODULE   , ONLY : STATEARR,STATE
+!       IMPLICIT NONE
+!       INTEGER(4) :: NFILO
+!       INTEGER(4) :: IKPT,ISPIN,IB
+!       REAL(8) :: EV
+!       CHARACTER(32) :: FMTEIG
+!       CHARACTER(32) :: FMTOCC
+!       INTEGER(4) :: ITEN,I1,I2
+!       REAL(8), ALLOCATABLE :: WKPT(:)
+!       INTEGER(4) :: NKPT
+!       INTEGER(4) :: NSPIN
+!       INTEGER(4) :: NKDIV(3)
+!       CALL FILEHANDLER$UNIT('PROT',NFILO)
+!       CALL CONSTANTS('EV',EV)
+!       CALL PDOS$GETI4('NKPT',NKPT)
+!       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
+!       CALL PDOS$GETI4('NSPIN',NSPIN)
+!       ALLOCATE(WKPT(NKPT))
+!       CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
+!       FMTEIG='("EIG",I3,":",10F8.3)'
+!       FMTOCC='("OCC",I3,":",10F8.3)'
+!       DO IKPT=1,NKPT
+!         DO ISPIN=1,NSPIN
+!           WRITE(NFILO,FMT='(A5,I6,A6,I2)')'IKPT=',IKPT,' SPIN=',ISPIN
+!           STATE=>STATEARR(IKPT,ISPIN)
+!           ITEN=0
+!           DO WHILE (STATE%NB.GT.ITEN)
+!             I1=ITEN+1
+!             I2=MIN(ITEN+10,STATE%NB)
+!             WRITE(NFILO,FMT=FMTEIG)ITEN,(STATE%EIG(IB)/EV,IB=I1,I2)
+!             ITEN=ITEN+10
+!           ENDDO
+!           ITEN=0
+!           DO WHILE (STATE%NB.GT.ITEN)
+!             I1=ITEN+1
+!             I2=MIN(ITEN+10,STATE%NB)
+!             WRITE(NFILO,FMT=FMTOCC)ITEN,(STATE%OCC(IB)/WKPT(IKPT),IB=I1,I2)
+!             ITEN=ITEN+10
+!           ENDDO
+!         END DO
+!       END DO
+!       DEALLOCATE(WKPT)
+!       END SUBROUTINE ENERGYWRITE
+! !
+! !     ...1.........2.........3.........4.........5.........6.........7.........8
+!       SUBROUTINE FERMILEVEL(EF)  !MARK: FERMILEVEL
+! !     **************************************************************************
+! !     ** CALCULATE FERMI LEVEL OF SIMULATION                                 **
+! !     **************************************************************************
+!       USE DATA_MODULE, ONLY: EIG,OCC,TINIT
+!       IMPLICIT NONE
+!       REAL(8), INTENT(OUT) :: EF
+!       INTEGER(4) :: NFIL
+!       INTEGER(4) :: NKPT
+!       INTEGER(4) :: NSPIN
+!       INTEGER(4) :: NDIM
+!       INTEGER(4), ALLOCATABLE :: NBARR(:,:)
+!       INTEGER(4) :: NB
+!       INTEGER(4) :: NBB
+!       REAL(8) :: RNTOT
+!       REAL(8), ALLOCATABLE :: WGHT(:,:)
+!       REAL(8) :: EV
+!       IF(.NOT.TINIT) THEN
+!         CALL ERROR$MSG('DATA MODULE NOT INITIALIZED')
+!         CALL ERROR$STOP('FERMILEVEL')
+!       ENDIF
+!       CALL CONSTANTS('EV',EV)
+!       CALL FILEHANDLER$UNIT('PROT',NFIL)
+!       CALL PDOS$GETI4('NKPT',NKPT)
+!       CALL PDOS$GETI4('NSPIN',NSPIN)
+!       CALL PDOS$GETI4('NDIM',NDIM)
+!       CALL PDOS$GETR8('RNTOT',RNTOT)
+!       ALLOCATE(NBARR(NKPT,NSPIN))
+!       CALL PDOS$GETI4A('NB',NKPT*NSPIN,NBARR)
+!       NB=MAXVAL(NBARR)
+!       DEALLOCATE(NBARR)
+
+!       NBB=NB
+!       IF(NDIM.EQ.1)NBB=2*NB  ! COLLINEAR AND NON-SPIN-POLARIZED
+!       ALLOCATE(WGHT(NBB,NKPT))
+!       CALL BRILLOUIN$DOS(NBB,NKPT,EIG,WGHT,RNTOT,EF)
+!       DEALLOCATE(WGHT)
+!       WRITE(NFIL,FMT='(A10,F12.6)')'EFERMI:',EF/EV
+!       END SUBROUTINE FERMILEVEL
+! !
+! !     ...1.........2.........3.........4.........5.........6.........7.........8
+!       SUBROUTINE RIXS$XK  !MARK: RIXS$XK
+! !     **************************************************************************
+! !     **  CALCULATES THE RELATIVE K VECTORS AND MOMENTUM TRANSFER VECTOR      **
+! !     **  FOR EACH SPECTRUM                                                   **
+! !     **  APPROXIMATION: LENGTH OF OUTGOING K VECTOR IS SAME IS INCOMING      **
+! !     **************************************************************************
+!       USE RIXS_MODULE
+!       IMPLICIT NONE
+!       INTEGER(4) :: ISPEC
+!       REAL(8) :: EIN  ! ENERGY OF INCIDENT LIGHT IN HARTREE ATOMIC UNITS
+!       DO ISPEC=1,NSPECTRA
+!         EIN=EFEXP+SPECTRA(ISPEC)%EIREL
+!         ! CALCULATE K VECTOR IN RECIPROCAL BOHRRADIUS
+!         CALL KVEC(EIN,SPECTRA(ISPEC)%KDIRI,SPECTRA(ISPEC)%KI)
+!         CALL KVEC(EIN,SPECTRA(ISPEC)%KDIRF,SPECTRA(ISPEC)%KF)
+!         ! CALCULATE MOMENTUM TRANSFER VECTOR IN RECIPROCAL BOHRRADIUS
+!         SPECTRA(ISPEC)%Q=SPECTRA(ISPEC)%KI-SPECTRA(ISPEC)%KF
+!         ! CALCULATE K VECTOR IN RELATIVE COORDINATES
+!         CALL KPTTOXK(SPECTRA(ISPEC)%KI,SPECTRA(ISPEC)%XKI)
+!         CALL KPTTOXK(SPECTRA(ISPEC)%KF,SPECTRA(ISPEC)%XKF)
+!         ! CALCULATE MOMENTUM TRANSFER VECTOR IN RELATIVE COORDINATES
+!         SPECTRA(ISPEC)%XQ=SPECTRA(ISPEC)%XKI-SPECTRA(ISPEC)%XKF
+!       ENDDO
+!       END SUBROUTINE RIXS$XK
+! SUBROUTINE RIXS$QTRANSFER  !MARK: RIXS$QTRANSFER
+!       USE RIXS_MODULE, ONLY: NSPECTRA,SPECTRA,EFEXP
+!       IMPLICIT NONE
+!       INTEGER(4) :: NFIL
+!       INTEGER(4) :: ISPEC
+!       REAL(8) :: RBAS(3,3)
+!       REAL(8) :: GBAS(3,3)
+!       REAL(8) :: INVGBAS(3,3)
+!       REAL(8) :: VOL
+!       REAL(8) :: XQ1(3)
+!       INTEGER(4) :: NKDIV(3)
+!       INTEGER(4) :: IP(3)
+!       REAL(8) :: QTRANS(3)
+!       REAL(8) :: VVAR(3)
+!       REAL(8) :: EV
+!       REAL(8) :: ANGSTROM
+!       REAL(8) :: HBAR
+!       REAL(8) :: C
+!       INTEGER(4) :: THISTASK,NTASKS
+!       CALL FILEHANDLER$UNIT('PROT',NFIL)
+!       CALL CONSTANTS('EV',EV)
+!       CALL CONSTANTS('ANGSTROM',ANGSTROM)
+!       CALL CONSTANTS('HBAR',HBAR)
+!       CALL CONSTANTS('C',C)
+
+!       CALL PDOS$GETR8A('RBAS',3*3,RBAS)
+!       CALL GBASS(RBAS,GBAS,VOL)
+!       CALL LIB$INVERTR8(3,GBAS,INVGBAS)
+!       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
+
+!       CALL MPE$QUERY('~',NTASKS,THISTASK)
+!       ! IF(THISTASK.EQ.1) THEN
+!       !   WRITE(NFIL,FMT='(A)')
+!       !   WRITE(NFIL,FMT='(80("="))')
+!       !   WRITE(NFIL,FMT='(80("="),T15,A50)') &
+!       ! &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
+!       !   WRITE(NFIL,FMT='(80("="))')
+!       ! ENDIF
+!       DO ISPEC=1,NSPECTRA
+! !
+! !       ========================================================================
+! !       ==  CALCULATE K AND Q VECTOR IN RECIPROCAL BOHRRADIUS                 ==
+! !       ========================================================================
+!         CALL KVEC(EFEXP+SPECTRA(ISPEC)%EIREL,SPECTRA(ISPEC)%KDIRI,SPECTRA(ISPEC)%KI)
+! ! WARNING: KF IS CALCULATED WITH THE EXCITATION ENERGY AND NOT THE 
+! !          EMISSION ENERGY
+!         CALL KVEC(EFEXP+SPECTRA(ISPEC)%EIREL,SPECTRA(ISPEC)%KDIRF,SPECTRA(ISPEC)%KF)
+! ! WARNING: Q=KI-KF
+!         SPECTRA(ISPEC)%Q=SPECTRA(ISPEC)%KI-SPECTRA(ISPEC)%KF
+! !
+! !       ========================================================================
+! !       ==  CALCULATE K AND Q VECTOR IN RELATIVE COORDINATES                  ==
+! !       ========================================================================
+!         SPECTRA(ISPEC)%XKI=MATMUL(INVGBAS,SPECTRA(ISPEC)%KI)
+!         SPECTRA(ISPEC)%XKF=MATMUL(INVGBAS,SPECTRA(ISPEC)%KF)
+!         SPECTRA(ISPEC)%XQ=MATMUL(INVGBAS,SPECTRA(ISPEC)%Q)
+! !
+! !       ========================================================================
+! !       ==  CALCULATE RELATIVE Q VECTOR GOING FROM ONE KPT TO ANOTHER         ==
+! !       ==  BEST MATCHING THE ACTUAL MOMENTUM TRANSFER                        ==
+! !       ========================================================================
+! ! WARNING: CHECK IF SMALLEST DISTANCE IN RELATIVE COORDINATES IS ALSO SMALLEST
+! !          DISTANCE IN TOTAL COORDINATES
+!         XQ1(:)=MODULO(SPECTRA(ISPEC)%XQ(:),1.D0)
+!         XQ1(:)=XQ1(:)*REAL(NKDIV(:),KIND=8)
+!         IP(:)=NINT(XQ1(:))
+!         QTRANS(:)=REAL(IP(:),KIND=8)/REAL(NKDIV(:),KIND=8)
+!         VVAR(:)=SPECTRA(ISPEC)%XQ(:)-QTRANS(:)
+!         IP(:)=NINT(VVAR(:))
+!         QTRANS(:)=QTRANS(:)+REAL(IP(:),KIND=8)
+!         ! IF(THISTASK.EQ.1) THEN
+!         !   WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
+!         !   WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
+!         !   WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
+!         !   WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
+!         !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
+!         !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
+!         ! ENDIF
+
+!         SPECTRA(ISPEC)%XQAPPROX=QTRANS
+!       ENDDO
+!       END SUBROUTINE RIXS$QTRANSFER
