@@ -6819,6 +6819,10 @@
           DEALLOCATE(AEPSI)
         ENDDO ! END ISP
         ! ======================================================================
+        ! ==  POPULATE BRILLOUIN MODULE                                       ==
+        ! ======================================================================
+        CALL BRILLOUIN$MSHNOSYM(TINV,RBAS,NKDIV,ISHIFT)
+        ! ======================================================================
         ! ==  OCCUPATIONS AND K-POINTS AND THEIR WEIGHTS                      ==
         ! ======================================================================
         IF(THISTASK.EQ.RTASK) THEN
