@@ -202,6 +202,10 @@
       REAL(8), ALLOCATABLE :: SPECTRUMRAW(:,:,:) ! (NKPT,NSPIN,NB2-NOCC) RAW SPECTRUM
       END TYPE XAS_SPEC_TYPE
 
+      TYPE AMPL_CONTAINER
+      COMPLEX(8), ALLOCATABLE :: AMPL(:,:) ! (3,NB2-NOCC) AMPLITUDE
+      END TYPE AMPL_CONTAINER
+
       LOGICAL(4) :: TACTIVE=.FALSE. ! XAS ACTIVE
       LOGICAL(4) :: TINITIALIZE=.FALSE.
       INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR XAS
@@ -209,6 +213,8 @@
       REAL(8) :: EMAX=HUGE(1.D0) ! MAXIMUM ENERGY FOR XAS
       REAL(8) :: DE ! ENERGY STEP FOR XAS SPECTRUM
       INTEGER(4) :: NE ! NUMBER OF ENERGY POINTS FOR XAS SPECTRUM
+
+      TYPE(AMPL_CONTAINER), ALLOCATABLE :: AMPLITUDES(:,:) ! (NKPT,NSPIN) AMPLITUDE CONTAINERS
 
       TYPE(XAS_SPEC_TYPE), ALLOCATABLE, TARGET :: SPECTRA(:) ! (NSPEC) SPECTRA
       TYPE(XAS_SPEC_TYPE), POINTER :: THIS ! POINTER TO CURRENT SPECTRUM
@@ -362,11 +368,22 @@
       CALL XRAY$OVERLAP
 
       CALL XRAY$WRITEOVERLAP
+ 
+      ! FREE UP MEMORY CONTAINING PROJECTIONS
+      CALL STATE$DEALLOCATEPROJ
 
+      ! ========================================================================
+      ! == XAS                                                                ==
+      ! ========================================================================
       CALL XAS$CALCULATE
 
       CALL XAS$OUTPUT
+      ! FREE UP MEMORY CONTAINING XAS SPECTRA
+      CALL XAS$DEALLOCATESPECTRA
 
+      ! ========================================================================
+      ! == RIXS                                                               ==
+      ! ========================================================================
       CALL RIXS$CALCULATE
 
 
@@ -3473,7 +3490,7 @@
 !     ** CALCULATE XAS SPECTRA                                                **
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,DE
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,DE,AMPLITUDES
       USE MPE_MODULE
       IMPLICIT NONE
       INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
@@ -3526,7 +3543,9 @@
       CALL XAS$GETR8('EMAX',EMAX)
       CALL XAS$GETI4('NE',NE)
 
+      
       ! ALLOCATE STORAGE
+      ALLOCATE(AMPLITUDES(NKPT,NSPIN))
       DO ISPEC=1,NSPEC
         CALL XAS$ISELECT(ISPEC)
         ALLOCATE(THIS%E(NE))
@@ -3553,8 +3572,12 @@
           CALL OVERLAP$GETC8A('DIPOLE',3*NB2,DIPOLE)
           ALLOCATE(KMAT(NB2-NOCC,NOCC))
           CALL OVERLAP$K(NB2-NOCC,NOCC,KMAT)
+          ALLOCATE(AMPLITUDES(IKPT,ISPIN)%AMPL(3,NB2-NOCC))
           DO IEMP=1,NB2-NOCC
             CALL AMPLITUDE(NB2,NOCC,IEMP,KMAT,DIPOLE,AMPL)
+            ! SAVE AMPLITUDES FOR POTENTIAL RIXS LATER ON
+            AMPLITUDES(IKPT,ISPIN)%AMPL(:,IEMP)=AMPL(:)
+
             EFINAL=EEXCITE+EIG(NOCC+IEMP)
             EDIFF=EFINAL-EGROUND
             DO ISPEC=1,NSPEC
@@ -3756,6 +3779,34 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XAS$REPORT
+! 
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XAS$DEALLOCATESPECTRA  ! MARK: XAS$DEALLOCATESPECTRA
+!     **************************************************************************
+!     ** DEALLOCATE XAS SPECTRA                                               **
+!     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
+!     **************************************************************************
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,SPECTRA
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      IF(.NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('XAS$DEALLOCATESPECTRA')
+      IF(.NOT.TINITIALIZE) THEN
+        CALL ERROR$MSG('XAS NOT INITIALIZED')
+        CALL ERROR$STOP('XAS$DEALLOCATESPECTRA')
+      END IF
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        IF(ALLOCATED(THIS%E)) DEALLOCATE(THIS%E)
+        IF(ALLOCATED(THIS%SPECTRUM)) DEALLOCATE(THIS%SPECTRUM)
+        IF(ALLOCATED(THIS%ERAW)) DEALLOCATE(THIS%ERAW)
+        IF(ALLOCATED(THIS%SPECTRUMRAW)) DEALLOCATE(THIS%SPECTRUMRAW)
+        CALL XAS$UNSELECT
+      ENDDO ! END ISPEC
+      IF(ALLOCATED(SPECTRA)) DEALLOCATE(SPECTRA)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XAS$DEALLOCATESPECTRA
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XAS_AUTOMATICENERGYWINDOW  ! MARK: XAS_AUTOMATICENERGYWINDOW
@@ -5375,6 +5426,35 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE STATE$ENERGYWRITE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE STATE$DEALLOCATEPROJ  ! MARK: STATE$DEALLOCATEPROJ
+!     **************************************************************************
+!     ** DEALLOCATE PROJECTION ARRAYS IN STATE MODULE                         **
+!     ** REQUIRES STATE INITIALIZED AND UNSELECTED                            **
+!     **************************************************************************
+      USE STATE_MODULE, ONLY: INITIALIZED,SELECTED,THIS,NKPTG,NSPING
+      IMPLICIT NONE
+      INTEGER(4), PARAMETER :: NSIM=2
+      INTEGER(4) :: ISIM
+      INTEGER(4) :: IKPT,ISPIN
+                          CALL TRACE$PUSH('STATE$DEALLOCATEPROJ')
+      IF(.NOT.INITIALIZED) THEN
+        CALL ERROR$MSG('STATE NOT INITIALIZED')
+        CALL ERROR$STOP('STATE$DEALLOCATEPROJ')
+      END IF
+      DO ISIM=1,NSIM
+        CALL STATE$ISELECT(ISIM)
+        DO IKPT=1,NKPTG
+          DO ISPIN=1,NSPING
+            IF(ALLOCATED(THIS(IKPT,ISPIN)%PROJ)) DEALLOCATE(THIS(IKPT,ISPIN)%PROJ)
+          ENDDO
+        ENDDO
+        CALL STATE$UNSELECT
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE STATE$DEALLOCATEPROJ
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE STATE_OCCUPATION  ! MARK: STATE_OCCUPATION
