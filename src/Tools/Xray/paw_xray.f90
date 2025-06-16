@@ -334,6 +334,7 @@
       CALL XSETUP$UNSELECT
       CALL STATE$SELECT('GROUND')
       CALL STATE$REPORT(NFIL)
+      CALL STATE$ENERGYWRITE(NFIL)
       CALL STATE$UNSELECT
 
       CALL SIMULATION$SELECT('EXCITE')
@@ -344,6 +345,7 @@
       CALL XSETUP$UNSELECT
       CALL STATE$SELECT('EXCITE')
       CALL STATE$REPORT(NFIL)
+      CALL STATE$ENERGYWRITE(NFIL)
       CALL STATE$UNSELECT
 
       CALL SETTINGS$REPORT(NFIL)
@@ -5234,6 +5236,69 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE STATE$REPORT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE STATE$ENERGYWRITE(NFIL)  ! MARK: STATE$ENERGYWRITE
+!     **************************************************************************
+!     ** WRITE STATE ENERGIES TO FILE                                        **
+!     ** REQUIRES STATE INITIALIZED AND SELECTED                              **
+!     **************************************************************************
+      USE STATE_MODULE, ONLY: INITIALIZED,THIS,NKPTG,NSPING,SELECTED
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4) :: IKPT,ISPIN
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+      REAL(8) :: EV
+      CHARACTER(32) :: FMTEIG
+      CHARACTER(32) :: FMTOCC
+      INTEGER(4) :: ITEN,I1,I2
+      INTEGER(4) :: IB
+      REAL(8), ALLOCATABLE :: WKPT(:)
+
+
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('STATE$ENERGYWRITE')
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('CANNOT WRITE STATE ENERGIES WHEN STATE ARRAY NOT SELECTED')
+        CALL ERROR$STOP('STATE$ENERGYWRITE')
+      END IF
+      IF(.NOT.INITIALIZED) THEN
+        CALL ERROR$MSG('STATE NOT INITIALIZED')
+        CALL ERROR$STOP('STATE$ENERGYWRITE')
+      END IF
+      CALL CONSTANTS('EV',EV)
+      ALLOCATE(WKPT(NKPTG))
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETR8A('WKPT',NKPTG,WKPT)
+      CALL SIMULATION$UNSELECT
+      FMTEIG='("EIG",I3,":",10F8.3)'
+      FMTOCC='("OCC",I3,":",10F8.3)'
+      DO IKPT=1,NKPTG
+        DO ISPIN=1,NSPING
+          WRITE(NFIL,FMT='(A5,I6,A6,I2)')'IKPT=',IKPT,' SPIN=',ISPIN
+          ITEN=0
+          DO WHILE(THIS(IKPT,ISPIN)%NB.GT.ITEN)
+            I1=ITEN+1
+            I2=MIN(ITEN+10,THIS(IKPT,ISPIN)%NB)
+            WRITE(NFIL,FMT=FMTEIG)ITEN,(THIS(IKPT,ISPIN)%EIG(IB)/EV,IB=I1,I2)
+            ITEN=ITEN+10
+          ENDDO
+          ITEN=0
+          DO WHILE(THIS(IKPT,ISPIN)%NB.GT.ITEN)
+            I1=ITEN+1
+            I2=MIN(ITEN+10,THIS(IKPT,ISPIN)%NB)
+            WRITE(NFIL,FMT=FMTOCC)ITEN,(THIS(IKPT,ISPIN)%OCC(IB)/WKPT(IKPT),IB=I1,I2)
+            ITEN=ITEN+10
+          ENDDO
+        ENDDO
+      ENDDO
+      DEALLOCATE(WKPT)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE STATE$ENERGYWRITE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE STATE_OCCUPATION  ! MARK: STATE_OCCUPATION
