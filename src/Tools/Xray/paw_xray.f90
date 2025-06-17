@@ -6222,6 +6222,73 @@
       END SUBROUTINE OVERLAP$K
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$L(NB1,NB2,NOCC,IOCC,IEMP,L)  ! MARK: OVERLAP$L
+!     **************************************************************************
+!     ** GET OVERLAP L-MATRIX                                                **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NB1
+      INTEGER(4), INTENT(IN) :: NB2
+      INTEGER(4), INTENT(IN) :: NOCC
+      INTEGER(4), INTENT(IN) :: IOCC
+      INTEGER(4), INTENT(IN) :: IEMP
+      COMPLEX(8), INTENT(OUT) :: L(NB2-NOCC,NOCC)
+      COMPLEX(8), ALLOCATABLE :: U(:)
+      COMPLEX(8), ALLOCATABLE :: ASWITCHINV(:,:)
+      COMPLEX(8), ALLOCATABLE :: CSWITCH(:,:)
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$L')
+      END IF
+      ALLOCATE(U(NOCC))
+      ALLOCATE(ASWITCHINV(NOCC,NOCC))
+      ALLOCATE(CSWITCH(NB2-NOCC,NOCC))
+      ! ASWITCH=A WITH ONE COLUMN REPLACED BY ONE IN B
+      ! ASWITCH=A+U*B_IEMP
+      U=THIS%B(:,IEMP)-THIS%A(:,IOCC)
+      ! INVERSE OF ASWITCH USING SHERMAN-MORRISON FORMULA
+      CALL LIB$SMFASTINVERTC8('V',NOCC,THIS%AINV,U,IOCC,ASWITCHINV)
+      ! CSWITCH=C WITH ONE COLUMN REPLACED BY ONE IN D
+      CSWITCH(:,:)=THIS%C(:,:)
+      CSWITCH(:,IOCC)=THIS%D(:,IEMP)
+      ! L=CSWITCH*ASWITCHINV (TEST WHAT IS FASTER)
+      ! CALL LIB$MATMULC8(NB2-NOCC,NOCC,NOCC,CSWITCH,ASWITCHINV,L)
+      L=MATMUL(CSWITCH,ASWITCHINV)
+      DEALLOCATE(ASWITCHINV)
+      DEALLOCATE(CSWITCH)
+      RETURN
+      END SUBROUTINE OVERLAP$L
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$H(NB1,NOCC,H)  ! MARK: OVERLAP$H
+!     **************************************************************************
+!     ** GET OVERLAP H-MATRIX                                                 **
+!     ** REQUIRES SELECTED OVERLAP                                            **
+!     ** H=AINV*B                                                             **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NB1
+      INTEGER(4), INTENT(IN) :: NOCC
+      COMPLEX(8), INTENT(OUT) :: H(NOCC,NB1-NOCC)
+      COMPLEX(8), ALLOCATABLE :: AINV(:,:)
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$H')
+      END IF
+      ALLOCATE(AINV(NOCC,NOCC))
+      ! SAFEGUARD TO GET AINV
+      CALL OVERLAP$GETC8A('AINV',NOCC*NOCC,AINV)
+      ! H=AINV*B (TEST WHAT IS FASTER)
+      ! CALL LIB$MATMULC8(NOCC,NOCC,NB1-NOCC,AINV,THIS%B,H)
+      H=MATMUL(AINV,THIS%B)
+      DEALLOCATE(AINV)
+      RETURN
+      END SUBROUTINE OVERLAP$H
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP$SELECT(IKPT,ISPIN)  ! MARK: OVERLAP$SELECT
 !     **************************************************************************
 !     ** SELECT OVERLAP FOR KPOINT AND SPIN                                   **
