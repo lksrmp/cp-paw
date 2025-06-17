@@ -4554,7 +4554,7 @@
       END SUBROUTINE RIXS$REPORT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE RIXS$KVECTORS  ! MARK: RIXS_KVECTORS
+      SUBROUTINE RIXS$KVECTORS  ! MARK: RIXS$KVECTORS
 !     **************************************************************************
 !     ** CALCULATE K-VECTORS FOR RIXS MODULE                                  **
 !     ** REQUIRES RIXS INITIALIZED                                            **
@@ -4564,18 +4564,21 @@
       IMPLICIT NONE
       INTEGER(4) :: ISPEC
       REAL(8) :: RBAS(3,3)
-                          CALL TRACE$PUSH('RIXS_KVECTORS')
+      LOGICAL(4) :: TACTIVE
+      CALL RIXS$GETL4('ACTIVE',TACTIVE)
+      IF(.NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('RIXS$KVECTORS')
       CALL SIMULATION$SELECT('GROUND')
       CALL SIMULATION$GETR8A('RBAS',9,RBAS)
       CALL SIMULATION$UNSELECT
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
-        CALL ERROR$STOP('RIXS_KVECTORS')
+        CALL ERROR$STOP('RIXS$KVECTORS')
       END IF
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('RIXS SPECTRUM ALREADY SELECTED')
-        CALL ERROR$STOP('RIXS_KVECTORS')
+        CALL ERROR$STOP('RIXS$KVECTORS')
       END IF
       DO ISPEC=1,NSPEC
         CALL RIXS$ISELECT(ISPEC)
