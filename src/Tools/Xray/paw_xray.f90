@@ -1513,7 +1513,7 @@
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       REAL(8) :: EV
-      INTEGER(4) :: IAT,ISPIN,IKPT
+      INTEGER(4) :: IAT,IKPT
       INTEGER(4), ALLOCATABLE :: DUMMY(:,:)
       CHARACTER(256) :: FORMAT
       REAL(8) :: SVAR
@@ -2435,7 +2435,7 @@
 !     ** FILE FOR THE SIMULATION                                              **
 !     ** REQUIRES NO SELECTED SIMULATION                                      **
 !     **************************************************************************
-      USE SIMULATION_MODULE, ONLY: THIS,SELECTED,S,ATOMMAP
+      USE SIMULATION_MODULE, ONLY: THIS,SELECTED,ATOMMAP
       USE STRINGS_MODULE
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
@@ -3227,7 +3227,7 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4), PARAMETER :: PERLINE=14
-      INTEGER(4) :: IKPT,IND
+      INTEGER(4) :: IKPT
       INTEGER(4) :: BEGINKPT,ENDKPT
       INTEGER(4) :: NTASKS,THISTASK
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -3564,7 +3564,7 @@
       USE SHARED_DATA_MODULE, ONLY: ABSORB
       USE MPE_MODULE
       IMPLICIT NONE
-      INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
+      INTEGER(4) :: NTASKS,THISTASK,WTASK
       INTEGER(4) :: ISPEC
       INTEGER(4) :: NKPT
       INTEGER(4) :: IKPT
@@ -3699,7 +3699,6 @@
       INTEGER(4) :: NKPT
       INTEGER(4) :: NSPIN
       INTEGER(4) :: NE
-      INTEGER(4) :: IKPT
       INTEGER(4) :: ISPEC
       REAL(8) :: EV
       CHARACTER(6) :: ID
@@ -4609,7 +4608,7 @@
         CALL RIXS$GETC8A('POLXYZO',3,POLXYZ)
         WRITE(NFIL,FMT=-'(A12,3(F8.5,SP,F8.5,"I ",S))')'POLXYZO:',THIS%POLXYZO(:)
         ! MOMENTUM TRANSFER
-        WRITE(NFIL,FMT='(A)')'MOMENTUM TRANSFER'
+        WRITE(NFIL,FMT='(A,L2)')'MOMENTUM TRANSFER ACTIVE: ',THIS%TKPTSHIFT
         WRITE(NFIL,FMT='(A12,3F10.4)')'Q[1/AA]:',THIS%Q(:)*ANGSTROM
         WRITE(NFIL,FMT='(A12,3F10.4)')'QAPPROX:',THIS%QAPPROX(:)*ANGSTROM
         WRITE(NFIL,FMT='(A12,F10.4)')'QERROR:',THIS%QERROR*ANGSTROM
@@ -4679,13 +4678,10 @@
       USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS,NSPEC
       IMPLICIT NONE
       INTEGER(4) :: NKPT
-      INTEGER(4) :: IKPT
       REAL(8), ALLOCATABLE :: XK(:,:)
       REAL(8) :: XCORNER(3)
       REAL(8) :: CORNER(3)
       INTEGER(4) :: ICORNER(3)
-      REAL(8) :: XQ(3)
-      REAL(8) :: Q(3)
       INTEGER(4) :: NKDIV(3)
       REAL(8) :: RBAS(3,3)
       REAL(8) :: XQ1(3)
@@ -4754,6 +4750,11 @@
         
         ! SAVE APPROXIMATED Q VECTOR
         THIS%QAPPROX(:)=QAPPROX(:)
+        IF(NORM2(QAPPROX(:))<1.D-10) THEN
+          THIS%TKPTSHIFT=.FALSE.
+        ELSE
+          THIS%TKPTSHIFT=.TRUE.
+        END IF
         ! TRANSFORM TO RELATIVE COORDINATES
         CALL KTOXK(QAPPROX,RBAS,THIS%XQAPPROX)
         ! SAVE DISTANCE AS ERROR
@@ -4942,7 +4943,7 @@
               IF(ELOSS.GT.EMAX.OR.ELOSS.LT.EMIN) CYCLE
 
               ! CALCULATE LINEAR DEPENDENCY MATRIX L
-              CALL OVERLAP$L(NB1,NB2,NOCC,IOCC,IEMP,L)
+              CALL OVERLAP$L(NB2,NOCC,IOCC,IEMP,L)
 
               DO IELL=1,NB2-NOCC
                 IELLTOT=IELL+NOCC
@@ -5762,7 +5763,7 @@
 !     ** DEALLOCATE PROJECTION ARRAYS IN STATE MODULE                         **
 !     ** REQUIRES STATE INITIALIZED AND UNSELECTED                            **
 !     **************************************************************************
-      USE STATE_MODULE, ONLY: INITIALIZED,SELECTED,THIS,NKPTG,NSPING
+      USE STATE_MODULE, ONLY: INITIALIZED,THIS,NKPTG,NSPING
       IMPLICIT NONE
       INTEGER(4), PARAMETER :: NSIM=2
       INTEGER(4) :: ISIM
@@ -6262,7 +6263,6 @@
       INTEGER(4), PARAMETER :: NSIM=2
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       INTEGER(4) :: IKPT,ISPIN
-      INTEGER(4) :: NB,NOCC
       INTEGER(4) :: ISIM
       CHARACTER(5) :: KEY
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -6454,14 +6454,13 @@
       END SUBROUTINE OVERLAP$K
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE OVERLAP$L(NB1,NB2,NOCC,IOCC,IEMP,L)  ! MARK: OVERLAP$L
+      SUBROUTINE OVERLAP$L(NB2,NOCC,IOCC,IEMP,L)  ! MARK: OVERLAP$L
 !     **************************************************************************
 !     ** GET OVERLAP L-MATRIX                                                **
 !     ** REQUIRES SELECTED OVERLAP                                           **
 !     **************************************************************************
       USE OVERLAP_MODULE, ONLY: THIS,SELECTED
       IMPLICIT NONE
-      INTEGER(4), INTENT(IN) :: NB1
       INTEGER(4), INTENT(IN) :: NB2
       INTEGER(4), INTENT(IN) :: NOCC
       INTEGER(4), INTENT(IN) :: IOCC
@@ -6732,8 +6731,6 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(OUT) :: VAL(LEN)
-      LOGICAL(4) :: NBSET
-      LOGICAL(4) :: NOCCSET
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$GETC8A')
