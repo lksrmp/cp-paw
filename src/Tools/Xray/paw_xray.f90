@@ -5505,8 +5505,10 @@
 
             ! == OUTPUT AMPLITUDES FOR NEGATIVE K-POINT ========================
             IF(TNEGATIVEKPT) THEN
-              WRITE(NFIL)IKPTTOT+1,ISPIN,NB1,NOCC
-              WRITE(NFIL)EIG
+              IF(THISTASK.EQ.RTASK) THEN
+                WRITE(NFIL)IKPTTOT+1,ISPIN,NB1,NOCC
+                WRITE(NFIL)EIG
+              END IF
               IF(THISTASK.EQ.WTASK) THEN
                 X=THIS%TWOAMPL(IKPTTOT+1,ISPIN)%X
                 Y=THIS%TWOAMPL(IKPTTOT+1,ISPIN)%Y
@@ -5533,6 +5535,10 @@
             END IF
             ! == OUTPUT AMPLITUDES FOR NEGATIVE K-POINT ========================
             IF(TNEGATIVEKPT) THEN
+              IF(THISTASK.EQ.RTASK) THEN
+                WRITE(NFIL)IKPTTOT+1,ISPIN,NB1,NOCC
+                WRITE(NFIL)EIG
+              END IF
               IF(THISTASK.EQ.WTASK) XY=THIS%ONEAMPL(IKPTTOT+1,ISPIN)%XY
               CALL MPE$SENDRECEIVE('~',WTASK,RTASK,XY)
               IF(THISTASK.EQ.RTASK) THEN
@@ -5542,8 +5548,9 @@
             END IF
             DEALLOCATE(XY)
           END IF
-          DEALLOCATE(EIG)
+          IF(THISTASK.EQ.RTASK) DEALLOCATE(EIG)
         ENDDO ! END ISPIN
+        IF(TNEGATIVEKPT) IKPTTOT=IKPTTOT+1
       ENDDO ! END IKPT
       DEALLOCATE(TINVARR)
                           CALL TRACE$POP
