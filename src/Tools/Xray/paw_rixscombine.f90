@@ -42,6 +42,8 @@
       TYPE SPEC_TYPE
       CHARACTER(256) :: FILENAME ! FILENAME FOR THE SPEC
       REAL(8) :: RHOLE(3) ! POSITION OF THE COREHOLE
+      REAL(8) :: EMIN ! LOWEST ENERGY FOR THE SPECTRUM
+      REAL(8) :: EMAX ! HIGHEST ENERGY FOR THE SPECTRUM
       TYPE(ONEKPT_TYPE), ALLOCATABLE :: ONEKPT(:,:) ! (NKPTTOT,NSPIN)
       TYPE(TWOKPT_TYPE), ALLOCATABLE :: TWOKPT(:,:) ! (NKPTTOT,NSPIN)
       END TYPE SPEC_TYPE
@@ -75,6 +77,13 @@
       REAL(8) :: QERROR
       LOGICAL(4) :: TKPTSHIFT
 
+      REAL(8) :: GEMIN
+      REAL(8) :: GEMAX
+      REAL(8) :: GDE
+      INTEGER(4) :: GNE
+      REAL(8) :: GEBROAD
+
+
 
       LOGICAL(4) :: TFIRST=.TRUE.
 
@@ -86,6 +95,11 @@
       LOGICAL(4) :: SELECTED=.FALSE. ! SELECTED SPEC FOR THE CURRENT TASK
 
       TYPE(RESULT_TYPE), ALLOCATABLE :: RES(:,:) !(NKPTTOT,NSPIN)
+      REAL(8), ALLOCATABLE :: ENERGY(:)
+      REAL(8), ALLOCATABLE :: TOTAL(:)
+      REAL(8), ALLOCATABLE :: UP(:)
+      REAL(8), ALLOCATABLE :: DOWN(:)
+
       END MODULE RIXSAMPL_MODULE
 
 !
@@ -109,15 +123,20 @@
 
       CALL FILEHANDLER$UNIT('XCCNTL',NFIL)
       CALL XCCNTL$READ(NFIL)
+      CALL XCCNTL$GRID
       CALL XCCNTL$AMPLITUDE
 
       CALL INPUT
+
+      CALL RIXSAMPL$GRID
 
       CALL FILEHANDLER$UNIT('PROT',NFIL)
 
       CALL RIXSAMPL$REPORT(NFIL)
 
       CALL RIXSAMPL$CALCULATE
+
+      CALL RIXSAMPL$OUTPUT
 
                           CALL TIMING$PRINT('~',NFIL)
       CALL MPE$CLOCKREPORT(NFIL)
@@ -631,7 +650,7 @@
 !     **************************************************************************
 !     ** SET REAL(8) VALUE IN RIXSAMPL MODULE                                 **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: EMIN,EMAX,ELIGHT,QERROR,TFIRST
+      USE RIXSAMPL_MODULE, ONLY: EMIN,EMAX,ELIGHT,QERROR,TFIRST,GDE,GEMIN,GEMAX,GEBROAD
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(IN) :: VAL
@@ -675,6 +694,14 @@
           END IF
         END IF
         QERROR=VAL
+      ELSE IF(ID.EQ.'GDE') THEN
+        GDE=VAL
+      ELSE IF(ID.EQ.'GEMIN') THEN
+        GEMIN=VAL
+      ELSE IF(ID.EQ.'GEMAX') THEN
+        GEMAX=VAL
+      ELSE IF(ID.EQ.'GEBROAD') THEN
+        GEBROAD=VAL
       ELSE
         CALL ERROR$MSG('RIXSAMPL SETR8 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -1199,7 +1226,8 @@
 !     **************************************************************************
 !     ** CALCULATE CROSS-SECTION FROM AMPLITUDES FOR ONEKPT                   **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: FLAG,NSPEC,RES,NKPTTOT,NSPIN,Q,THIS
+      USE RIXSAMPL_MODULE, ONLY: FLAG,NSPEC,RES,NKPTTOT,NSPIN,Q,THIS, &
+     &                           TOTAL,UP,DOWN,GDE,GNE,GEMIN,ENERGY
       USE STRINGS_MODULE
       IMPLICIT NONE
       COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
@@ -1208,6 +1236,9 @@
       INTEGER(4) :: ISPIN
       COMPLEX(8) :: EXPFAC
       INTEGER(4) :: NB1,NOCC
+      INTEGER(4) :: IEMP,IOCC,IEMPTOT
+      REAL(8) :: ELOSS
+      REAL(8) :: SIGMA
 ! WARNING: REQUIRES ALL (IKPT,ISPIN) TO HAVE THE SAME NB1,NOCC FOR ALL SPEC
 !          SHOULD BE GIVEN AS ALL REFERENCE THE SAME GROUND STATE SIMULATION
       IF(FLAG.NE.+'ONEKPT') RETURN
@@ -1237,6 +1268,7 @@
 
 
       DO ISPEC=1,NSPEC
+        CALL TRACE$I4VAL('ISPEC',ISPEC)
         CALL RIXSAMPL$ISELECT(ISPEC)
         ! EXP(I*Q*D)
         EXPFAC=EXP(CI*DOT_PRODUCT(Q,THIS%RHOLE))
@@ -1252,6 +1284,30 @@
       DO IKPT=1,NKPTTOT
         DO ISPIN=1,NSPIN
           RES(IKPT,ISPIN)%ABSXY(:,:)=REAL(RES(IKPT,ISPIN)%XY,KIND=8)**2+AIMAG(RES(IKPT,ISPIN)%XY)**2
+        ENDDO
+      ENDDO
+
+      ! CROSS-SECTION
+      DO IKPT=1,NKPTTOT
+        DO ISPIN=1,NSPIN
+          NB1=RES(IKPT,ISPIN)%NB1
+          NOCC=RES(IKPT,ISPIN)%NOCC
+          DO IEMP=1,NB1-NOCC
+            IEMPTOT=IEMP+NOCC
+            DO IOCC=1,NOCC
+              ELOSS=RES(IKPT,ISPIN)%EIG(IEMPTOT)-RES(IKPT,ISPIN)%EIG(IOCC)
+              SIGMA=RES(IKPT,ISPIN)%ABSXY(IEMP,IOCC)
+              CALL MAPGRID(ELOSS,SIGMA,GNE,TOTAL,GEMIN,GDE)
+              IF(ISPIN.EQ.1) THEN
+                CALL MAPGRID(ELOSS,SIGMA,GNE,UP,GEMIN,GDE)
+                IF(NSPIN.EQ.1) THEN
+                  CALL MAPGRID(ELOSS,SIGMA,GNE,DOWN,GEMIN,GDE)
+                END IF
+              ELSE IF(ISPIN.EQ.2) THEN
+                CALL MAPGRID(ELOSS,SIGMA,GNE,DOWN,GEMIN,GDE)
+              END IF
+            ENDDO
+          ENDDO
         ENDDO
       ENDDO
                           CALL TRACE$POP
@@ -1303,13 +1359,12 @@
       CALL RIXSAMPL$UNSELECT
 
       DO ISPEC=1,NSPEC
+        CALL TRACE$I4VAL('ISPEC',ISPEC)
         CALL RIXSAMPL$ISELECT(ISPEC)
         ! EXP(I*Q*D)
         EXPFAC=EXP(CI*DOT_PRODUCT(Q,THIS%RHOLE))
         DO IKPT=1,NKPTTOT
-          call trace$i4val('ikpt',ikpt)
           DO ISPIN=1,NSPIN
-            call trace$i4val('ispin',ISPIN)
             NB1=RES(IKPT,ISPIN)%NB1
             NOCC=RES(IKPT,ISPIN)%NOCC
             DO IOCC=1,NOCC
@@ -1328,9 +1383,117 @@
           RES(IKPT,ISPIN)%ABSXY(:,:)=REAL(RES(IKPT,ISPIN)%XY,KIND=8)**2+AIMAG(RES(IKPT,ISPIN)%XY)**2
         ENDDO
       ENDDO
+
+
+      ! CONTINUE HERE
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE RIXSAMPL_CALCULATETWOKPT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXSAMPL$OUTPUT  ! MARK: RIXSAMPL$OUTPUT
+!     **************************************************************************
+!     ** OUTPUT RIXSAMPL DATA TO FILE                                        **
+!     **************************************************************************
+      USE RIXSAMPL_MODULE, ONLY: GNE,ENERGY,TOTAL,UP,DOWN,GEBROAD
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL=11
+      INTEGER(4) :: I
+      REAL(8) :: EV
+
+      CALL CONSTANTS('EV',EV)
+
+      CALL GAUSSCONV(GNE,ENERGY,TOTAL,GEBROAD)
+      CALL GAUSSCONV(GNE,ENERGY,UP,GEBROAD)
+      CALL GAUSSCONV(GNE,ENERGY,DOWN,GEBROAD)
+
+      OPEN(UNIT=NFIL,FILE='rixsampl.dat',STATUS='REPLACE',FORM='FORMATTED')
+      DO I=1,GNE
+        WRITE(NFIL,*) ENERGY(I)/EV,TOTAL(I),UP(I),DOWN(I)
+      ENDDO
+      CLOSE(NFIL)
+      RETURN
+      END SUBROUTINE RIXSAMPL$OUTPUT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXSAMPL$COMBINE  ! MARK: RIXSAMPL$COMBINE
+!     **************************************************************************
+!     ** COMBINE CROSS-SECTION FROM AMPLITUDES                                **
+!     **************************************************************************
+      USE RIXSAMPL_MODULE, ONLY: NKPTTOT,NSPIN,RES,TOTAL,UP,DOWN
+      IMPLICIT NONE
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: IOCC
+      INTEGER(4) :: IEMP
+      INTEGER(4) :: IEMPTOT
+      INTEGER(4) :: NB1,NOCC
+      REAL(8) :: ELOSS
+                          CALL TRACE$PUSH('RIXSAMPL$COMBINE')
+      DO IKPT=1,NKPTTOT
+        DO ISPIN=1,NSPIN
+          NB1=RES(IKPT,ISPIN)%NB1
+          NOCC=RES(IKPT,ISPIN)%NOCC
+          DO IEMP=1,NB1-NOCC
+            IEMPTOT=IEMP+NOCC
+            DO IOCC=1,NOCC
+              ELOSS=RES(IKPT,ISPIN)%EIG(IEMPTOT)-RES(IKPT,ISPIN)%EIG(IOCC)
+
+! CONTINUE HERE (COMBINATION FOR ONEKPT ALREADY DONE IN CALCULATE)
+            ENDDO ! END IOCC
+          ENDDO ! END IEMP
+        ENDDO ! END ISPIN
+      ENDDO ! END IKPT
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE RIXSAMPL$COMBINE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RIXSAMPL$GRID  ! MARK: RIXSAMPL$GRID
+!     **************************************************************************
+!     ** CREATE ENERGY GRID FOR RIXSAMPL DATA                                 **
+!     **************************************************************************
+      USE RIXSAMPL_MODULE, ONLY: GDE,GEMIN,GEMAX,GNE,ENERGY,TOTAL,UP,DOWN
+      IMPLICIT NONE
+      INTEGER(4) :: NE
+      REAL(8) :: EMIN,EMAX,DE
+      INTEGER(4) :: I
+                          CALL TRACE$PUSH('RIXSAMPL$GRID')
+      DE=GDE
+      EMIN=GEMIN
+      EMAX=GEMAX
+      NE=INT((EMAX-EMIN)/DE)+1
+      GNE=NE
+
+      IF(ALLOCATED(ENERGY)) THEN
+        CALL ERROR$MSG('RIXSAMPL ENERGY ALREADY ALLOCATED')
+        CALL ERROR$STOP('RIXSAMPL$GRID')
+      END IF
+      ALLOCATE(ENERGY(NE))
+      DO I=1,NE
+        ENERGY(I)=EMIN+REAL(I-1,KIND=8)*DE
+      ENDDO
+      IF(ALLOCATED(TOTAL)) THEN
+        CALL ERROR$MSG('RIXSAMPL TOTAL ALREADY ALLOCATED')
+        CALL ERROR$STOP('RIXSAMPL$GRID')
+      END IF
+      ALLOCATE(TOTAL(NE))
+      TOTAL(:)=0.D0
+      IF(ALLOCATED(UP)) THEN
+        CALL ERROR$MSG('RIXSAMPL UP ALREADY ALLOCATED')
+        CALL ERROR$STOP('RIXSAMPL$GRID')
+      END IF
+      ALLOCATE(UP(NE))
+      UP(:)=0.D0
+      IF(ALLOCATED(DOWN)) THEN
+        CALL ERROR$MSG('RIXSAMPL DOWN ALREADY ALLOCATED')
+        CALL ERROR$STOP('RIXSAMPL$GRID')
+      END IF
+      ALLOCATE(DOWN(NE))
+      DOWN(:)=0.D0
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE RIXSAMPL$GRID
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXSAMPL$ISELECT(ISPEC)  ! MARK: RIXSAMPL$ISELECT
@@ -1520,3 +1683,141 @@
     
                           CALL TRACE$POP
       END SUBROUTINE XCCNTL$AMPLITUDE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XCCNTL$GRID  ! MARK: XCCNTL$GRID
+!     **************************************************************************
+!     ** READ !XCCNTL!GRID BLOCK FROM CONTROL FILE                            **
+!     **************************************************************************
+      USE XCCNTL_MODULE, ONLY: LL_CNTL
+      USE LINKEDLIST_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      REAL(8) :: DE
+      REAL(8) :: EMIN
+      REAL(8) :: EMAX
+      REAL(8) :: EBROAD
+      REAL(8) :: EV
+                          CALL TRACE$PUSH('XCCNTL$GRID')
+      CALL CONSTANTS('EV',EV)
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCCNTL')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'GRID',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('CONTROL FILE DOES NOT CONTAIN !XCCNTL!GRID BLOCK')
+        CALL ERROR$STOP('XCCNTL$GRID')
+      END IF
+
+      CALL LINKEDLIST$SELECT(LL_CNTL,'GRID')
+      ! READ GDE
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'DE[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'DE[EV]',1,DE)
+        DE=DE*EV
+        CALL RIXSAMPL$SETR8('GDE',DE)
+      ELSE
+        DE=0.01D0*EV
+        CALL RIXSAMPL$SETR8('GDE',DE)
+      END IF
+      ! READ GEMIN
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EMIN[EV]',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('EMIN[EV] NOT FOUND IN !XCCNTL!GRID BLOCK')
+        CALL ERROR$STOP('XCCNTL$GRID')
+      END IF
+      CALL LINKEDLIST$GET(LL_CNTL,'EMIN[EV]',1,EMIN)
+      EMIN=EMIN*EV
+      CALL RIXSAMPL$SETR8('GEMIN',EMIN)
+      ! READ GEMAX
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EMAX[EV]',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('EMAX[EV] NOT FOUND IN !XCCNTL!GRID BLOCK')
+        CALL ERROR$STOP('XCCNTL$GRID')
+      END IF
+      CALL LINKEDLIST$GET(LL_CNTL,'EMAX[EV]',1,EMAX)
+      EMAX=EMAX*EV
+      CALL RIXSAMPL$SETR8('GEMAX',EMAX)
+      ! CHECK GEMIN, GEMAX
+      IF(EMIN.GT.EMAX) THEN
+        CALL ERROR$MSG('EMIN[EV] GREATER THAN EMAX[EV]')
+        CALL ERROR$R8VAL('EMIN[EV]',EMIN)
+        CALL ERROR$R8VAL('EMAX[EV]',EMAX)
+        CALL ERROR$STOP('XCCNTL$GRID')
+      END IF
+      ! CHECK GDE
+      IF(DE.LE.0.D0) THEN
+        CALL ERROR$MSG('DE[EV] SHOULD BE GREATER THAN ZERO')
+        CALL ERROR$R8VAL('DE[EV]',DE)
+        CALL ERROR$STOP('XCCNTL$GRID')
+      END IF
+      ! READ GEBROAD
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EBROAD[EV]',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'EBROAD[EV]',1,EBROAD)
+        EBROAD=EBROAD*EV
+        CALL RIXSAMPL$SETR8('GEBROAD',EBROAD)
+      ELSE
+        EBROAD=0.3D0*EV
+        CALL RIXSAMPL$SETR8('GEBROAD',EBROAD)
+      END IF
+      ! CHECK GEBROAD
+      IF(EBROAD.LE.0.D0) THEN
+        CALL ERROR$MSG('EBROAD[EV] SHOULD BE GREATER THAN ZERO')
+        CALL ERROR$R8VAL('EBROAD[EV]',EBROAD)
+        CALL ERROR$STOP('XCCNTL$GRID')
+      END IF
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XCCNTL$GRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE MAPGRID(X,Y,N,GRID,XMIN,DE)  ! MARK: MAPGRID
+!     **************************************************************************
+!     ** MAP VALUE Y AT POSITION X ONTO GRID                                  **
+!     ** SPLIT BETWEEN THE TWO NEIGHBORING POINTS DEPENDING ON DISTANCE       **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), INTENT(IN) :: X
+      REAL(8), INTENT(IN) :: Y
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(INOUT) :: GRID(N)
+      REAL(8), INTENT(IN) :: XMIN
+      REAL(8), INTENT(IN) :: DE
+      INTEGER(4) :: I1,I2
+      REAL(8) :: X0
+      REAL(8) :: W1,W2
+      X0=(X-XMIN)/DE+1.D0
+      I1=INT(X0)
+      I2=I1+1
+      W2=(X0-REAL(I1,KIND=8))
+      W1=1.D0-W2
+      IF(I1.GT.0.AND.I1.LE.N) GRID(I1)=GRID(I1)+Y*W1
+      IF(I2.GT.0.AND.I2.LE.N) GRID(I2)=GRID(I2)+Y*W2
+      RETURN
+      END SUBROUTINE MAPGRID
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE GAUSSCONV(N,X,Y,SIGMA)
+!     **************************************************************************
+!     ** CALCULATE CONVOLUTION WITH GAUSSIAN FUNCTION                         **
+!     ** G(X,X0,SIGMA)=(1/(SIGMA*SQRT(2*PI)))*EXP(-0.5*((X-X0)/SIGMA)**2)     **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(IN) :: X(N)
+      REAL(8), INTENT(INOUT) :: Y(N)
+      REAL(8), INTENT(IN) :: SIGMA
+      REAL(8) :: WORK(N)
+      INTEGER(4) :: I,J
+      REAL(8) :: SVAR
+      DO I=1,N
+        WORK(I)=0.D0
+        DO J=1,N
+          SVAR=EXP(-0.5D0*((X(I)-X(J))/SIGMA)**2)/(SIGMA*SQRT(2.D0*PI))
+          WORK(I)=WORK(I)+Y(J)*SVAR
+        ENDDO
+      ENDDO
+      Y=WORK
+      RETURN
+      END SUBROUTINE GAUSSCONV
