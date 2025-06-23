@@ -1358,17 +1358,22 @@
 !     **************************************************************************
 !     ** CALCULATE CROSS-SECTION FROM AMPLITUDES FOR TWOKPT                   **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: FLAG,RES,NKPTTOT,NSPIN,NSPEC,THIS,Q
+      USE RIXSAMPL_MODULE, ONLY: FLAG,RES,NKPTTOT,NSPIN,NSPEC,THIS,Q,JOFIKPT, &
+     &                           TOTAL,UP,DOWN,GDE,GNE,GEMIN,ENERGY
       USE STRINGS_MODULE
       IMPLICIT NONE
       COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
       INTEGER(4) :: ISPEC
       INTEGER(4) :: IKPT
+      INTEGER(4) :: JKPT
       INTEGER(4) :: ISPIN
       COMPLEX(8) :: EXPFAC
       COMPLEX(8) :: CVAR
       INTEGER(4) :: NB1,NOCC
       INTEGER(4) :: IEMP,IOCC
+      INTEGER(4) :: IEMPTOT
+      REAL(8) :: ELOSS
+      REAL(8) :: SIGMA
 ! WARNING: REQUIRES ALL (IKPT,ISPIN) TO HAVE THE SAME NB1,NOCC FOR ALL SPEC
 !          SHOULD BE GIVEN AS ALL REFERENCE THE SAME GROUND STATE SIMULATION
       IF(FLAG.NE.+'TWOKPT') RETURN
@@ -1403,12 +1408,15 @@
         ! EXP(I*Q*D)
         EXPFAC=EXP(CI*DOT_PRODUCT(Q,THIS%RHOLE))
         DO IKPT=1,NKPTTOT
+          JKPT=JOFIKPT(IKPT)
           DO ISPIN=1,NSPIN
             NB1=RES(IKPT,ISPIN)%NB1
             NOCC=RES(IKPT,ISPIN)%NOCC
             DO IOCC=1,NOCC
               DO IEMP=1,NB1-NOCC
-                CVAR=EXPFAC*THIS%TWOKPT(IKPT,ISPIN)%X(IEMP)*THIS%TWOKPT(IKPT,ISPIN)%Y(IOCC)
+                CVAR=THIS%TWOKPT(IKPT,ISPIN)%X(IEMP)
+                CVAR=THIS%TWOKPT(JKPT,ISPIN)%Y(IOCC)*CVAR
+                CVAR=EXPFAC*CVAR
                 RES(IKPT,ISPIN)%XY(IEMP,IOCC)=RES(IKPT,ISPIN)%XY(IEMP,IOCC)+CVAR
               ENDDO ! END IEMP
             ENDDO ! END IOCC
@@ -1423,8 +1431,31 @@
         ENDDO
       ENDDO
 
-
-      ! CONTINUE HERE
+      ! CROSS-SECTION
+      DO IKPT=1,NKPTTOT
+        JKPT=JOFIKPT(IKPT)
+        DO ISPIN=1,NSPIN
+          NB1=RES(IKPT,ISPIN)%NB1
+          NOCC=RES(IKPT,ISPIN)%NOCC
+          DO IEMP=1,NB1-NOCC
+            IEMPTOT=IEMP+NOCC
+            DO IOCC=1,NOCC
+              ! EPSILON(K,X)-EPSILON(K',Y)
+              ELOSS=RES(IKPT,ISPIN)%EIG(IEMPTOT)-RES(JKPT,ISPIN)%EIG(IOCC)
+              SIGMA=RES(IKPT,ISPIN)%ABSXY(IEMP,IOCC)
+              CALL MAPGRID(ELOSS,SIGMA,GNE,TOTAL,GEMIN,GDE)
+              IF(ISPIN.EQ.1) THEN
+                CALL MAPGRID(ELOSS,SIGMA,GNE,UP,GEMIN,GDE)
+                IF(NSPIN.EQ.1) THEN
+                  CALL MAPGRID(ELOSS,SIGMA,GNE,DOWN,GEMIN,GDE)
+                END IF
+              ELSE IF(ISPIN.EQ.2) THEN
+                CALL MAPGRID(ELOSS,SIGMA,GNE,DOWN,GEMIN,GDE)
+              END IF
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE RIXSAMPL_CALCULATETWOKPT
