@@ -6092,14 +6092,15 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,WTASK,RTASK
-      INTEGER(4) :: NKPT,NSPIN
+      INTEGER(4) :: NKPT,NSPIN,NKPTTOT
       INTEGER(4) :: NKDIV(3)
       INTEGER(4) :: IKPT,ISPIN
-      INTEGER(4) :: NKPTTOT
       INTEGER(4) :: IKPTTOT
       LOGICAL(4) :: TNEGATIVEKPT
-      LOGICAL(4), ALLOCATABLE :: TINVARR(:)
       INTEGER(4) :: NB1,NOCC
+      INTEGER(4), ALLOCATABLE :: TOIRRKPT(:)
+      LOGICAL(4), ALLOCATABLE :: TIRRKPT(:)
+      INTEGER(4) :: TIRR
       REAL(8), ALLOCATABLE :: EIG(:)
       COMPLEX(8), ALLOCATABLE :: XY(:,:)
       COMPLEX(8), ALLOCATABLE :: X(:)
@@ -6119,11 +6120,12 @@
 
       CALL SIMULATION$SELECT('GROUND')
       CALL SIMULATION$GETI4('NKPT',NKPT)
-      ALLOCATE(TINVARR(NKPT))
-      CALL SIMULATION$GETL4A('TINVARR',NKPT,TINVARR)
       CALL SIMULATION$GETI4('NSPIN',NSPIN)
-      CALL SIMULATION$GETI4A('NKDIV',3,NKDIV)
-      NKPTTOT=PRODUCT(NKDIV(:))
+      CALL SIMULATION$GETI4('NKPTTOT',NKPTTOT)
+      ALLOCATE(TOIRRKPT(NKPTTOT))
+      ALLOCATE(TIRRKPT(NKPTTOT))
+      CALL SIMULATION$GETI4A('TOIRRKPT',NKPTTOT,TOIRRKPT)
+      CALL SIMULATION$GETL4A('TIRRKPT',NKPTTOT,TIRRKPT)
       CALL SIMULATION$UNSELECT
 
       IF(THISTASK.EQ.RTASK) THEN
@@ -6131,16 +6133,16 @@
         WRITE(NFIL)NKPTTOT
       END IF
       
-      IKPTTOT=0
-      DO IKPT=1,NKPT
-        ! COUNT TOTAL K-POINTS UP BY ONE
-        IKPTTOT=IKPTTOT+1
-        ! CHECK IF NEGATIVE K-POINT NEEDS TO BE TREATED
-        TNEGATIVEKPT=.NOT.TINVARR(IKPT)
+
+
+      DO IKPTTOT=1,NKPTTOT
+        ! GET K-POINT INDEX OF IRREDUCIBLE K-POINT
+        IKPT=TOIRRKPT(IKPTTOT)
+        ! CHECK IF K-POINT IS IRREDUCIBLE OR NOT
+        TIRR=TIRRKPT(IKPTTOT)
         DO ISPIN=1,NSPIN
           CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
           IF(THISTASK.NE.WTASK.AND.THISTASK.NE.RTASK) CYCLE
-                          CALL TRACE$I4VAL('WRITING KPT',IKPT)
           ! GET NB1,NOCC
           CALL STATE$SELECT('GROUND')
           CALL STATE$GETI4('NB',IKPT,ISPIN,NB1)
@@ -6174,26 +6176,6 @@
               ! THIS%TWOAMPL(IKPTTOT,ISPIN)%Y(NOCC)
               WRITE(NFIL) Y
             END IF
-
-            ! == OUTPUT AMPLITUDES FOR NEGATIVE K-POINT ========================
-            IF(TNEGATIVEKPT) THEN
-              IF(THISTASK.EQ.RTASK) THEN
-                WRITE(NFIL)IKPTTOT+1,ISPIN,NB1,NOCC
-                WRITE(NFIL)EIG
-              END IF
-              IF(THISTASK.EQ.WTASK) THEN
-                X=THIS%TWOAMPL(IKPTTOT+1,ISPIN)%X
-                Y=THIS%TWOAMPL(IKPTTOT+1,ISPIN)%Y
-              END IF
-              CALL MPE$SENDRECEIVE('~',WTASK,RTASK,X)
-              CALL MPE$SENDRECEIVE('~',WTASK,RTASK,Y)
-              IF(THISTASK.EQ.RTASK) THEN
-                ! THIS%TWOAMPL(IKPTTOT+1,ISPIN)%X(NB1-NOCC)
-                WRITE(NFIL) X
-                ! THIS%TWOAMPL(IKPTTOT+1,ISPIN)%Y(NOCC)
-                WRITE(NFIL) Y
-              END IF
-            END IF
             DEALLOCATE(X)
             DEALLOCATE(Y)
           ELSE
@@ -6205,26 +6187,13 @@
               ! THIS%ONEAMPL(IKPTTOT,ISPIN)%XY(NB1-NOCC,NOCC)
               WRITE(NFIL) XY
             END IF
-            ! == OUTPUT AMPLITUDES FOR NEGATIVE K-POINT ========================
-            IF(TNEGATIVEKPT) THEN
-              IF(THISTASK.EQ.RTASK) THEN
-                WRITE(NFIL)IKPTTOT+1,ISPIN,NB1,NOCC
-                WRITE(NFIL)EIG
-              END IF
-              IF(THISTASK.EQ.WTASK) XY=THIS%ONEAMPL(IKPTTOT+1,ISPIN)%XY
-              CALL MPE$SENDRECEIVE('~',WTASK,RTASK,XY)
-              IF(THISTASK.EQ.RTASK) THEN
-                ! THIS%ONEAMPL(IKPTTOT+1,ISPIN)%XY(NB1-NOCC,NOCC)
-                WRITE(NFIL) XY
-              END IF
-            END IF
             DEALLOCATE(XY)
           END IF
           IF(THISTASK.EQ.RTASK) DEALLOCATE(EIG)
         ENDDO ! END ISPIN
-        IF(TNEGATIVEKPT) IKPTTOT=IKPTTOT+1
       ENDDO ! END IKPT
-      DEALLOCATE(TINVARR)
+      DEALLOCATE(TOIRRKPT)
+      DEALLOCATE(TIRRKPT)
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE RIXS_OUTPUTDATA 
@@ -7758,6 +7727,35 @@
       DEALLOCATE(AINV)
       RETURN
       END SUBROUTINE OVERLAP$H
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$MU(NB1,NB2,NOCC,MU)  ! MARK: OVERLAP$MU
+!     **************************************************************************
+!     ** GET OVERLAP MU-MATRIX                                                **
+!     ** REQUIRES SELECTED OVERLAP                                            **
+!     ** MU=D-C*AINV*B                                                        **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NB1
+      INTEGER(4), INTENT(IN) :: NB2
+      INTEGER(4), INTENT(IN) :: NOCC
+      COMPLEX(8), INTENT(OUT) :: MU(NB2-NOCC,NB1-NOCC)
+      COMPLEX(8), ALLOCATABLE :: AINV(:,:)
+      COMPLEX(8), ALLOCATABLE :: WORK(:,:)
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$MU')
+      END IF
+      ALLOCATE(AINV(NOCC,NOCC))
+      ! SAFEGUARD TO GET AINV
+      CALL OVERLAP$GETC8A('AINV',NOCC*NOCC,AINV)
+      ! MU=D-C*AINV*B
+      MU=MATMUL(THIS%C,MATMUL(AINV,THIS%B))
+      MU=THIS%D-MU
+      DEALLOCATE(AINV)
+      RETURN
+      END SUBROUTINE OVERLAP$MU
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP$SELECT(IKPT,ISPIN)  ! MARK: OVERLAP$SELECT
