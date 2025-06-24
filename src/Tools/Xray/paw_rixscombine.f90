@@ -83,6 +83,7 @@
       REAL(8) :: GDE
       INTEGER(4) :: GNE
       REAL(8) :: GEBROAD
+      CHARACTER(1) :: BROADMODE
 
 
 
@@ -410,13 +411,14 @@
       USE RIXSAMPL_MODULE, ONLY: NKPT,NKPTTOT,NSPIN,NKDIV,FLAG,EMIN,EMAX, &
      &      ELIGHT,NORMAL,KDIRI,POLI,POLXYZI,KI,XKI,KDIRO,POLO,POLXYZO,KO,XKO, &
      &      Q,XQ,QAPPROX,XQAPPROX,QERROR,TKPTSHIFT,TFIRST, &
-     &      GEMIN,GEMAX,GDE,GNE,GEBROAD,TOIRRKPT,TIRRKPT,JOFIKPT
+     &      GEMIN,GEMAX,GDE,GNE,GEBROAD,BROADMODE,TOIRRKPT,TIRRKPT,JOFIKPT
       USE STRINGS_MODULE
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: IKPTTOT
       REAL(8) :: EV
       REAL(8) :: ANGSTROM
+      CHARACTER(12) :: MODE
                           CALL TRACE$PUSH('RIXSAMPL$REPORT')
       IF(TFIRST) THEN
         CALL ERROR$MSG('RIXSAMPL NOT INITIALIZED')
@@ -464,7 +466,17 @@
       WRITE(NFIL,FMT='(A12,F10.4)')'EMAX[EV]:',GEMAX/EV
       WRITE(NFIL,FMT='(A12,F10.4)')'DE[EV]:',GDE/EV
       WRITE(NFIL,FMT='(A12,I10)')'NE:',GNE
-      WRITE(NFIL,FMT='(A12,F10.4)')'EBROAD[EV]:',GEBROAD/EV
+      IF(BROADMODE.EQ.+'G') THEN
+        MODE='(GAUSSIAN)'
+      ELSE IF(BROADMODE.EQ.+'L') THEN
+        MODE='(LORENTZIAN)'
+      ELSE IF(BROADMODE.EQ.+'N') THEN
+        MODE='(NONE)'
+      END IF
+      WRITE(NFIL,FMT='(A12,A2,X,A)')'BROADMODE:',BROADMODE,TRIM(ADJUSTL(MODE))
+      IF(BROADMODE.NE.+'N') THEN
+        WRITE(NFIL,FMT='(A12,F10.4)')'EBROAD[EV]:',GEBROAD/EV
+      END IF
       ! KPT MAPPING
       WRITE(NFIL,FMT='(A)')'K-POINT MAPPING'
       WRITE(NFIL,FMT='(A10,A10,A10,A10)')'IKPTTOT','IKPT','IRR. KPT','SHIFT KPT'
@@ -1043,7 +1055,7 @@
 !     **************************************************************************
 !     ** SET CHARACTER VALUE IN RIXSAMPL MODULE                               **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: FLAG,TFIRST,THIS,SELECTED
+      USE RIXSAMPL_MODULE, ONLY: FLAG,TFIRST,THIS,SELECTED,BROADMODE
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
@@ -1064,6 +1076,8 @@
           CALL ERROR$STOP('RIXSAMPL$SETCH')
         END IF
         THIS%FILENAME=TRIM(ADJUSTL(VAL))
+      ELSE IF(ID.EQ.'BROADMODE') THEN
+        BROADMODE=VAL
       ELSE
         CALL ERROR$MSG('RIXSAMPL SETCH ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -1465,7 +1479,8 @@
 !     **************************************************************************
 !     ** OUTPUT RIXSAMPL DATA TO FILE                                        **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: GNE,ENERGY,TOTAL,UP,DOWN,GEBROAD
+      USE RIXSAMPL_MODULE, ONLY: GNE,ENERGY,TOTAL,UP,DOWN,GEBROAD,BROADMODE
+      USE STRINGS_MODULE
       IMPLICIT NONE
       INTEGER(4) :: NFIL=11
       INTEGER(4) :: I
@@ -1473,9 +1488,15 @@
 
       CALL CONSTANTS('EV',EV)
 
-      CALL GAUSSCONV(GNE,ENERGY,TOTAL,GEBROAD)
-      CALL GAUSSCONV(GNE,ENERGY,UP,GEBROAD)
-      CALL GAUSSCONV(GNE,ENERGY,DOWN,GEBROAD)
+      IF(BROADMODE.EQ.+'G') THEN
+        CALL GAUSSCONV(GNE,ENERGY,TOTAL,GEBROAD)
+        CALL GAUSSCONV(GNE,ENERGY,UP,GEBROAD)
+        CALL GAUSSCONV(GNE,ENERGY,DOWN,GEBROAD)
+      ELSE IF(BROADMODE.EQ.+'L') THEN
+        CALL LORENTZCONV(GNE,ENERGY,TOTAL,GEBROAD)
+        CALL LORENTZCONV(GNE,ENERGY,UP,GEBROAD)
+        CALL LORENTZCONV(GNE,ENERGY,DOWN,GEBROAD)
+      END IF
 
       OPEN(UNIT=NFIL,FILE='rixsampl.dat',STATUS='REPLACE',FORM='FORMATTED')
       DO I=1,GNE
@@ -1761,6 +1782,7 @@
 !     **************************************************************************
       USE XCCNTL_MODULE, ONLY: LL_CNTL
       USE LINKEDLIST_MODULE
+      USE STRINGS_MODULE
       IMPLICIT NONE
       LOGICAL(4) :: TCHK
       REAL(8) :: DE
@@ -1768,6 +1790,7 @@
       REAL(8) :: EMAX
       REAL(8) :: EBROAD
       REAL(8) :: EV
+      CHARACTER(1) :: BROADMODE
                           CALL TRACE$PUSH('XCCNTL$GRID')
       CALL CONSTANTS('EV',EV)
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
@@ -1836,6 +1859,20 @@
         CALL ERROR$R8VAL('EBROAD[EV]',EBROAD)
         CALL ERROR$STOP('XCCNTL$GRID')
       END IF
+      ! READ BROADMODE
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'BROADMODE',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'BROADMODE',1,BROADMODE)
+        BROADMODE=+BROADMODE
+        IF(BROADMODE.NE.+'G'.AND.BROADMODE.NE.+'L'.AND.BROADMODE.NE.+'N') THEN
+          CALL ERROR$MSG('BROADMODE MUST BE G, L OR N')
+          CALL ERROR$CHVAL('BROADMODE',BROADMODE)
+          CALL ERROR$STOP('XCNTL$XAS')
+        END IF
+      ELSE
+        BROADMODE=+'G' ! DEFAULT BROADENING MODE
+      END IF
+      CALL RIXSAMPL$SETCH('BROADMODE',BROADMODE)
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XCCNTL$GRID
@@ -1891,3 +1928,31 @@
       Y=WORK
       RETURN
       END SUBROUTINE GAUSSCONV
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LORENTZCONV(N,X,Y,GAMMA)  ! MARK: LORENTZCONV
+!     **************************************************************************
+!     ** CALCULATE CONVOLUTION WITH LORENTZIAN FUNCTION                       **
+!     ** L(X,X0,GAMMA)=(Y/2)/(PI*((X-X0)**2+(GAMMA/2)**2))                    **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      INTEGER(4), INTENT(IN) :: N
+      REAL(8), INTENT(IN) :: X(N)
+      REAL(8), INTENT(INOUT) :: Y(N)
+      REAL(8), INTENT(IN) :: GAMMA
+      REAL(8) :: WORK(N)
+      INTEGER(4) :: I,J
+      REAL(8) :: GAMMA2
+      REAL(8) :: SVAR
+      DO I=1,N
+        WORK(I)=0.D0
+        GAMMA2=0.25D0*GAMMA*GAMMA
+        DO J=1,N
+          SVAR=GAMMA/(2.D0*PI*((X(I)-X(J))**2+GAMMA2))
+          WORK(I)=WORK(I)+Y(J)*SVAR
+        ENDDO
+      ENDDO
+      Y=WORK
+      RETURN
+      END SUBROUTINE LORENTZCONV
