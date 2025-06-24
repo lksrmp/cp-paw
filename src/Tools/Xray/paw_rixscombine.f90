@@ -90,7 +90,7 @@
       REAL(8) :: GEBROAD
       CHARACTER(1) :: BROADMODE
 
-
+      CHARACTER(256) :: OUTFILE
 
       LOGICAL(4) :: TFIRST=.TRUE.
 
@@ -130,6 +130,7 @@
 
       CALL FILEHANDLER$UNIT('XCCNTL',NFIL)
       CALL XCCNTL$READ(NFIL)
+      CALL XCCNTL$OUTPUT
       CALL XCCNTL$GRID
       CALL XCCNTL$AMPLITUDE
 
@@ -1090,7 +1091,7 @@
 !     **************************************************************************
 !     ** SET CHARACTER VALUE IN RIXSAMPL MODULE                               **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: FLAG,TFIRST,THIS,SELECTED,BROADMODE
+      USE RIXSAMPL_MODULE, ONLY: FLAG,TFIRST,THIS,SELECTED,BROADMODE,OUTFILE
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
@@ -1121,6 +1122,8 @@
       ELSE IF(ID.EQ.'REMOTE') THEN
         CALL SELECTCHECK
         THIS%REMOTE=TRIM(ADJUSTL(VAL))
+      ELSE IF(ID.EQ.'OUTFILE') THEN
+        OUTFILE=TRIM(ADJUSTL(VAL))
       ELSE
         CALL ERROR$MSG('RIXSAMPL SETCH ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -1536,12 +1539,13 @@
 !     **************************************************************************
 !     ** OUTPUT RIXSAMPL DATA TO FILE                                        **
 !     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: GNE,ENERGY,TOTAL,UP,DOWN,GEBROAD,BROADMODE
+      USE RIXSAMPL_MODULE, ONLY: GNE,ENERGY,TOTAL,UP,DOWN,GEBROAD,BROADMODE,OUTFILE
       USE STRINGS_MODULE
       IMPLICIT NONE
       INTEGER(4) :: NFIL=11
       INTEGER(4) :: I
       REAL(8) :: EV
+      CHARACTER(7) :: ID
 
       CALL CONSTANTS('EV',EV)
 
@@ -1555,46 +1559,20 @@
         CALL LORENTZCONV(GNE,ENERGY,DOWN,GEBROAD)
       END IF
 
-      OPEN(UNIT=NFIL,FILE='rixsampl.dat',STATUS='REPLACE',FORM='FORMATTED')
+      ID=+'OUTFILE'
+      CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(OUTFILE))
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
+
+      CALL FILEHANDLER$UNIT(ID,NFIL)
       DO I=1,GNE
         WRITE(NFIL,*) ENERGY(I)/EV,TOTAL(I),UP(I),DOWN(I)
       ENDDO
-      CLOSE(NFIL)
+      CALL FILEHANDLER$CLOSE(ID)
       RETURN
       END SUBROUTINE RIXSAMPL$OUTPUT
-!
-!     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE RIXSAMPL$COMBINE  ! MARK: RIXSAMPL$COMBINE
-!     **************************************************************************
-!     ** COMBINE CROSS-SECTION FROM AMPLITUDES                                **
-!     **************************************************************************
-      USE RIXSAMPL_MODULE, ONLY: NKPTTOT,NSPIN,RES,TOTAL,UP,DOWN
-      IMPLICIT NONE
-      INTEGER(4) :: IKPT
-      INTEGER(4) :: ISPIN
-      INTEGER(4) :: IOCC
-      INTEGER(4) :: IEMP
-      INTEGER(4) :: IEMPTOT
-      INTEGER(4) :: NB1,NOCC
-      REAL(8) :: ELOSS
-                          CALL TRACE$PUSH('RIXSAMPL$COMBINE')
-      DO IKPT=1,NKPTTOT
-        DO ISPIN=1,NSPIN
-          NB1=RES(IKPT,ISPIN)%NB1
-          NOCC=RES(IKPT,ISPIN)%NOCC
-          DO IEMP=1,NB1-NOCC
-            IEMPTOT=IEMP+NOCC
-            DO IOCC=1,NOCC
-              ELOSS=RES(IKPT,ISPIN)%EIG(IEMPTOT)-RES(IKPT,ISPIN)%EIG(IOCC)
-
-! CONTINUE HERE (COMBINATION FOR ONEKPT ALREADY DONE IN CALCULATE)
-            ENDDO ! END IOCC
-          ENDDO ! END IEMP
-        ENDDO ! END ISPIN
-      ENDDO ! END IKPT
-                          CALL TRACE$POP
-      RETURN
-      END SUBROUTINE RIXSAMPL$COMBINE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXSAMPL$GRID  ! MARK: RIXSAMPL$GRID
@@ -1786,6 +1764,39 @@
       END IF
                           CALL TRACE$POP
       END SUBROUTINE XCCNTL$READ
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XCCNTL$OUTPUT  ! MARK: XCCNTL$OUTPUT
+!     **************************************************************************
+!     ** READ !XCCNTL!OUTPUT BLOCK FROM CONTROL FILE                          **
+!     **************************************************************************
+      USE XCCNTL_MODULE, ONLY: LL_CNTL
+      USE LINKEDLIST_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TCHK
+      CHARACTER(256) :: FILENAME
+                          CALL TRACE$PUSH('XCCNTL$OUTPUT')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCCNTL')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'OUTPUT',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('CONTROL FILE DOES NOT CONTAIN !XCCNTL!OUTPUT BLOCK')
+        CALL ERROR$STOP('XCCNTL$OUTPUT')
+      END IF
+
+      CALL LINKEDLIST$SELECT(LL_CNTL,'OUTPUT')
+
+      ! READ FILE NAME
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+      IF(.NOT.TCHK) THEN
+        CALL ERROR$MSG('!OUTPUT:FILE NOT FOUND')
+        CALL ERROR$STOP('XCCNTL$OUTPUT')
+      END IF
+      CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
+      CALL RIXSAMPL$SETCH('OUTFILE',FILENAME)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XCCNTL$OUTPUT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XCCNTL$AMPLITUDE  ! MARK: XCCNTL$AMPLITUDE
