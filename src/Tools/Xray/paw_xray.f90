@@ -1,6 +1,9 @@
-!     ==  OPEN QUESTIONS  ======================================================
+! TODO: ==  OPEN QUESTIONS  ====================================================
 ! WHAT HAPPENS FOR DIFFERENT AMOUNT OF BANDS AT DIFFERENT K-POINTS?
-! TODO: DEALLOCATE WHAT IS NOT NEEDED DURING RUNTIME
+! CAN STORAGE BE HANDLED MORE EFFICIENTLY?
+! BETTER CONTROL OF IO/FILES
+! POLARIZATION SHOULD ALTERNATIVELY BE SET IN XYZ COORDINATES
+! 
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       MODULE XCNTL_MODULE  ! MARK: XCNTL_MODULE
 !     **************************************************************************
@@ -350,7 +353,6 @@
       CALL XCNTL$COREHOLE
       CALL XCNTL$XAS
       CALL XCNTL$RIXS
-      ! TODO: IMPLEMENT RIXS BLOCK READ
       CALL TIMING$CLOCKOFF('XCNTL')
 
 
@@ -4183,7 +4185,6 @@
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     ** REQUIRES XAS SPECTRUM SELECTED                                      **
 !     **************************************************************************
-! TODO: FIND WAY OF GETTING GIT COMMIT
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS
       USE CLOCK_MODULE
       USE STRINGS_MODULE
@@ -4696,7 +4697,6 @@
 !     ==                      RIXS MODULE FUNCTIONS                           ==
 !     ==========================================================================
 !     ==========================================================================
-! TODO: UPDATE RIXS FUNCTIONS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE RIXS$CALCULATE  ! MARK: RIXS$CALCULATE
@@ -5606,6 +5606,7 @@
               ! MULTIPLY SUMMED AMPLITUDES WITH H MATRIX ELEMENT
               AMPLTOT(:)=H(IOCC,IEMP)*AMPLTOT(:)
               ! TODO: CHECK IF WE NEED WKPT HERE IN ANY FORM
+              !       CURRENTLY TREATED IN PAW_RIXSCOMBINE
 
               ! == SAVE AMPLITUDE FOR EACH SPECTRUM ============================
               DO ISPEC=1,NSPEC
@@ -5938,6 +5939,7 @@
             ENDDO ! END IELL
 
             ! TODO: CHECK IF WE NEED WKPT HERE IN ANY FORM
+            !       CURRENTLY TREATED IN PAW_RIXSCOMBINE
 
             ! == SAVE AMPLITUDE FOR EACH SPECTRUM ==============================
             DO ISPEC=1,NSPEC
@@ -6523,7 +6525,6 @@
 !     ** GET REAL ARRAY FROM RIXS MODULE                                      **
 !     ** REQUIRES RIXS INITIALIZED AND SELECTED                               **
 !     **************************************************************************
-! TODO: IMPLEMENT ON THE FLY CALCULATION OF CERTAIN VALUES
       USE RIXS_MODULE, ONLY: SELECTED,THIS,TINITIALIZE
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
@@ -9795,54 +9796,6 @@
       END SUBROUTINE XKTOK
 
 ! SUBROUTINES TAKEN FROM OTHER PROGRAMS THAT MIGHT BE USEFUL IN THE FUTURE
-
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-! ! TODO: ADAPT FOR STATE MODULE
-!       SUBROUTINE ENERGYWRITE  !MARK: ENERGYWRITE
-!       USE PDOS_MODULE   , ONLY : STATEARR,STATE
-!       IMPLICIT NONE
-!       INTEGER(4) :: NFILO
-!       INTEGER(4) :: IKPT,ISPIN,IB
-!       REAL(8) :: EV
-!       CHARACTER(32) :: FMTEIG
-!       CHARACTER(32) :: FMTOCC
-!       INTEGER(4) :: ITEN,I1,I2
-!       REAL(8), ALLOCATABLE :: WKPT(:)
-!       INTEGER(4) :: NKPT
-!       INTEGER(4) :: NSPIN
-!       INTEGER(4) :: NKDIV(3)
-!       CALL FILEHANDLER$UNIT('PROT',NFILO)
-!       CALL CONSTANTS('EV',EV)
-!       CALL PDOS$GETI4('NKPT',NKPT)
-!       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
-!       CALL PDOS$GETI4('NSPIN',NSPIN)
-!       ALLOCATE(WKPT(NKPT))
-!       CALL PDOS$GETR8A('WKPT',NKPT,WKPT)
-!       FMTEIG='("EIG",I3,":",10F8.3)'
-!       FMTOCC='("OCC",I3,":",10F8.3)'
-!       DO IKPT=1,NKPT
-!         DO ISPIN=1,NSPIN
-!           WRITE(NFILO,FMT='(A5,I6,A6,I2)')'IKPT=',IKPT,' SPIN=',ISPIN
-!           STATE=>STATEARR(IKPT,ISPIN)
-!           ITEN=0
-!           DO WHILE (STATE%NB.GT.ITEN)
-!             I1=ITEN+1
-!             I2=MIN(ITEN+10,STATE%NB)
-!             WRITE(NFILO,FMT=FMTEIG)ITEN,(STATE%EIG(IB)/EV,IB=I1,I2)
-!             ITEN=ITEN+10
-!           ENDDO
-!           ITEN=0
-!           DO WHILE (STATE%NB.GT.ITEN)
-!             I1=ITEN+1
-!             I2=MIN(ITEN+10,STATE%NB)
-!             WRITE(NFILO,FMT=FMTOCC)ITEN,(STATE%OCC(IB)/WKPT(IKPT),IB=I1,I2)
-!             ITEN=ITEN+10
-!           ENDDO
-!         END DO
-!       END DO
-!       DEALLOCATE(WKPT)
-!       END SUBROUTINE ENERGYWRITE
 ! !
 ! !     ...1.........2.........3.........4.........5.........6.........7.........8
 !       SUBROUTINE FERMILEVEL(EF)  !MARK: FERMILEVEL
@@ -9884,111 +9837,3 @@
 !       DEALLOCATE(WGHT)
 !       WRITE(NFIL,FMT='(A10,F12.6)')'EFERMI:',EF/EV
 !       END SUBROUTINE FERMILEVEL
-! !
-! !     ...1.........2.........3.........4.........5.........6.........7.........8
-!       SUBROUTINE RIXS$XK  !MARK: RIXS$XK
-! !     **************************************************************************
-! !     **  CALCULATES THE RELATIVE K VECTORS AND MOMENTUM TRANSFER VECTOR      **
-! !     **  FOR EACH SPECTRUM                                                   **
-! !     **  APPROXIMATION: LENGTH OF OUTGOING K VECTOR IS SAME IS INCOMING      **
-! !     **************************************************************************
-!       USE RIXS_MODULE
-!       IMPLICIT NONE
-!       INTEGER(4) :: ISPEC
-!       REAL(8) :: EIN  ! ENERGY OF INCIDENT LIGHT IN HARTREE ATOMIC UNITS
-!       DO ISPEC=1,NSPECTRA
-!         EIN=EFEXP+SPECTRA(ISPEC)%EIREL
-!         ! CALCULATE K VECTOR IN RECIPROCAL BOHRRADIUS
-!         CALL KVEC(EIN,SPECTRA(ISPEC)%KDIRI,SPECTRA(ISPEC)%KI)
-!         CALL KVEC(EIN,SPECTRA(ISPEC)%KDIRF,SPECTRA(ISPEC)%KF)
-!         ! CALCULATE MOMENTUM TRANSFER VECTOR IN RECIPROCAL BOHRRADIUS
-!         SPECTRA(ISPEC)%Q=SPECTRA(ISPEC)%KI-SPECTRA(ISPEC)%KF
-!         ! CALCULATE K VECTOR IN RELATIVE COORDINATES
-!         CALL KPTTOXK(SPECTRA(ISPEC)%KI,SPECTRA(ISPEC)%XKI)
-!         CALL KPTTOXK(SPECTRA(ISPEC)%KF,SPECTRA(ISPEC)%XKF)
-!         ! CALCULATE MOMENTUM TRANSFER VECTOR IN RELATIVE COORDINATES
-!         SPECTRA(ISPEC)%XQ=SPECTRA(ISPEC)%XKI-SPECTRA(ISPEC)%XKF
-!       ENDDO
-!       END SUBROUTINE RIXS$XK
-! SUBROUTINE RIXS$QTRANSFER  !MARK: RIXS$QTRANSFER
-!       USE RIXS_MODULE, ONLY: NSPECTRA,SPECTRA,EFEXP
-!       IMPLICIT NONE
-!       INTEGER(4) :: NFIL
-!       INTEGER(4) :: ISPEC
-!       REAL(8) :: RBAS(3,3)
-!       REAL(8) :: GBAS(3,3)
-!       REAL(8) :: INVGBAS(3,3)
-!       REAL(8) :: VOL
-!       REAL(8) :: XQ1(3)
-!       INTEGER(4) :: NKDIV(3)
-!       INTEGER(4) :: IP(3)
-!       REAL(8) :: QTRANS(3)
-!       REAL(8) :: VVAR(3)
-!       REAL(8) :: EV
-!       REAL(8) :: ANGSTROM
-!       REAL(8) :: HBAR
-!       REAL(8) :: C
-!       INTEGER(4) :: THISTASK,NTASKS
-!       CALL FILEHANDLER$UNIT('PROT',NFIL)
-!       CALL CONSTANTS('EV',EV)
-!       CALL CONSTANTS('ANGSTROM',ANGSTROM)
-!       CALL CONSTANTS('HBAR',HBAR)
-!       CALL CONSTANTS('C',C)
-
-!       CALL PDOS$GETR8A('RBAS',3*3,RBAS)
-!       CALL GBASS(RBAS,GBAS,VOL)
-!       CALL LIB$INVERTR8(3,GBAS,INVGBAS)
-!       CALL PDOS$GETI4A('NKDIV',3,NKDIV)
-
-!       CALL MPE$QUERY('~',NTASKS,THISTASK)
-!       ! IF(THISTASK.EQ.1) THEN
-!       !   WRITE(NFIL,FMT='(A)')
-!       !   WRITE(NFIL,FMT='(80("="))')
-!       !   WRITE(NFIL,FMT='(80("="),T15,A50)') &
-!       ! &            '       APPROXIMATE MOMENTUM TRANSFER SHIFT        '
-!       !   WRITE(NFIL,FMT='(80("="))')
-!       ! ENDIF
-!       DO ISPEC=1,NSPECTRA
-! !
-! !       ========================================================================
-! !       ==  CALCULATE K AND Q VECTOR IN RECIPROCAL BOHRRADIUS                 ==
-! !       ========================================================================
-!         CALL KVEC(EFEXP+SPECTRA(ISPEC)%EIREL,SPECTRA(ISPEC)%KDIRI,SPECTRA(ISPEC)%KI)
-! ! WARNING: KF IS CALCULATED WITH THE EXCITATION ENERGY AND NOT THE 
-! !          EMISSION ENERGY
-!         CALL KVEC(EFEXP+SPECTRA(ISPEC)%EIREL,SPECTRA(ISPEC)%KDIRF,SPECTRA(ISPEC)%KF)
-! ! WARNING: Q=KI-KF
-!         SPECTRA(ISPEC)%Q=SPECTRA(ISPEC)%KI-SPECTRA(ISPEC)%KF
-! !
-! !       ========================================================================
-! !       ==  CALCULATE K AND Q VECTOR IN RELATIVE COORDINATES                  ==
-! !       ========================================================================
-!         SPECTRA(ISPEC)%XKI=MATMUL(INVGBAS,SPECTRA(ISPEC)%KI)
-!         SPECTRA(ISPEC)%XKF=MATMUL(INVGBAS,SPECTRA(ISPEC)%KF)
-!         SPECTRA(ISPEC)%XQ=MATMUL(INVGBAS,SPECTRA(ISPEC)%Q)
-! !
-! !       ========================================================================
-! !       ==  CALCULATE RELATIVE Q VECTOR GOING FROM ONE KPT TO ANOTHER         ==
-! !       ==  BEST MATCHING THE ACTUAL MOMENTUM TRANSFER                        ==
-! !       ========================================================================
-! ! WARNING: CHECK IF SMALLEST DISTANCE IN RELATIVE COORDINATES IS ALSO SMALLEST
-! !          DISTANCE IN TOTAL COORDINATES
-!         XQ1(:)=MODULO(SPECTRA(ISPEC)%XQ(:),1.D0)
-!         XQ1(:)=XQ1(:)*REAL(NKDIV(:),KIND=8)
-!         IP(:)=NINT(XQ1(:))
-!         QTRANS(:)=REAL(IP(:),KIND=8)/REAL(NKDIV(:),KIND=8)
-!         VVAR(:)=SPECTRA(ISPEC)%XQ(:)-QTRANS(:)
-!         IP(:)=NINT(VVAR(:))
-!         QTRANS(:)=QTRANS(:)+REAL(IP(:),KIND=8)
-!         ! IF(THISTASK.EQ.1) THEN
-!         !   WRITE(NFIL,FMT='("#",A11,I3)')'SPECTRUM ',ISPEC
-!         !   WRITE(NFIL,FMT='(A12,3F12.8)')'RELATIVE XQ',SPECTRA(ISPEC)%XQ
-!         !   WRITE(NFIL,FMT='(A12,3F12.8)')'CLOSEST XQ',QTRANS
-!         !   WRITE(NFIL,FMT='(A12,F12.6)')'REL. ERROR',NORM2(QTRANS-SPECTRA(ISPEC)%XQ)
-!         !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [A^-1]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*ANGSTROM)
-!         !   WRITE(NFIL,FMT='(A12,F12.6)')'ERROR [EV]',NORM2(MATMUL(GBAS,QTRANS-SPECTRA(ISPEC)%XQ)*HBAR*C)/EV
-!         ! ENDIF
-
-!         SPECTRA(ISPEC)%XQAPPROX=QTRANS
-!       ENDDO
-!       END SUBROUTINE RIXS$QTRANSFER
