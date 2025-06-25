@@ -5519,6 +5519,8 @@
         DO ISPIN=1,NSPIN
           CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
           IF(THISTASK.NE.WTASK) CYCLE
+                          CALL TRACE$I4VAL(' ONEKPT IKPTTOT',IKPTTOT)
+                          CALL TRACE$I4VAL(' ONEKPT ISPIN',ISPIN)
           ! GET NB1,NB2,NOCC
           CALL STATE$SELECT('GROUND')
           CALL STATE$GETI4('NB',IKPT,ISPIN,NB1)
@@ -5552,6 +5554,7 @@
 
           ! == LOOP OVER FINAL STATES (X,Y) -> (IEMP,IOCC) =====================
           DO IOCC=1,NOCC
+                          CALL TRACE$I4VAL(' ONEKPT IOCC',IOCC)
             DO IEMP=1,NB1-NOCC
               IEMPTOT=IEMP+NOCC
               ! CALCULATE ENERGY LOSS
@@ -5872,6 +5875,8 @@
         DO ISPIN=1,NSPIN
           CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
           IF(THISTASK.NE.WTASK) CYCLE
+                          CALL TRACE$I4VAL(' ONEKPT IKPTTOT',IKPTTOT)
+                          CALL TRACE$I4VAL(' ONEKPT ISPIN',ISPIN)
           ! GET NB1,NB2,NOCC
           CALL STATE$SELECT('GROUND')
           CALL STATE$GETI4('NB',IKPT,ISPIN,NB1)
@@ -9549,7 +9554,6 @@
       REAL(8) :: WORK(3)
       REAL(8) :: WORK2(3)
       REAL(8) :: SVAR
-                          CALL TRACE$PUSH('POLARISATION_CONVERT')
       CALL CROSS_PROD(K,N,WORK)
       SVAR=NORM2(WORK)
       IF(SVAR.LT.TOL) THEN
@@ -9564,7 +9568,6 @@
       POLXYZ=POL(1)*WORK+POL(2)*WORK2
       SVAR=SQRT(SUM(ABS(POLXYZ)**2))
       POLXYZ=POLXYZ/SVAR
-                          CALL TRACE$POP
       RETURN
       END SUBROUTINE POLARISATION_CONVERT
 !
