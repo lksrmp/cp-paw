@@ -1159,6 +1159,38 @@
       END IF
       RETURN
       END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB$DETC8(N,A,DET)
+!     **************************************************************************
+!     ** CALCULATES THE DETERMINANT OF A COMPLEX SQUARE MATRIX                **
+!     ** USING LU DECOMPOSITION                                               **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: N
+      COMPLEX(8),INTENT(IN) :: A(N,N)
+      COMPLEX(8),INTENT(OUT):: DET
+      COMPLEX(8)            :: AUX(N,N)
+      INTEGER(4)            :: IPIV(N)
+      INTEGER(4)            :: NSWAP
+      INTEGER(4)            :: I
+!     **************************************************************************
+      IF(N.EQ.1) THEN
+        DET=A(1,1)
+        RETURN
+      END IF
+      AUX(:,:)=A(:,:)
+      CALL LIB_LAPACK_ZGETRF(N,AUX,IPIV)
+      DET=(1.D0,0.D0)
+      NSWAP=0
+      DO I=1,N
+        DET=DET*AUX(I,I)
+        IF(IPIV(I).NE.I) NSWAP=NSWAP+1
+      ENDDO
+      IF(MOD(NSWAP,2).NE.0) DET=-DET
+      RETURN
+      END
+!
 !***********************************************************************
 !***********************************************************************
 !****                                                               ****
