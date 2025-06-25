@@ -2266,6 +2266,41 @@
       END IF
       RETURN
       END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB_LAPACK_ZGETRF(N,A,IPIV)
+!     **************************************************************************
+!     **  ZGETRF COMPUTES AN LU FACTORIZATION OF A GENERAL M-BY-N MATRIX A    **
+!     **  USING PARTIAL PIVOTING WITH ROW INTERCHANGES.                       **
+!     **  THE FACTORIZATION HAS THE FORM                                      **
+!     **    A = P * L * U                                                     **
+!     ** WHERE P IS A PERMUTATION MATRIX, L IS LOWER TRIANGULAR WITH UNIT     **
+!     ** DIAGONAL ELEMENTS (LOWER TRAPEZOIDAL IF M > N), AND U IS UPPER       **
+!     ** TRIANGULAR (UPPER TRAPEZOIDAL IF M < N).                             **
+!     **                                                                      **
+!     ** REMARK: THIS INTERFACE IS RESTRICTED TO SQUARE MATRICES NXN          **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: N
+      COMPLEX(8),INTENT(INOUT) :: A(N,N)
+      INTEGER(4),INTENT(OUT) :: IPIV(N)
+      INTEGER(4) :: INFO
+!     **************************************************************************
+      CALL ZGETRF(N,N,A,N,IPIV,INFO)
+      IF(INFO.NE.0) THEN
+        IF(INFO.LT.0) THEN
+          CALL ERROR$MSG('I-TH ARGUMENT HAD AN ILLEGAL VALUE')
+          CALL ERROR$I4VAL('I',-INFO)
+          CALL ERROR$STOP('LIB_LAPACK_ZGETRF')
+        ELSE
+          CALL ERROR$MSG('U(I,I) IS EXACTLY ZERO')
+          CALL ERROR$I4VAL('I',INFO)
+          CALL ERROR$MSG('FACTORIZATION COMPLETED BUT DIVISION BY 0 MIGHT OCCUR')
+          CALL ERROR$STOP('LIB_LAPACK_ZGETRF')
+        END IF
+      END IF
+      RETURN
+      END
 !!$#ENDIF
 ! 
 !*******************************************************************************
