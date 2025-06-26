@@ -404,6 +404,8 @@
 
       CALL XRAY$OVERLAP
 
+      CALL OVERLAP$REPORT(NFIL)
+
       CALL XRAY$WRITEOVERLAP
  
       ! FREE UP MEMORY CONTAINING PROJECTIONS
@@ -4200,7 +4202,7 @@
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     ** REQUIRES XAS SPECTRUM SELECTED                                      **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS,SINGLEPARTICLE
       USE CLOCK_MODULE
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -4244,6 +4246,11 @@
         WRITE(NFIL,FMT='("# ",I6,A)')NUMCHANGES,-' CHANGES SINCE LAST COMMIT'
       ELSE
         WRITE(NFIL,FMT='("# ",A)')-'NO CHANGES SINCE LAST COMMIT'
+      END IF
+      IF(SINGLEPARTICLE) THEN
+        WRITE(NFIL,FMT='("# ",A)')'SINGLE PARTICLE CALCULATION (SINGLEPARTICLE=T)'
+      ELSE
+        WRITE(NFIL,FMT='("# ",A)')'DETERMINANT CALCULATION (SINGLEPARTICLE=F)'
       END IF
       IF(THIS%BROADMODE.EQ.+'N') THEN
         WRITE(NFIL,FMT='("# ",A12,X,A)')'BROADEN:','NONE'
@@ -7670,6 +7677,51 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE OVERLAP$INIT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$REPORT(NFIL)  ! MARK: OVERLAP$REPORT
+!     **************************************************************************
+!     ** REPORT OVERLAP MODULE                                                **
+!     ** REQUIRES NO SELECTED OVERLAP                                         **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,NKPTG,NSPING,INITIALIZED,THIS
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
+      INTEGER(4) :: IKPT,ISPIN
+                          CALL TRACE$PUSH('OVERLAP$REPORT')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(.NOT.INITIALIZED) THEN
+        CALL ERROR$MSG('OVERLAP NOT INITIALIZED')
+        CALL ERROR$STOP('OVERLAP$REPORT')
+      END IF
+      IF(THISTASK.EQ.RTASK) THEN
+        WRITE(NFIL,'(A)') ''
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A)') 'OVERLAP REPORT'
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,'(A4,X,A5,X,A21,X,A10)') 'IKPT','ISPIN','ADET','|ADET|**2'
+      END IF
+      DO IKPT=1,NKPTG
+        DO ISPIN=1,NSPING
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          IF(THISTASK.NE.WTASK.AND.THISTASK.NE.RTASK) CYCLE
+          CALL OVERLAP$SELECT(IKPT,ISPIN)
+          IF(THISTASK.EQ.WTASK) THEN
+            CALL LIB$DETC8(THIS%NOCC,THIS%A,THIS%ADET)
+          END IF
+          CALL MPE$SENDRECEIVE('~',WTASK,RTASK,THIS%ADET)
+          IF(THISTASK.EQ.RTASK) THEN
+            WRITE(NFIL,FMT='(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') IKPT,ISPIN,THIS%ADET,ABS(THIS%ADET)**2
+          END IF
+          CALL OVERLAP$UNSELECT
+        ENDDO
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE OVERLAP$REPORT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP$K(NB2NOCC,NOCC,KMAT)  ! MARK: OVERLAP$K
