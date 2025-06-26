@@ -7690,32 +7690,24 @@
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
       INTEGER(4) :: IKPT,ISPIN
-                          CALL TRACE$PUSH('OVERLAP$REPORT')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('OVERLAP$REPORT')
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('OVERLAP NOT INITIALIZED')
         CALL ERROR$STOP('OVERLAP$REPORT')
       END IF
-      IF(THISTASK.EQ.RTASK) THEN
-        WRITE(NFIL,'(A)') ''
-        WRITE(NFIL,'(80("#"))')
-        WRITE(NFIL,FMT='(A)') 'OVERLAP REPORT'
-        WRITE(NFIL,'(80("#"))')
-        WRITE(NFIL,'(A4,X,A5,X,A21,X,A10)') 'IKPT','ISPIN','ADET','|ADET|**2'
-      END IF
+      WRITE(NFIL,'(A)') ''
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A)') 'OVERLAP REPORT'
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,'(A4,X,A5,X,A21,X,A10)') 'IKPT','ISPIN','ADET','|ADET|'
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
-          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
-          IF(THISTASK.NE.WTASK.AND.THISTASK.NE.RTASK) CYCLE
           CALL OVERLAP$SELECT(IKPT,ISPIN)
-          IF(THISTASK.EQ.WTASK) THEN
-            CALL LIB$DETC8(THIS%NOCC,THIS%A,THIS%ADET)
-          END IF
-          CALL MPE$SENDRECEIVE('~',WTASK,RTASK,THIS%ADET)
-          IF(THISTASK.EQ.RTASK) THEN
-            WRITE(NFIL,FMT='(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') IKPT,ISPIN,THIS%ADET,ABS(THIS%ADET)**2
-          END IF
+          WRITE(NFIL,FMT='(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') &
+     &                                       IKPT,ISPIN,THIS%ADET,ABS(THIS%ADET)
           CALL OVERLAP$UNSELECT
         ENDDO
       ENDDO
@@ -8064,6 +8056,54 @@
       END IF
       RETURN
       END SUBROUTINE OVERLAP$SETR8A
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$GETC8(ID,VAL)  ! MARK: OVERLAP$GETC8
+!     **************************************************************************
+!     ** GET COMPLEX VALUE FROM SELECTED OVERLAP                              **
+!     ** REQUIRES SELECTED OVERLAP                                            **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      COMPLEX(8), INTENT(OUT) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$GETC8')
+      END IF
+      IF(ID.EQ.'ADET') THEN
+        VAL=THIS%ADET
+      ELSE
+        CALL ERROR$MSG('OVERLAP GETC8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$GETC8')
+      END IF
+      RETURN
+      END SUBROUTINE OVERLAP$GETC8
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE OVERLAP$SETC8(ID,VAL)  ! MARK: OVERLAP$SETC8
+!     **************************************************************************
+!     ** SET COMPLEX VALUE IN SELECTED OVERLAP                                **
+!     ** REQUIRES SELECTED OVERLAP                                           **
+!     **************************************************************************
+      USE OVERLAP_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      COMPLEX(8), INTENT(IN) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO OVERLAP SELECTED')
+        CALL ERROR$STOP('OVERLAP$SETC8')
+      END IF
+      IF(ID.EQ.'ADET') THEN
+        THIS%ADET=VAL
+      ELSE
+        CALL ERROR$MSG('OVERLAP SETC8 ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID: ',ID)
+        CALL ERROR$STOP('OVERLAP$SETC8')
+      END IF
+      RETURN
+      END SUBROUTINE OVERLAP$SETC8
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP$GETC8A(ID,LEN,VAL)  ! MARK: OVERLAP$GETC8A
@@ -9078,6 +9118,7 @@
       INTEGER(4) :: NKPT,NSPIN
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: NTASKS,THISTASK,WTASK
+      COMPLEX(8) :: ADET
 
                           CALL TRACE$PUSH('XRAY$OVERLAP')
                           CALL TIMING$CLOCKON('XRAY$OVERLAP')
@@ -9098,27 +9139,31 @@
       DO IKPT=1,NKPT
         DO ISPIN=1,NSPIN
           CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
-          IF(THISTASK.NE.WTASK) CYCLE
           CALL OVERLAP$SELECT(IKPT,ISPIN)
-          CALL STATE$SELECT('GROUND')
-          CALL STATE$GETI4('NB',IKPT,ISPIN,NB1)
-          CALL STATE$GETI4('NOCC',IKPT,ISPIN,NOCC)
-          CALL STATE$UNSELECT
-          CALL STATE$SELECT('EXCITE')
-          CALL STATE$GETI4('NB',IKPT,ISPIN,NB2)
-          CALL STATE$UNSELECT
-          ALLOCATE(DUMMY(NOCC,NOCC))
-          CALL OVERLAP$GETC8A('A',NOCC*NOCC,DUMMY)
-          DEALLOCATE(DUMMY)
-          ALLOCATE(DUMMY(NOCC,NB1-NOCC))
-          CALL OVERLAP$GETC8A('B',NOCC*(NB1-NOCC),DUMMY)
-          DEALLOCATE(DUMMY)
-          ALLOCATE(DUMMY(NB2-NOCC,NOCC))
-          CALL OVERLAP$GETC8A('C',(NB2-NOCC)*NOCC,DUMMY)
-          DEALLOCATE(DUMMY)
-          ALLOCATE(DUMMY(NB2-NOCC,NB1-NOCC))
-          CALL OVERLAP$GETC8A('D',(NB2-NOCC)*(NB1-NOCC),DUMMY)
-          DEALLOCATE(DUMMY)
+          IF(THISTASK.EQ.WTASK) THEN
+            CALL STATE$SELECT('GROUND')
+            CALL STATE$GETI4('NB',IKPT,ISPIN,NB1)
+            CALL STATE$GETI4('NOCC',IKPT,ISPIN,NOCC)
+            CALL STATE$UNSELECT
+            CALL STATE$SELECT('EXCITE')
+            CALL STATE$GETI4('NB',IKPT,ISPIN,NB2)
+            CALL STATE$UNSELECT
+            ALLOCATE(DUMMY(NOCC,NOCC))
+            CALL OVERLAP$GETC8A('A',NOCC*NOCC,DUMMY)
+            DEALLOCATE(DUMMY)
+            CALL LIB$DETC8(NOCC,DUMMY,ADET)
+            ALLOCATE(DUMMY(NOCC,NB1-NOCC))
+            CALL OVERLAP$GETC8A('B',NOCC*(NB1-NOCC),DUMMY)
+            DEALLOCATE(DUMMY)
+            ALLOCATE(DUMMY(NB2-NOCC,NOCC))
+            CALL OVERLAP$GETC8A('C',(NB2-NOCC)*NOCC,DUMMY)
+            DEALLOCATE(DUMMY)
+            ALLOCATE(DUMMY(NB2-NOCC,NB1-NOCC))
+            CALL OVERLAP$GETC8A('D',(NB2-NOCC)*(NB1-NOCC),DUMMY)
+            DEALLOCATE(DUMMY)
+          END IF
+          CALL MPE$BROADCAST('~',WTASK,ADET)
+          CALL OVERLAP$SETC8('ADET',ADET)
           CALL OVERLAP$UNSELECT
         ENDDO
       ENDDO
