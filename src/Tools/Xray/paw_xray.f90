@@ -6040,9 +6040,9 @@
 !     ** CALCULATE RIXS SPECTRA AT TWO KPTS                                   **
 !     ** REQUIRES RIXS INITIALIZED, UNSELECTED, AND ABSORB CALCULATED         **
 !     **************************************************************************
-! TODO: IMPLEMENT ADET, BASISWGHT, NORMALIZE
+! TODO: CHECK ADET, BASISWGHT, NORMALIZE
       USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS,NSPEC,EMIN,EMAX,TTWOK
-      USE SHARED_DATA_MODULE, ONLY: ABSORB
+      USE SHARED_DATA_MODULE, ONLY: ABSORB,ADETPROD
       IMPLICIT NONE
       COMPLEX(8), PARAMETER :: CI=(0.D0,1.D0)
       INTEGER(4) :: ISPEC
@@ -6076,6 +6076,13 @@
       COMPLEX(8), ALLOCATABLE :: MU(:,:) ! (NB2-NOCC,NB1-NOCC)
       COMPLEX(8), ALLOCATABLE :: AINV(:,:) ! (NOCC,NOCC)
       COMPLEX(8) :: DUMMY(3)
+      LOGICAL(4) :: TADET
+      COMPLEX(8) :: ADET
+      COMPLEX(8) :: ADETOP
+      INTEGER(4) :: ISPINOP
+      LOGICAL(4) :: TBASISWGHT
+      LOGICAL(4) :: TNORMALIZE
+      REAL(8) :: ADETSUM
       ! SKIP COMPLETELY IF ONLY SPECTRA AT ONE KPT
       IF(.NOT.TTWOK) RETURN
                           CALL TRACE$PUSH('RIXS_TWOKPT')
@@ -6094,6 +6101,11 @@
       END IF
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       ALLOCATE(AMPLTOT(NSPEC))
+
+      CALL XCNTL$GETL4('ADET',TADET)
+      CALL XCNTL$GETL4('BASISWGHT',TBASISWGHT)
+      CALL XCNTL$GETL4('NORMALIZE',TNORMALIZE)
+      CALL OVERLAP$GETR8('ADETSUM',ADETSUM)
 
 
       CALL SIMULATION$SELECT('GROUND')
@@ -6156,7 +6168,15 @@
             END IF
             CALL RIXS$UNSELECT
           ENDDO ! END ISPEC
+
+          ISPINOP=MOD(ISPIN,NSPIN)+1 ! GET OPPOSITE SPIN
+          ! GET ADET FOR OPPOSITE SPIN
+          CALL OVERLAP$SELECT(IKPT,ISPINOP)
+          CALL OVERLAP$GETC8('ADET',ADETOP)
+          CALL OVERLAP$UNSELECT
+
           CALL OVERLAP$SELECT(IKPT,ISPIN)
+          CALL OVERLAP$GETC8('ADET',ADET)
           ALLOCATE(DIPOLE(3,NB2))
           CALL OVERLAP$GETC8A('DIPOLE',3*NB2,DIPOLE)
           ALLOCATE(MU(NB2-NOCC,NB1-NOCC))
@@ -6185,10 +6205,19 @@
                   CVAR=DOT_PRODUCT(CONJG(THIS%POLXYZI),ABSORB(IKPT,ISPIN)%AMPL(:,IELL))
                   ! MU(IELL,IEMP) * EPSILON^P * <PSI_IELL|R|S>
                   CVAR=MU(IELL,IEMP)*CVAR
+                  ! TODO: CHECK IF WE NEED CONJG HERE
+                  ! APPLY ADET
+                  IF(TADET) THEN
+                    CVAR=CVAR*ADET*ADETOP
+                  END IF
                 ! NON-IRREDUCIBLE K-POINT (REQUIRES CONJG)
                 ELSE
                   CVAR=DOT_PRODUCT(CONJG(THIS%POLXYZI),CONJG(ABSORB(IKPT,ISPIN)%AMPL(:,IELL)))
                   CVAR=CONJG(MU(IELL,IEMP))*CVAR
+                  ! APPLY ADET
+                  IF(TADET) THEN
+                    CVAR=CVAR*CONJG(ADET)*CONJG(ADETOP)
+                  END IF
                 END IF
                 ! DENOMINATOR
                 CVAR=CVAR/DENOMINATOR
@@ -6206,6 +6235,14 @@
               CALL RIXS$ISELECT(ISPEC)
               ! ONLY SELECT SPECTRUM IF AT TWO KPTS
               IF(THIS%TKPTSHIFT) THEN
+                ! MULTIPLY BASIS WEIGHT FOR K POINT
+                IF(TBASISWGHT) THEN
+                  AMPLTOT(ISPEC)=AMPLTOT(ISPEC)/ADETPROD(IKPT,1)
+                END IF
+                ! NORMALIZE AMPLITUDE
+                IF(TNORMALIZE) THEN
+                  AMPLTOT(ISPEC)=AMPLTOT(ISPEC)/ADETSUM
+                END IF
                 ! SAVE AMPLITUDE FOR THIS SPECTRUM
                 THIS%TWOAMPL(IKPTTOT,ISPIN)%X(IEMP)=AMPLTOT(ISPEC)
               END IF
@@ -6223,8 +6260,12 @@
 
             DO IELL=1,NOCC
               ! TODO: CHECK INDEX OF AINV
-              AMPL(:)=AMPL(:)+DIPOLE(:,IELL)*AINV(IOCC,IELL)
+              ! TODO: CHECK IF DIPOLE/ADET IS CONJG
+              AMPL(:)=AMPL(:)+CONJG(DIPOLE(:,IELL))*AINV(IOCC,IELL)
             ENDDO
+            IF(TADET) THEN
+              AMPL(:)=AMPL(:)*ADET*ADETOP
+            END IF
             DO ISPEC=1,NSPEC
               CALL RIXS$ISELECT(ISPEC)
               ! DO NOT CALCULATE SPECTRUM IF NOT AT TWO KPTS
@@ -6236,10 +6277,26 @@
               IF(TIRR) THEN
                 ! (EPSILON^P)^* * AMPL (DOT_PRODUCT DOES CONJG)
                 CVAR=DOT_PRODUCT(THIS%POLXYZO,AMPL)
+                IF(TADET) THEN
+                  ! APPLY ADET
+                  CVAR=CVAR*CONJG(ADET)*CONJG(ADETOP)
+                END IF
               ! NON-IRREDUCIBLE K-POINT (REQUIRES CONJG)
               ELSE
                 ! (EPSILON^P)^* * CONJG(AMPL) (DOT_PRODUCT DOES CONJG)
                 CVAR=DOT_PRODUCT(THIS%POLXYZO,CONJG(AMPL))
+                IF(TADET) THEN
+                  ! APPLY ADET
+                  CVAR=CVAR*ADET*ADETOP
+                END IF
+              END IF
+              ! MULTIPLY BY BASIS WEIGHT FOR K POINT
+              IF(TBASISWGHT) THEN
+                CVAR=CVAR/ADETPROD(IKPT,1)
+              END IF
+              ! NORMALIZE AMPLITUDE
+              IF(TNORMALIZE) THEN
+                CVAR=CVAR/ADETSUM
               END IF
               ! SAVE AMPLITUDE
               THIS%TWOAMPL(IKPTTOT,ISPIN)%Y(IOCC)=CVAR
