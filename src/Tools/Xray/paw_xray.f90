@@ -306,6 +306,25 @@
       END MODULE RIXS_MODULE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      MODULE AUXORB_MODULE  ! MARK: AUXORB_MODULE
+      TYPE XAS_AUXORB_TYPE
+      CHARACTER(256) :: FILE ! FILENAME FOR AUXILIARY ORBITAL
+      INTEGER(4) :: B ! BAND INDEX OF EMPTY FINAL ORBITAL
+      INTEGER(4) :: S ! SPIN INDEX
+      INTEGER(4) :: K ! KPOINT INDEX
+      COMPLEX(8), ALLOCATABLE :: VAL(:) ! (NOCC+1) VALUES OF AUXILIARY ORBITAL FACTOR
+      INTEGER(4), ALLOCATABLE :: BARR(:) ! (NOCC+1) BAND INDEXES OF AUXILIARY ORBITAL
+      INTEGER(4) :: NOCC ! NUMBER OF OCCUPIED BANDS
+      END TYPE XAS_AUXORB_TYPE
+
+      INTEGER(4) :: NAUXORB ! NUMBER OF AUXILIARY ORBITALS
+      TYPE(XAS_AUXORB_TYPE), ALLOCATABLE, TARGET :: AUXORB(:) ! (NAUXORB) AUXILIARY ORBITALS
+      TYPE(XAS_AUXORB_TYPE), POINTER :: THIS ! POINTER TO CURRENT AUXILIARY ORBITAL
+      LOGICAL(4) :: SELECTED=.FALSE. ! AUXILIARY ORBITAL SELECTED
+      LOGICAL(4) :: TACTIVE=.FALSE.
+      END MODULE AUXORB_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       MODULE SHARED_DATA_MODULE  ! MARK: SHARED_DATA_MODULE
 !     **************************************************************************
 !     ** SHARED DATA MODULE FOR PAW XRAY TOOL                                 **
@@ -426,6 +445,13 @@
       CALL XAS$OUTPUT
       ! FREE UP MEMORY CONTAINING XAS SPECTRA
       CALL XAS$DEALLOCATESPECTRA
+      
+      ! ========================================================================
+      ! == AUXILIARY ORBITALS                                                 ==
+      ! ========================================================================
+      CALL AUXORB$CALCULATE
+
+      CALL AUXORB$OUTPUT
 
       ! ========================================================================
       ! == RIXS                                                               ==
@@ -782,6 +808,10 @@
       CHARACTER(1) :: CHVAR
       COMPLEX(8) :: CVAR2(2)
       REAL(8) :: EV
+
+      INTEGER(4) :: NAUXORB
+      INTEGER(4) :: IORB
+      INTEGER(4) :: IVAR
       ! ONLY READ IF XAS IS ACTIVE
       CALL XAS$GETL4('ACTIVE',TCHK)
       IF(.NOT.TCHK) RETURN
@@ -995,6 +1025,59 @@
         END IF
         CALL XAS$UNSELECT
       ENDDO ! END ISPEC
+
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XAS')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'AUXORB',1,TCHK)
+      CALL AUXORB$SETL4('ACTIVE',TCHK)
+      
+      IF(TCHK) THEN
+        CALL LINKEDLIST$NLISTS(LL_CNTL,'AUXORB',NAUXORB)
+        CALL AUXORB$SETI4('NAUXORB',NAUXORB)
+        DO IORB=1,NAUXORB
+          CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+          CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+          CALL LINKEDLIST$SELECT(LL_CNTL,'XAS')
+          CALL LINKEDLIST$SELECT(LL_CNTL,'AUXORB',IORB)
+          CALL AUXORB$SELECT(IORB)
+          ! READ FILENAME
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+          IF(.NOT.TCHK) THEN
+            CALL ERROR$MSG('!XAS!AUXORB:FILE NOT FOUND')
+            CALL ERROR$I4VAL('IORB',IORB)
+            CALL ERROR$STOP('XCNTL$XAS')
+          END IF
+          CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
+          CALL AUXORB$SETCH('FILE',TRIM(ADJUSTL(FILENAME)))
+          ! READ BAND
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'B',1,TCHK)
+          IF(.NOT.TCHK) THEN
+            CALL ERROR$MSG('!XAS!AUXORB:B NOT FOUND')
+            CALL ERROR$I4VAL('IORB',IORB)
+            CALL ERROR$STOP('XCNTL$XAS')
+          END IF
+          CALL LINKEDLIST$GET(LL_CNTL,'B',1,IVAR)
+          CALL AUXORB$SETI4('B',IVAR)
+          ! READ KPOINT
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'K',1,TCHK)
+          IF(TCHK) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'K',1,IVAR)
+            CALL AUXORB$SETI4('K',IVAR)
+          ELSE
+            CALL AUXORB$SETI4('K',1) ! DEFAULT K IS 1
+          END IF
+          ! READ SPIN
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'S',1,TCHK)
+          IF(TCHK) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'S',1,IVAR)
+            CALL AUXORB$SETI4('S',IVAR)
+          ELSE
+            CALL AUXORB$SETI4('S',1) ! DEFAULT SPIN IS 1
+          END IF
+          CALL AUXORB$UNSELECT
+        ENDDO
+      END IF
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XCNTL$XAS
@@ -10092,6 +10175,390 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE SHARED_DATA$REPORT
+!
+!     ==========================================================================
+!     ==========================================================================
+!     == AUXORB MODULE                                                        ==
+!     ==========================================================================
+!     ==========================================================================
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$CALCULATE  ! MARK: AUXORB$CALCULATE
+!     **************************************************************************
+!     ** CALCULATE AUXILIARY ORBITAL FOR AUXILIARY MODULE                     **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: THIS,NAUXORB,TACTIVE
+      IMPLICIT NONE
+      INTEGER(4) :: NTASKS,THISTASK,WTASK
+      INTEGER(4) :: IORB
+      INTEGER(4) :: IKPT,ISPIN,BAND
+      INTEGER(4) :: NKPT,NSPIN
+      INTEGER(4) :: NB2
+      INTEGER(4) :: NOCC
+      COMPLEX(8), ALLOCATABLE :: KMAT(:,:)
+      INTEGER(4) :: IEMP
+      INTEGER(4) :: IB
+      COMPLEX(8) :: ADET
+      COMPLEX(8) :: ADETOP
+      INTEGER(4) :: ISPINOP
+      IF(.NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('AUXORB$CALCULATE')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+      DO IORB=1,NAUXORB
+        CALL AUXORB$SELECT(IORB)
+        IKPT=THIS%K
+        ISPIN=THIS%S
+        BAND=THIS%B
+        ! TODO: CATCH THIS EARLIER
+        IF(ISPIN.LT.1.OR.ISPIN.GT.NSPIN) THEN
+          CALL ERROR$MSG('ISPIN OUT OF RANGE')
+          CALL ERROR$I4VAL('ISPIN',ISPIN)
+          CALL ERROR$I4VAL('NSPIN',NSPIN)
+          CALL ERROR$STOP('AUXORB$CALCULATE')
+        END IF
+        IF(IKPT.LT.1.OR.IKPT.GT.NKPT) THEN
+          CALL ERROR$MSG('IKPT OUT OF RANGE')
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('NKPT',NKPT)
+          CALL ERROR$STOP('AUXORB$CALCULATE')
+        END IF
+        CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+        IF(THISTASK.NE.WTASK) THEN
+          CALL AUXORB$UNSELECT
+          CYCLE
+        END IF
+
+        ISPINOP=MOD(ISPIN,NSPIN)+1
+        CALL OVERLAP$SELECT(IKPT,ISPINOP)
+        CALL OVERLAP$GETC8('ADET',ADETOP)
+        CALL OVERLAP$UNSELECT
+
+        CALL OVERLAP$SELECT(IKPT,ISPIN)
+        CALL OVERLAP$GETC8('ADET',ADET)
+        CALL OVERLAP$GETI4('NB2',NB2)
+        CALL OVERLAP$GETI4('NOCC',NOCC)
+        IF(BAND.LE.NOCC.OR.BAND.GT.NB2) THEN
+          CALL ERROR$MSG('BAND OUT OF RANGE')
+          CALL ERROR$I4VAL('B',BAND)
+          CALL ERROR$I4VAL('NOCC',NOCC)
+          CALL ERROR$I4VAL('NB2',NB2)
+          CALL ERROR$STOP('AUXORB$CALCULATE')
+        END IF
+        THIS%NOCC=NOCC
+        IEMP=BAND-NOCC
+        ALLOCATE(KMAT(NB2-NOCC,NOCC))
+        CALL OVERLAP$K(NB2-NOCC,NOCC,KMAT)
+        ALLOCATE(THIS%VAL(NOCC+1))
+        ALLOCATE(THIS%BARR(NOCC+1))
+        DO IB=1,NOCC
+          THIS%VAL(IB)=-KMAT(IEMP,IB)
+          THIS%BARR(IB)=IB
+        ENDDO
+        THIS%VAL(NOCC+1)=1.D0
+        THIS%BARR(NOCC+1)=BAND
+        ! TODO: CHECK IF THIS IS NEEDED
+        THIS%VAL(:)=THIS%VAL(:)*ADET*ADETOP*(-1.D0)**(NOCC)
+        DEALLOCATE(KMAT)
+        CALL OVERLAP$UNSELECT
+        CALL AUXORB$UNSELECT
+      ENDDO ! END IORB
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE AUXORB$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$OUTPUT  ! MARK: AUXORB$OUTPUT
+!     **************************************************************************
+!     ** OUTPUT AUXILIARY ORBITAL FOR AUXILIARY MODULE                        **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: THIS,NAUXORB,TACTIVE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: IORB
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: IKPT,ISPIN,BAND
+      INTEGER(4) :: NTASKS,THISTASK,WTASK,RTASK
+      INTEGER(4) :: IB
+      INTEGER(4) :: I
+      IF(.NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('AUXORB$OUTPUT')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+
+      DO IORB=1,NAUXORB
+        CALL AUXORB$SELECT(IORB)
+        IF(THISTASK.EQ.RTASK) THEN
+          CALL FILEHANDLER$SETFILE('AUXORB',.FALSE.,TRIM(THIS%FILE))
+          CALL FILEHANDLER$SETSPECIFICATION('AUXORB','STATUS','REPLACE')
+          CALL FILEHANDLER$SETSPECIFICATION('AUXORB','POSITION','REWIND')
+          CALL FILEHANDLER$SETSPECIFICATION('AUXORB','ACTION','WRITE')
+          CALL FILEHANDLER$SETSPECIFICATION('AUXORB','FORM','FORMATTED')
+          CALL FILEHANDLER$UNIT('AUXORB',NFIL)
+        END IF
+        IKPT=THIS%K
+        ISPIN=THIS%S
+        BAND=THIS%B
+        CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+        IF(THISTASK.NE.WTASK.AND.THISTASK.NE.RTASK) THEN
+          CALL AUXORB$UNSELECT
+          CYCLE
+        END IF
+        CALL MPE$SENDRECEIVE('~',WTASK,RTASK,THIS%NOCC)
+        IF(THISTASK.EQ.RTASK) THEN
+          IF(.NOT.ALLOCATED(THIS%VAL)) ALLOCATE(THIS%VAL(THIS%NOCC+1))
+          IF(.NOT.ALLOCATED(THIS%BARR)) ALLOCATE(THIS%BARR(THIS%NOCC+1))
+        END IF
+        CALL MPE$SENDRECEIVE('~',WTASK,RTASK,THIS%VAL)
+        CALL MPE$SENDRECEIVE('~',WTASK,RTASK,THIS%BARR)
+        IF(THISTASK.EQ.RTASK) THEN
+          WRITE(NFIL, &
+     &     FMT='("# AUXILIARY ORBITALS K=",I5," S=",I2," BAND=",I4)')IKPT,ISPIN,BAND
+          WRITE(NFIL,FMT='(A5, 2A14)') '#BAND', 'REAL', 'IMAG'
+          DO IB=1,THIS%NOCC+1
+            WRITE(NFIL,FMT='(I5,2F14.8)') THIS%BARR(IB),REAL(THIS%VAL(IB)), AIMAG(THIS%VAL(IB))
+          ENDDO
+        END IF
+        IF(THISTASK.EQ.RTASK) CALL FILEHANDLER$CLOSE('AUXORB')
+        DEALLOCATE(THIS%VAL)
+        DEALLOCATE(THIS%BARR)
+        CALL AUXORB$UNSELECT
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE AUXORB$OUTPUT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$SELECT(IORB)  ! MARK: AUXORB$SELECT
+!     **************************************************************************
+!     ** SELECT AUXILIARY ORBITAL FOR AUXILIARY MODULE                        **
+!     ** IORB: INDEX OF AUXILIARY ORBITAL                                     **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: SELECTED,THIS,AUXORB,NAUXORB
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: IORB  ! INDEX OF AUXILIARY
+      IF(SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('AUXORB$SELECT ALREADY SELECTED')
+        CALL ERROR$STOP('AUXORB$SELECT')
+      END IF
+      IF(.NOT.ALLOCATED(AUXORB)) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('AUXORB NOT ALLOCATED')
+        CALL ERROR$STOP('AUXORB$SELECT')
+      END IF
+      IF(IORB.LT.1.OR.IORB.GT.NAUXORB) THEN
+        CALL ERROR$MSG('IORB OUT OF RANGE')
+        CALL ERROR$I4VAL('IORB',IORB)
+        CALL ERROR$I4VAL('NAUXORB',NAUXORB)
+        CALL ERROR$STOP('AUXORB$SELECT')
+      END IF
+      SELECTED=.TRUE.
+      THIS=>AUXORB(IORB)
+      RETURN
+      END SUBROUTINE AUXORB$SELECT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$UNSELECT  ! MARK: AUXORB$UNSELECT
+!     **************************************************************************
+!     ** UNSELECT AUXILIARY ORBITAL FOR AUXILIARY MODULE                      **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: SELECTED,THIS
+      IMPLICIT NONE
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('SAFEGUARD FUNCTION:')
+        CALL ERROR$MSG('AUXORB NOT SELECTED')
+        CALL ERROR$STOP('AUXORB$UNSELECT')
+      END IF
+      SELECTED=.FALSE.
+      NULLIFY(THIS)
+      RETURN
+      END SUBROUTINE AUXORB$UNSELECT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$GETI4(ID,VAL)  ! MARK: AUXORB$GETI4
+!     **************************************************************************
+!     ** GET INTEGER VALUE FROM AUXILIARY ORBITAL                             **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: THIS,SELECTED,NAUXORB
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(ID.EQ.'NAUXORB') THEN
+        VAL=NAUXORB
+      ELSE IF(ID.EQ.'B') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('NO AUXORB SELECTED')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('AUXORB$GETI4')
+        END IF
+        VAL=THIS%B
+      ELSE IF(ID.EQ.'S') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('NO AUXORB SELECTED')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('AUXORB$GETI4')
+        END IF
+        VAL=THIS%S
+      ELSE IF(ID.EQ.'K') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('NO AUXORB SELECTED')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('AUXORB$GETI4')
+        END IF
+        VAL=THIS%K
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE AUXORB$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$SETI4(ID,VAL)  ! MARK: AUXORB$SETI4
+!     **************************************************************************
+!     ** SET INTEGER VALUE IN AUXILIARY ORBITAL                               **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: THIS,SELECTED,NAUXORB,AUXORB
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'NAUXORB') THEN
+        IF(VAL.LT.1) THEN
+          CALL ERROR$MSG('NAUXORB MUST BE >= 1')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        IF(.NOT.ALLOCATED(AUXORB)) THEN
+          ALLOCATE(AUXORB(VAL))
+        ELSE IF(VAL.NE.NAUXORB) THEN
+          CALL ERROR$MSG('AUXORB ALREADY ALLOCATED')
+          CALL ERROR$I4VAL('NAUXORB',NAUXORB)
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        NAUXORB=VAL
+      ELSE IF(ID.EQ.'B') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('NO AUXORB SELECTED')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        IF(VAL.LT.1) THEN
+          CALL ERROR$MSG('BAND MUST BE >= 1')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        THIS%B=VAL
+      ELSE IF(ID.EQ.'S') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('NO AUXORB SELECTED')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        ! TODO: CATCH NSPIN=1
+        IF(VAL.LT.1.OR.VAL.GT.2) THEN
+          CALL ERROR$MSG('S MUST BE 1 OR 2')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        THIS%S=VAL
+      ELSE IF(ID.EQ.'K') THEN
+        IF(.NOT.SELECTED) THEN
+          CALL ERROR$MSG('NO AUXORB SELECTED')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        ! TODO: CATCH K>NKPT
+        IF(VAL.LT.1) THEN
+          CALL ERROR$MSG('K MUST BE >= 1')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('AUXORB$SETI4')
+        END IF
+        THIS%K=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$SETI4')
+      END IF
+      RETURN
+      END SUBROUTINE AUXORB$SETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$GETCH(ID,VAL)  ! MARK: AUXORB$GETCH
+!     **************************************************************************
+!     ** GET CHARACTER VALUE FROM AUXILIARY ORBITAL                           **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO AUXORB SELECTED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$GETCH')
+      END IF
+      IF(ID.EQ.'FILE') THEN
+        VAL=THIS%FILE
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE AUXORB$GETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$SETCH(ID,VAL)  ! MARK: AUXORB$SETCH
+!     **************************************************************************
+!     ** SET CHARACTER VALUE IN AUXILIARY ORBITAL                             **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: THIS,SELECTED
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(IN) :: VAL
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO AUXORB SELECTED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$SETCH')
+      END IF
+      IF(ID.EQ.'FILE') THEN
+        IF(LEN_TRIM(VAL).EQ.0) THEN
+          CALL ERROR$MSG('FILE NAME CANNOT BE EMPTY')
+          CALL ERROR$CHVAL('VAL',VAL)
+          CALL ERROR$STOP('AUXORB$SETCH')
+        END IF
+        THIS%FILE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$SETCH')
+      END IF
+      RETURN
+      END SUBROUTINE AUXORB$SETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE AUXORB$SETL4(ID,VAL)  ! MARK: AUXORB$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL VALUE IN AUXILIARY ORBITAL                               **
+!     **************************************************************************
+      USE AUXORB_MODULE, ONLY: TACTIVE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'ACTIVE') THEN
+        TACTIVE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('AUXORB$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE AUXORB$SETL4
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE POLARISATION_CONVERT(K,N,POL,POLXYZ)  ! MARK: POLARISATION_CONVERT
