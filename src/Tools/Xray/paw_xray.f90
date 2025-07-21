@@ -6425,10 +6425,10 @@
                 IF(TIRR) THEN
                   ! EPSILON^Q * <PSI_IELL|R|S> (DOT_PRODUCT DOES CONJG)
                   CVAR=DOT_PRODUCT(CONJG(THIS%POLXYZI),ABSORB(IKPT,ISPIN)%AMPL(:,IELL))
-                  ! MU(IELL,IEMP) * EPSILON^P * <PSI_IELL|R|S>
+                  ! MU(IELL,IEMP) * EPSILON^Q * <PSI_IELL|R|S>
                   CVAR=MU(IELL,IEMP)*CVAR
                   ! TODO: CHECK IF WE NEED CONJG HERE
-                  ! APPLY ADET
+                  ! APPLY ADET FOR |ADET|^2 (CONJG(ADET) IS ALREADY APPLIED IN ABSORB)
                   IF(TADET) THEN
                     CVAR=CVAR*ADET*ADETOP
                   END IF
@@ -6436,7 +6436,7 @@
                 ELSE
                   CVAR=DOT_PRODUCT(CONJG(THIS%POLXYZI),CONJG(ABSORB(IKPT,ISPIN)%AMPL(:,IELL)))
                   CVAR=CONJG(MU(IELL,IEMP))*CVAR
-                  ! APPLY ADET
+                  ! APPLY ADET FOR |ADET|^2 (CONJG(CONJG(ADET)) IS ALREADY APPLIED IN ABSORB)
                   IF(TADET) THEN
                     CVAR=CVAR*CONJG(ADET)*CONJG(ADETOP)
                   END IF
