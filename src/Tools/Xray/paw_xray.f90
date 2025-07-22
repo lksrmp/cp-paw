@@ -4272,7 +4272,7 @@
           WRITE(NFIL,FMT='(A)',ADVANCE='NO') '# '
           DO ISPIN=1,NSPIN
             DO IKPT=1,NKPT
-              WRITE(NFIL,FMT='(A1,I3,A1,I2,",",5X)',ADVANCE='NO')'K',IKPT,'S',ISPIN
+              WRITE(NFIL,FMT='(A1,I3,A2,I2,",",5X)',ADVANCE='NO')'K',IKPT,' S',ISPIN
             ENDDO
           ENDDO
           WRITE(NFIL,FMT='(A)')''
