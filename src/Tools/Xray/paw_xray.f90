@@ -225,6 +225,7 @@
       LOGICAL(4) :: TACTIVE=.FALSE. ! XAS ACTIVE
       LOGICAL(4) :: TINITIALIZE=.FALSE.
       LOGICAL(4) :: TRAW
+      LOGICAL(4) :: TKPTSPIN
       LOGICAL(4) :: SINGLEPARTICLE ! SINGLE PARTICLE XAS
       INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR XAS
       REAL(8) :: EMIN=-HUGE(1.D0) ! MINIMUM ENERGY FOR XAS
@@ -843,6 +844,15 @@
         CALL XAS$SETL4('RAW',TCHK)
       ELSE
         CALL XAS$SETL4('RAW',.FALSE.) ! DEFAULT
+      END IF
+
+      ! KPTSPIN
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'KPTSPIN',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'KPTSPIN',1,TCHK)
+        CALL XAS$SETL4('KPTSPIN',TCHK)
+      ELSE
+        CALL XAS$SETL4('KPTSPIN',.FALSE.) ! DEFAULT
       END IF
       
       ! EMIN[EV]
@@ -4134,7 +4144,7 @@
 !     ** OUTPUT XAS SPECTRA TO FILES                                          **
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,TRAW
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,TRAW,TKPTSPIN
       USE SHARED_DATA_MODULE, ONLY: ADETPROD
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -4240,6 +4250,38 @@
           CALL FILEHANDLER$CLOSE(ID)
         END IF
 
+        ! WRITE SPECTRUM PER K-POINT AND SPIN
+        IF(TKPTSPIN) THEN
+          IF(THIS%BROADMODE.EQ.+'G') THEN
+            DO IKPT=1,NKPT
+              DO ISPIN=1,NSPIN
+                CALL GAUSSCONV(NE,THIS%E,THIS%SPECTRUM(IKPT,ISPIN,:),THIS%EBROAD)
+              ENDDO
+            ENDDO
+          ELSE IF(THIS%BROADMODE.EQ.+'L') THEN
+            DO IKPT=1,NKPT
+              DO ISPIN=1,NSPIN
+                CALL LORENTZCONV(NE,THIS%E,THIS%SPECTRUM(IKPT,ISPIN,:),THIS%EBROAD)
+              ENDDO
+            ENDDO
+          END IF
+          ! WRITE K-POINT AND SPIN FILE
+          CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(ADJUSTL(THIS%FILE))//-'kpt')
+          CALL FILEHANDLER$UNIT(ID,NFIL)
+          CALL XAS_OUTPUTHEADER(NFIL) 
+          WRITE(NFIL,FMT='(A)',ADVANCE='NO') '# '
+          DO ISPIN=1,NSPIN
+            DO IKPT=1,NKPT
+              WRITE(NFIL,FMT='(A1,I3,A1,I2,",",5X)',ADVANCE='NO')'K',IKPT,'S',ISPIN
+            ENDDO
+          ENDDO
+          WRITE(NFIL,FMT='(A)')''
+          DO I=1,NE
+            WRITE(NFIL,*) THIS%E(I)/EV,THIS%E(I)/EV*THIS%SPECTRUM(:,:,I)
+          ENDDO
+          CALL FILEHANDLER$CLOSE(ID)
+        END IF
+
         CALL XAS$UNSELECT
       ENDDO ! END ISPEC
       DEALLOCATE(SUMK)
@@ -4255,7 +4297,7 @@
 !     ** REQUIRES XAS ACTIVE, INITIALIZED, AND UNSELECTED                     **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,NSPEC,DE,THIS, &
-     &                      SINGLEPARTICLE,TRAW
+     &                      SINGLEPARTICLE,TRAW,TKPTSPIN
       USE STRINGS_MODULE
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
@@ -4324,6 +4366,7 @@
       CALL XAS$GETI4('NE',NE)
       WRITE(NFIL,FMT='(A12,I10)')'NE:',NE
       WRITE(NFIL,FMT='(A12,L2)')'RAW OUTPUT:',TRAW
+      WRITE(NFIL,FMT='(A12,L2)')'KPTSPIN:',TKPTSPIN
 
       DO ISPEC=1,NSPEC
         CALL XAS$ISELECT(ISPEC)
@@ -4654,7 +4697,7 @@
 !     ** GET LOGICAL FROM XAS MODULE                                         **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS, &
-     &                      SINGLEPARTICLE,TRAW
+     &                      SINGLEPARTICLE,TRAW,TKPTSPIN
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
@@ -4680,6 +4723,12 @@
           CALL ERROR$STOP('XAS$GETL4')
         END IF
         VAL=TRAW
+      ELSE IF(ID.EQ.'KPTSPIN') THEN
+        IF(.NOT.TINITIALIZE) THEN
+          CALL ERROR$MSG('XAS NOT INITIALIZED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        VAL=TKPTSPIN
       ELSE
         CALL ERROR$MSG('XAS GETL4 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -4694,7 +4743,7 @@
 !     ** SET LOGICAL IN XAS MODULE                                           **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS, &
-     &                      SINGLEPARTICLE,TRAW
+     &                      SINGLEPARTICLE,TRAW,TKPTSPIN
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
@@ -4712,6 +4761,8 @@
         THIS%TPOLXYZ=VAL
       ELSE IF(ID.EQ.'RAW') THEN
         TRAW=VAL
+      ELSE IF(ID.EQ.'KPTSPIN') THEN
+        TKPTSPIN=VAL
       ELSE
         CALL ERROR$MSG('XAS SETL4 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
