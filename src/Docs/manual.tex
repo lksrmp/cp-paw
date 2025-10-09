@@ -2949,6 +2949,19 @@ experimental broadenig (4).  }
     the text in italics is replaced by the corresponding values as
     specified above.}  }
 
+%----------------------------------------------------------------------
+\block{!CONTROL!ANALYSE!OVL}
+%----------------------------------------------------------------------
+\brules{optional} 
+\bdescr{Create necessary output file for a Xray Absorption Spectrum 
+calculation. File can be processed by the paw\_xray tool. Warning:
+This file is about as large as the restart file.}
+
+\mbax{\key{FILE}
+\vdescr{full file name of the file to be produced}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
 
 
 
@@ -8740,6 +8753,294 @@ where
 \item If the first argument is '-h', the usage information is written
   to stdout.
 \end{itemize}
+
+%==========================================================================
+\newpage
+\section{The X-ray Spectrum Tool: paw\_xray}
+The paw\_xray tool allows calculation of X-ray absorption spectra (XAS) or
+resonant inelastic X-ray scattering (RIXS) spectra. The RIXS calculation
+is implemented but not yet documented. It requires either two files 
+produced by the !CONTROL!ANALYSE!OVL option for a ground state and a
+core-hole calculation or one file produced by a previous run of the
+paw\_xray tool.
+
+%==========================================================================
+\subsection{Command}
+%==========================================================================
+The calling sequence is
+\bigskip\fbox{{\tt paw\_xray} {\it controlfile}}\bigskip
+
+\noindent
+where {\it controlfile} is the file name of the control input file for
+the paw\_xray tool. The extension should be ``.xcntl''.
+
+
+%==========================================================================
+\subsection{Example for the control input file}
+%==========================================================================
+\begin{verbatim}
+!XCNTL
+  !GROUND FILE='ground.ovl' !END
+  !EXCITE FILE='excited.ovl' !END
+  !OVERLAP_x FILE='overlap.overlap' !END
+  !COREHOLE ATOM='O_3' NCORE=1 LCORE=0 !END
+  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G' 
+    EMIN[EV]=520.0 EMAX[EV]=540.0 DE[EV]=0.1
+    NORMAL=0.0 0.0 1.0 KDIR=0.0 1.0 -1.0 POL=1.0 0.0 0.0 0.0
+    !SPECTRUM FILE='xas1.dat' !END
+    !SPECTRUM FILE='xas2.dat' EBROAD[EV]=0.1 BROADMODE='L'
+      NORMAL=0.0 0.0 1.0 KDIR=0.0 1.0 -1.0 POL=1.0 0.0 0.0 0.0
+    !END
+    !AUXORB FILE='auxorb.dat' B=421 K=1 S=1 !END
+  !END
+!END
+\end{verbatim}
+
+%==========================================================================
+\newpage
+\subsection{Argument description for the control input file}
+%==========================================================================
+
+%----------------------------------------------------------------------
+\block{!XCNTL}
+%----------------------------------------------------------------------
+\brules{mandatory}
+\bdescr{defines the operation of the tool}
+
+
+%----------------------------------------------------------------------
+\block{!XCNTL!GROUND}
+%----------------------------------------------------------------------
+\brules{optional; Either both !XCNTL!GROUND and !XCNTL!EXCITE 
+are given or only !XCNTL!OVERLAP.}
+\bdescr{defines file for the ground state of the calculation, output
+obtained via !CONTROL!ANALYSE!OVL option}
+
+\mbax{\key{FILE}
+\vdescr{file name of the ground state data}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!EXCITE}
+%----------------------------------------------------------------------
+\brules{optional; Either both !XCNTL!GROUND and !XCNTL!EXCITE
+are given or only !XCNTL!OVERLAP.}
+\bdescr{defines file for the excited state of the calculation, output
+obtained via !CONTROL!ANALYSE!OVL option}
+
+\mbax{\key{FILE}
+\vdescr{file name of the excited state data}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!OVERLAP}
+%----------------------------------------------------------------------
+\brules{optional; Either both !XCNTL!GROUND and !XCNTL!EXCITED
+are given or only !XCNTL!OVERLAP.}
+\bdescr{defines file for the overlap data of the calculation, created
+during previous run of the paw\_xray tool}
+
+\mbax{\key{FILE}
+\vdescr{file name of the overlap data}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!COREHOLE}
+%----------------------------------------------------------------------
+\brules{optional; mandatory if !XCNTL!GROUND and !XCNTL!EXCITED 
+are given; ignored if !XCNTL!OVERLAP is given.}
+\bdescr{defines the core hole to be used in the calculation}
+
+\mbax{\key{ATOM}
+\vdescr{atom name of the core hole}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
+
+\mbax{\key{NCORE}
+\vdescr{n quantum number of the core hole}
+\vformat{integer}
+\vrules{mandatory}
+\vdefault{none}}
+
+\mbax{\key{LCORE}
+\vdescr{angular momentum of the core hole; only LCORE=0 is
+currently supported}
+\vformat{integer}
+\vrules{mandatory}
+\vdefault{none}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!XAS}
+%----------------------------------------------------------------------
+\brules{optional}
+\bdescr{defines the X-ray absorption spectrum (XAS) calculation}
+
+\mbax{\key{SINGLEPARTICLE}
+\vdescr{if true, the dipole transition operator is set to be a
+single-particle operator; if false, the many-body dipole transition
+operator is used}
+\vformat{logical}
+\vrules{optional}
+\vdefault{F}}
+
+\mbax{\key{RAW}
+\vdescr{if true, the raw spectrum (before broadening) is written to
+a output file with the name of the spectrum file appended by 'raw'.}
+\vformat{logical}
+\vrules{optional}
+\vdefault{F}}
+
+\mbax{\key{KPTSPIN}
+\vdescr{if true, the results are given for each k-point and
+spin channel separately; the output file name is appended by
+'kpt'.}
+\vformat{logical}
+\vrules{optional}
+\vdefault{F}}
+
+\mbax{\key{EBROAD[EV]}
+\vdescr{energy broadening of the XAS spectrum in eV, replaces the delta
+function with a broadened function; Ignored if !XCNTL!XAS:BROADMODE='N'.}
+\vformat{real}
+\vrules{optional}
+\vdefault{0.3}}
+
+\mbax{\key{BROADMODE}
+\vdescr{broadening mode, either 'G' for Gaussian, 'L' for Lorentzian, 
+or 'N' for no broadening}
+\vformat{character}
+\vrules{optional}
+\vdefault{G}}
+
+% \mbax{\key{POLXYZ}
+% \vdescr{polarisation vector of the X-ray beam in Cartesian coordinates;
+%  Used as default for all spectra in this block. Will be overwritten by the
+%   !XCNTL!XAS!SPECTRUM blocks if they contain a POLXYZ.
+%   The six components are: Real and imaginary part of the
+%   polarisation vector in the x-direction, y-direction and z-direction.}
+% \vformat{real(6)}
+% \vrules{optional; NORMAL, KDIR, POL together or POLXYZ must be given either
+%   here or in the !XCNTL!XAS!SPECTRUM blocks. Giving POLXYZ lets NORMAL,
+%    KDIR and POL be ignored.}
+% \vdefault{none}}
+
+\mbax{\key{NORMAL}
+\vdescr{normal vector of the sample surface, used for the
+  calculation of the polarisation vector; Used as default for all
+  spectra in this block. Will be overwritten by the
+  !XCNTL!XAS!SPECTRUM blocks if they contain a NORMAL.}
+\vformat{real(3)}
+\vrules{optional; NORMAL, KDIR, POL must be given either
+  here or in the !XCNTL!XAS!SPECTRUM blocks.}
+\vdefault{none}}
+
+\mbax{\key{KDIR}
+\vdescr{direction of the incoming X-ray beam, used for the
+  calculation of the polarisation vector; Used as default for all
+  spectra in this block. Will be overwritten by the
+  !XCNTL!XAS!SPECTRUM blocks if they contain a KDIR.}
+\vformat{real(3)}
+\vrules{optional; NORMAL, KDIR, POL must be given either
+  here or in the !XCNTL!XAS!SPECTRUM blocks.}
+\vdefault{none}}
+
+\mbax{\key{POL}
+\vdescr{polarisation of the X-ray beam, used for the
+  calculation of the polarisation vector; Used as default for all
+  spectra in this block. Will be overwritten by the
+  !XCNTL!XAS!SPECTRUM blocks if they contain a POL.
+  The four components are: Real and imaginary part of the
+  polarisation vector in the sample surface plane and the
+  real and imaginary part of the polarisation vector in the scattering
+  plane.}
+\vformat{real(4)}
+\vrules{optional; NORMAL, KDIR, POL must be given either
+  here or in the !XCNTL!XAS!SPECTRUM blocks.}
+\vdefault{none}}
+
+\mbax{\key{EMIN[EV]}
+\vdescr{minimum energy of the XAS spectrum in eV; Careful,
+features might not be at the experimental energy values.}
+\vformat{real}
+\vrules{optional}
+\vdefault{highest integer that is atleast 2eV below the lowest energy signal}}
+
+\mbax{\key{EMAX[EV]}
+\vdescr{maximum energy of the XAS spectrum in eV; Careful,
+features might not be at the experimental energy values.}
+\vformat{real}
+\vrules{optional}
+\vdefault{lowest integer that is atleast 2eV above the highest energy signal}}
+
+\mbax{\key{DE}
+\vdescr{energy step size of the XAS spectrum in eV}
+\vformat{real}
+\vrules{optional}
+\vdefault{0.01 eV}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!XAS!SPECTRUM}
+%----------------------------------------------------------------------
+\brules{optional, multiple}
+\bdescr{defines a single XAS spectrum to be calculated}
+
+\mbax{\key{FILE}
+\vdescr{file name of the XAS spectrum data}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
+
+\mbax{\key{EBROAD[EV]}
+\vdescr{energy broadening of the XAS spectrum in eV, replaces the delta
+ function with a broadened function; Ignored if !XCNTL!XAS:BROADMODE='N'.}
+\vformat{real}
+\vrules{optional}
+\vdefault{value from !XCNTL!XAS}}
+
+\mbax{\key{BROADMODE}
+\vdescr{broadening mode, either 'G' for Gaussian, 'L' for Lorentzian,
+ or 'N' for no broadening}
+\vformat{character}
+\vrules{optional}
+\vdefault{value from !XCNTL!XAS}}
+
+\mbax{\key{NORMAL}
+\vdescr{normal vector of the sample surface, used for the
+  calculation of the polarisation vector; Will overwrite the value
+  from !XCNTL!XAS.}
+\vformat{real(3)}
+\vrules{optional; NORMAL, KDIR, POL together must be given either
+  here or in the !XCNTL!XAS block.}
+\vdefault{value from !XCNTL!XAS}}
+
+\mbax{\key{KDIR}
+\vdescr{direction of the incoming X-ray beam, used for the
+  calculation of the polarisation vector; Will overwrite the value
+  from !XCNTL!XAS.}
+\vformat{real(3)}
+\vrules{optional; NORMAL, KDIR, POL together must be given either
+  here or in the !XCNTL!XAS block.}
+\vdefault{value from !XCNTL!XAS}}
+
+\mbax{\key{POL}
+\vdescr{polarisation of the X-ray beam, used for the
+  calculation of the polarisation vector; Will overwrite the value
+  from !XCNTL!XAS.
+  The four components are: Real and imaginary part of the
+  polarisation vector in the sample surface plane and the
+  real and imaginary part of the polarisation vector in the scattering
+  plane.}
+\vformat{real(4)}
+\vrules{optional; NORMAL, KDIR, POL together must be given either
+  here or in the !XCNTL!XAS block.}
+\vdefault{value from !XCNTL!XAS}}
 
 %==========================================================================
 \newpage
