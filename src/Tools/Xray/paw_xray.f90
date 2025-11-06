@@ -333,6 +333,34 @@
       END MODULE AUXORB_MODULE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      MODULE XASDOS_MODULE  ! MARK: XASDOS_MODULE
+      USE BRILLOUIN_MODULE, ONLY: EWGHT_TYPE
+      TYPE(EWGHT_TYPE), ALLOCATABLE :: EWGHT(:,:,:) ! (NB,NKPT,NSPIN)
+      REAL(8), ALLOCATABLE :: WGHT(:,:,:) ! (NB,NKPT,NSPIN)
+
+      REAL(8) :: EF ! FERMI LEVEL
+
+      CHARACTER(32) :: FILE ! FILENAME FOR DOSRAW
+      INTEGER(4) :: NBB ! NUMBER OF BANDS
+      INTEGER(4) :: NKPT ! NUMBER OF KPOINTS
+      INTEGER(4) :: NSET ! NUMBER OF SETS
+
+      REAL(8), ALLOCATABLE :: EIGVAL(:,:) ! (NBB,NKPT) EIGENVALUES
+      REAL(8), ALLOCATABLE :: EIG(:,:,:) ! (NB,NKPT,NSPIN)
+      REAL(8), ALLOCATABLE :: SETVAL(:,:,:,:) ! (NBB,NKPT,2,NSET) PROJECTED DOS
+      REAL(8), ALLOCATABLE :: SET(:,:,:,:) ! (NB,NKPT,NSPIN,NSET) PROJECTED DOS
+      CHARACTER(32), ALLOCATABLE :: SETID(:) ! (NSET) SET IDENTIFIERS
+
+      ! NSPEC, NE, DE, EMIN, EMAX, EBROAD, BROADMODE TAKEN FROM XAS_MODULE
+      INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR DOS
+      INTEGER(4) :: NE ! NUMBER OF ENERGY POINTS FOR DOS
+
+      REAL(8), ALLOCATABLE :: EDOS(:) ! (NE) ENERGY GRID FOR DOS
+      REAL(8), ALLOCATABLE :: DOS(:,:,:,:) ! (NE,NSPIN,NSET,NSPEC) DOS
+      LOGICAL(4) :: TACTIVE=.FALSE.
+      END MODULE XASDOS_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       MODULE SHARED_DATA_MODULE  ! MARK: SHARED_DATA_MODULE
 !     **************************************************************************
 !     ** SHARED DATA MODULE FOR PAW XRAY TOOL                                 **
@@ -404,6 +432,12 @@
       ! DETERMINE K VECTORS AND MOMENTUM TRANSFER IN RIXS_MODULE
       CALL RIXS$KVECTORS
 
+      ! READ DOS FILE AND SAVE DATA ON READ TASK ONLY
+      CALL XASDOS$READ
+      ! VALIDATE XASDOS DATA AGAINST SIMULATION DATA
+      ! REFORMAT INTO COMPATIBLE ARRAYS
+      CALL XASDOS$VALIDATE
+
       CALL TIMING$CLOCKON('REPORTS')
       CALL KSMAP$REPORT(NFIL)
       CALL SIMULATION$SELECT('GROUND')
@@ -451,6 +485,10 @@
       CALL XAS$CALCULATE
 
       CALL XAS$OUTPUT
+
+      CALL XASDOS$CALCULATE
+
+      CALL XASDOS$OUTPUT
       ! FREE UP MEMORY CONTAINING XAS SPECTRA
       CALL XAS$DEALLOCATESPECTRA
       
@@ -1103,6 +1141,24 @@
           END IF
           CALL AUXORB$UNSELECT
         ENDDO
+      END IF
+
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XAS')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'DOS',1,TCHK)
+      CALL XASDOS$SETL4('ACTIVE',TCHK)
+
+      IF(TCHK) THEN
+        CALL LINKEDLIST$SELECT(LL_CNTL,'DOS')
+        ! READ FILENAME
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('!XAS!DOS:FILE NOT FOUND')
+          CALL ERROR$STOP('XCNTL$XAS')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
+        CALL XASDOS$SETCH('FILE',TRIM(ADJUSTL(FILENAME)))
       END IF
                           CALL TRACE$POP
       RETURN
@@ -11009,6 +11065,548 @@
       END IF
       RETURN
       END SUBROUTINE AUXORB$SETL4
+! 
+!     ==========================================================================
+!     ==========================================================================
+!     == XASDOS MODULE                                                        ==
+!     ==========================================================================
+!     ==========================================================================
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$CALCULATE  ! MARK: XASDOS$CALCULATE
+!     **************************************************************************
+!     ** CALCULATE XAS DOS DATA                                               **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,SET,SETID,NSET,NSPEC,EWGHT,DOS,NE,EDOS
+      USE XAS_MODULE, ONLY: THIS
+      IMPLICIT NONE
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: NB
+      INTEGER(4) :: NOCC
+      INTEGER(4) :: IB
+      INTEGER(4) :: IEMP
+      INTEGER(4) :: ISET
+      INTEGER(4) :: ISPEC
+      REAL(8) :: DE
+      REAL(8) :: EBROAD
+      CHARACTER(1) :: BROADMODE
+      REAL(8), ALLOCATABLE :: SVAR(:)
+      REAL(8) :: XAS
+      INTEGER(4) :: I1
+      INTEGER(4) :: I2
+      INTEGER(4) :: IE
+      INTEGER(4) :: RTASK
+      INTEGER(4) :: THISTASK,NTASKS
+      
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$CALCULATE')
+
+      CALL XASDOS_INITIALIZE
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+
+      CALL XAS$GETR8('DE',DE)
+
+      CALL STATE$SELECT('EXCITE')
+
+      ALLOCATE(SVAR(NSET))
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        DO IKPT=1,NKPT
+          DO ISPIN=1,NSPIN
+            CALL STATE$GETI4('NB',IKPT,ISPIN,NB)
+            CALL STATE$GETI4('NOCC',IKPT,ISPIN,NOCC)
+            DO IEMP=1,NB-NOCC
+              IB=NOCC+IEMP
+              XAS=THIS%SRAW(IKPT,ISPIN)%V(IEMP)
+              I1=EWGHT(IB,IKPT,ISPIN)%I1
+              I2=EWGHT(IB,IKPT,ISPIN)%I2
+              SVAR(:)=XAS*SET(IB,IKPT,ISPIN,:)*DE
+              DO IE=I1,I2
+                DOS(IE,ISPIN,:,ISPEC)=DOS(IE,ISPIN,:,ISPEC)+EWGHT(IB,IKPT,ISPIN)%WGHT(IE)*SVAR(:)
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO
+        CALL XAS$UNSELECT
+      ENDDO
+      DEALLOCATE(SVAR)
+      
+      ! TODO: GAUSSCONV OR THE PAW_DOS BROADENING?
+      ! BROADENING OF THE DOS
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        CALL XAS$GETR8('EBROAD',EBROAD)
+        CALL XAS$GETCH('BROADMODE',BROADMODE)
+        DO ISET=1,NSET
+          DO ISPIN=1,NSPIN
+            IF(BROADMODE.EQ.'G') THEN
+              CALL GAUSSCONV(NE,EDOS,DOS(:,ISPIN,ISET,ISPEC),EBROAD)
+            ELSE IF(BROADMODE.EQ.'L') THEN
+              CALL LORENTZCONV(NE,EDOS,DOS(:,ISPIN,ISET,ISPEC),EBROAD)
+            ELSE IF(BROADMODE.EQ.'N') THEN
+              ! NO BROADENING
+            ELSE
+              CALL ERROR$MSG('BROADMODE NOT RECOGNISED IN XASDOS MODULE')
+              CALL ERROR$CHVAL('BROADMODE',BROADMODE)
+              CALL ERROR$STOP('XASDOS$CALCULATE')
+            END IF
+          ENDDO
+        ENDDO
+        CALL XAS$UNSELECT
+      ENDDO
+
+      ! TODO: UNDERSTAND IF THIS IS VALID FOR ALL BROADENINGS
+      ! CONVERT DELTA-NOS INTO DOS
+      DOS(:,:,:,:)=DOS(:,:,:,:)/DE
+
+      ! ROUND INSIGNIFICANT VALUES TO ZERO
+      DO ISPEC=1,NSPEC
+        DO ISET=1,NSET
+          DO ISPIN=1,NSPIN
+            DO IE=1,NE
+              IF(ABS(DOS(IE,ISPIN,ISET,ISPEC)).LE.1.D-99) DOS(IE,ISPIN,ISET,ISPEC)=0.D0
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+      CALL STATE$UNSELECT
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$READ  ! MARK: XASDOS$READ
+!     **************************************************************************
+!     ** READ DOS RAW DATA FROM FILE                                          **
+!     **************************************************************************
+      USE STRINGS_MODULE
+      USE XASDOS_MODULE, ONLY: TACTIVE,FILE,EF,NBB,NKPT,NSET,EIGVAL,SETVAL,SETID
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: ISET
+      CHARACTER(8) :: KEY
+      INTEGER(4) :: THISTASK,NTASKS,RTASK
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$READ')
+      CALL FILEHANDLER$SETFILE('XASDOS',.FALSE.,TRIM(FILE))
+      CALL FILEHANDLER$SETSPECIFICATION('XASDOS','ACTION','READ')
+      CALL FILEHANDLER$SETSPECIFICATION('XASDOS','FORM','UNFORMATTED')
+      CALL FILEHANDLER$UNIT('XASDOS',NFIL)
+      READ(NFIL) NSET,NKPT,NBB
+      ALLOCATE(EIGVAL(NBB,NKPT))
+      ALLOCATE(SETVAL(NBB,NKPT,2,NSET))
+      ALLOCATE(SETID(NSET))
+      READ(NFIL) EIGVAL,EF
+      DO ISET=1,NSET
+        READ(NFIL) SETID(ISET)
+      ENDDO
+      READ(NFIL) SETVAL
+      READ(NFIL) KEY
+      IF(.NOT.KEY.EQ.+'FINISHED') THEN
+        CALL ERROR$MSG('XASDOS DATA FILE NOT PROPERLY TERMINATED')
+        CALL ERROR$CHVAL('FILE',FILE)
+        CALL ERROR$CHVAL('KEY',KEY)
+        CALL ERROR$STOP('XASDOS$READ')
+      END IF
+      CALL FILEHANDLER$CLOSE('XASDOS')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$READ
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$VALIDATE  ! MARK: XASDOS$VALIDATE
+!     **************************************************************************
+!     ** VALIDATE XASDOS MODULE DATA                                          **
+!     ** DATA SHOULD CORRESPOND TO DATA CONTAINED IN THE EXCITATED SIMULATION **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,NBB,NKPT,EIGVAL,EIG,SETVAL,SET,NSET,SETID
+      IMPLICIT NONE
+      INTEGER(4) :: NKPTSIM
+      INTEGER(4) :: NSPINSIM
+      INTEGER(4) :: NBSIM
+      INTEGER(4) :: NDIM
+      INTEGER(4) :: NB
+      REAL(8), ALLOCATABLE :: EIGSIM(:)
+      INTEGER(4) :: IB
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: ISET
+      REAL(8) :: ETOTGROUND
+      REAL(8) :: ETOTEXCITE
+
+      INTEGER(4) :: RTASK
+      INTEGER(4) :: THISTASK,NTASKS
+
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$VALIDATE')
+      ! CHECK NKPT
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPTSIM)
+      CALL SIMULATION$GETR8('ETOT',ETOTEXCITE)
+      IF(NKPT.NE.NKPTSIM) THEN
+        CALL ERROR$MSG('NKPT IN XASDOS MODULE DOES NOT MATCH EXCITATED SIMULATION')
+        CALL ERROR$I4VAL('XASDOS NKPT',NKPT)
+        CALL ERROR$I4VAL('EXCITATED NKPT',NKPTSIM)
+        CALL ERROR$STOP('XASDOS$VALIDATE')
+      END IF
+      CALL SIMULATION$GETI4('NSPIN',NSPINSIM)
+      CALL SIMULATION$GETI4('NDIM',NDIM)
+      IF(NDIM.NE.1) THEN
+        CALL ERROR$MSG('XASDOS MODULE ONLY VALID NSPIN=1 OR NSPIN=2 SIMULATIONS')
+        CALL ERROR$I4VAL('NDIM',NDIM)
+        CALL ERROR$STOP('XASDOS$VALIDATE')
+      END IF
+      CALL SIMULATION$UNSELECT
+
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETR8('ETOT',ETOTGROUND)
+      CALL SIMULATION$UNSELECT
+
+      CALL STATE$SELECT('EXCITE')
+      DO ISPIN=1,NSPINSIM
+        DO IKPT=1,NKPTSIM
+          ! CHECK NB
+          CALL STATE$GETI4('NB',IKPT,ISPIN,NBSIM)
+          IF(NBB.NE.2*NBSIM) THEN
+            CALL ERROR$MSG('NBB IN XASDOS MODULE DOES NOT MATCH EXCITATED SIMULATION')
+            CALL ERROR$I4VAL('XASDOS NBB',NBB)
+            CALL ERROR$I4VAL('EXCITATED NB',NBSIM)
+            CALL ERROR$I4VAL('IKPT',IKPT)
+            CALL ERROR$I4VAL('ISPIN',ISPIN)
+            CALL ERROR$MSG('THIS IS POSSIBLE IF THE SIMULATION HAS UNEQUAL NUMBER OF BANDS PER KPOINT OR SPIN')
+            CALL ERROR$MSG('IN THIS CASE PLEASE CHANGE THE CHECK')
+            CALL ERROR$STOP('XASDOS$VALIDATE')
+          END IF
+          ! CHECK EIGENVALUES
+          ALLOCATE(EIGSIM(NBSIM))
+          CALL STATE$GETR8A('EIG',IKPT,ISPIN,NBSIM,EIGSIM)
+          DO IB=1,NBSIM
+            IF(ABS(EIGVAL(IB+NBSIM*(ISPIN-1),IKPT)-EIGSIM(IB)).GT.1.D-7) THEN
+              CALL ERROR$MSG('EIGENVALUES IN XASDOS MODULE DO NOT MATCH EXCITATED SIMULATION')
+              CALL ERROR$I4VAL('IKPT',IKPT)
+              CALL ERROR$I4VAL('ISPIN',ISPIN)
+              CALL ERROR$I4VAL('IB',IB)
+              CALL ERROR$R8VAL('XASDOS EIG',EIGVAL(IB+NBSIM*(ISPIN-1),IKPT))
+              CALL ERROR$R8VAL('EXCITATED EIG',EIGSIM(IB))
+              CALL ERROR$STOP('XASDOS$VALIDATE')
+            END IF
+          ENDDO
+          DEALLOCATE(EIGSIM)
+        ENDDO
+      ENDDO
+      CALL STATE$UNSELECT
+
+      ! SHIFT ENERGY VALUES TO ALIGN WITH XAS ENERGIES
+      EIGVAL(:,:)=EIGVAL(:,:)+ETOTEXCITE-ETOTGROUND
+      NB=NBB/2
+      PRINT *, "NSPINSIM=",NSPINSIM
+      ! REARRANGE EIGVAL INTO EIG
+      ALLOCATE(EIG(NB,NKPT,NSPINSIM))
+      DO ISPIN=1,NSPINSIM
+        DO IKPT=1,NKPT
+          DO IB=1,NB
+            EIG(IB,IKPT,ISPIN)=EIGVAL(IB+NB*(ISPIN-1),IKPT)
+          ENDDO
+        ENDDO
+      ENDDO
+      ! REARRRANGE SETVAL INTO SET
+      ! FOR NSPIN=2 SETVAL(:,:,1,:) ONLY CONTAINS DATA IN SETVAL(1:NB,:,1,:)
+      !         AND SETVAL(:,:,2,:) ONLY CONTAINS DATA IN SETVAL(NB+1:2*NB,:,2,:)
+! WARNING: THIS SEEMS TO NOT BE THE CASE FOR "TOTAL" FOR NSPIN=1
+      ALLOCATE(SET(NB,NKPT,NSPINSIM,NSET))
+      SET(:,:,1,:)=SETVAL(1:NB,:,1,:)
+      IF(NSPINSIM.EQ.2) THEN
+        SET(:,:,2,:)=SETVAL(NB+1:2*NB,:,2,:)
+      END IF
+      ! FOR NSPIN=1 DOUBLE SET TO GET TOTAL (WORKAROUND FOR WARNING ABOVE)
+      DO ISET=1,NSET
+        IF(NSPINSIM.EQ.1) THEN
+          IF(SUM(SETVAL(1:NB,:,2,ISET)).GT.1.D-6) THEN
+            SET(:,:,1,ISET)=2.D0*SET(:,:,1,ISET)
+          END IF
+        END IF
+      ENDDO
+      do iset=1,nset
+        write(*,*), setid(iset)
+        write(*,*), '1:NB, 1'
+        write(*,fmt='(10F12.8," | ",F12.8)'), SETVAL(1:10,1,1,iset), sum(SETVAL(1:nb,1,1,iset))
+        write(*,*), 'NB+1:2*NB, 1'
+        write(*,fmt='(10F12.8," | ",F12.8)'), SETVAL(NB+1:nb+10,1,1,iset), sum(SETVAL(NB+1:2*NB,1,1,iset))
+        write(*,*), '1:NB, 2'
+        write(*,fmt='(10F12.8," | ",F12.8)'), SETVAL(1:10,1,2,iset), sum(SETVAL(1:nb,1,2,iset))
+        write(*,*), 'NB+1:2*NB, 2'
+        write(*,fmt='(10F12.8," | ",F12.8)'), SETVAL(NB+1:nb+10,1,2,iset), sum(SETVAL(NB+1:2*NB,1,2,iset))
+
+        write(*,*), setid(iset)
+        write(*,*), '1:NB, 1'
+        write(*,fmt='(10F12.8," | ",F12.8)'), SET(1:10,1,1,iset), sum(SET(1:nb,1,1,iset))
+        IF(NSPINSIM.EQ.2) THEN
+          write(*,*), '1:NB, 2'
+          write(*,fmt='(10F12.8," | ",F12.8)'), SET(1:10,1,2,iset), sum(SET(1:nb,1,2,iset))
+        END IF
+        write(*,*)""
+      enddo
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$VALIDATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$OUTPUT  ! MARK: XASDOS$OUTPUT
+!     **************************************************************************
+!     ** OUTPUT XAS DOS DATA TO FILE                                          **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,NSPEC,NSET,SETID,NE,EDOS,DOS
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: ISET
+      INTEGER(4) :: IE
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: ISPIN
+      CHARACTER(256) :: FILENAME
+      CHARACTER(6) :: ID
+      INTEGER(4) :: NFIL
+      REAL(8) :: EV
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$OUTPUT')
+                          CALL CONSTANTS('EV',EV)
+      ID=+'XASDOS'
+      CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XASDOS')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        CALL XAS$GETCH('FILE',FILENAME)
+        CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(ADJUSTL(FILENAME))//-'DOS')
+        CALL FILEHANDLER$UNIT(ID,NFIL)
+        CALL XAS_OUTPUTHEADER(NFIL)
+        CALL XAS$UNSELECT
+        WRITE(NFIL,FMT='(A)') '# DENSITY OF STATES DATA'
+        WRITE(NFIL,FMT='(A)') '# DOS IS WEIGHTED BY THE TRANSITION PROBABILITY'
+        WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY(EV)'
+        DO ISET=1,NSET
+          WRITE(NFIL,FMT='(A30)',ADVANCE='NO') TRIM(SETID(ISET))
+        ENDDO
+        WRITE(NFIL,*) ''
+        DO IE=1,NE
+          WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') EDOS(IE)/EV
+          DO ISET=1,NSET
+            DO ISPIN=1,NSPIN
+              WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') DOS(IE,ISPIN,ISET,ISPEC)
+            ENDDO
+            ! FOR NSPIN=1 WRITE 1ST SPIN AGAIN
+            IF(NSPIN.EQ.1) THEN
+              WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') DOS(IE,1,ISET,ISPEC)
+            END IF
+          ENDDO
+          WRITE(NFIL,*) ''
+        ENDDO
+        CALL FILEHANDLER$CLOSE(ID)
+      ENDDO
+
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$OUTPUT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS_INITIALIZE  ! MARK: XASDOS_INITIALIZE
+!     **************************************************************************
+!     ** INITIALIZE ENERGY GRID AND STORAGE ARRAYS FOR XASDOS MODULE          **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,EDOS,DOS,NSPEC,NE,NSET,WGHT,EWGHT,NKPT,NBB,EIG,EIGVAL
+      USE BRILLOUIN_MODULE, ONLY: EWGHT_TYPE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: NSPIN
+      REAL(8) :: EMIN,EMAX,DE
+      REAL(8) :: RNTOT
+      REAL(8) :: EFERMI
+      INTEGER(4) :: NB
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: I
+      REAL(8) :: EV
+      TYPE(EWGHT_TYPE), ALLOCATABLE :: EWGHTVAL(:,:) ! (NBB,NKPT)
+      REAL(8), ALLOCATABLE :: WGHTVAL(:,:) ! (NBB,NKPT)
+      INTEGER(4) :: RTASK,THISTASK,NTASKS
+!     **************************************************************************
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS_INITIALIZE')
+      CALL CONSTANTS('EV',EV)
+      ! SET NUMBER OF XAS SPECTRA FROM XAS_MODULE
+      CALL XAS$GETI4('NSPEC',NSPEC)
+      ! GET NUMBER OF GRID POINTS FROM XAS_MODULE
+      CALL XAS$GETI4('NE',NE)
+
+      CALL XAS$GETR8('EMIN',EMIN)
+      CALL XAS$GETR8('EMAX',EMAX)
+      CALL XAS$GETR8('DE',DE)
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$GETR8('RNTOT',RNTOT)
+      CALL SIMULATION$UNSELECT
+      
+      ! ALLOCATE ENERGY GRID AND DOS ARRAYS
+      ALLOCATE(EDOS(NE))
+      ALLOCATE(DOS(NE,NSPIN,NSET,NSPEC))
+      ! INITIALIZE ENERGY GRID
+      DO I=1,NE
+        EDOS(I)=EMIN+DE*REAL(I-1,8)
+      ENDDO
+PRINT *, 'XAS DOS ENERGY GRID: EMIN=',EMIN/EV,' EMAX=',EMAX/EV,' DE=',DE/EV,' NE=',NE
+PRINT *, 'EDOS(1)=',EDOS(1)/EV,' EDOS(2)=',EDOS(2)/EV,' EDOS(NE)=',EDOS(NE)/EV
+      DOS(:,:,:,:)=0.D0
+
+      NB=NBB/2
+      ALLOCATE(WGHTVAL(NBB,NKPT))
+! WARNING: DOES RNTOT NEED TO BE MULTIPLIED BY 2 FOR NON SPIN -POLARIZED CASES?
+      CALL BRILLOUIN$DOS(NBB,NKPT,EIGVAL,WGHTVAL,RNTOT,EFERMI)
+      ALLOCATE(EWGHTVAL(NBB,NKPT))
+      CALL BRILLOUIN$WGHT(NKPT,NBB,EMIN,EIGVAL,WGHTVAL)
+      CALL BRILLOUIN$EWGHT(NKPT,NBB,EIGVAL,EMIN,EMAX,NE,EWGHTVAL)
+
+      ALLOCATE(WGHT(NB,NKPT,NSPIN))
+      ALLOCATE(EWGHT(NB,NKPT,NSPIN))
+      DO ISPIN=1,NSPIN
+        DO IKPT=1,NKPT
+          DO I=1,NB
+            WGHT(I,IKPT,ISPIN)=WGHTVAL(I+NB*(ISPIN-1),IKPT)
+            EWGHT(I,IKPT,ISPIN)=EWGHTVAL(I+NB*(ISPIN-1),IKPT)
+          ENDDO
+        ENDDO
+      ENDDO
+      DEALLOCATE(WGHTVAL)
+      DEALLOCATE(EWGHTVAL)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS_INITIALIZE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$SETL4(ID,VAL)  ! MARK: XASDOS$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL VALUE IN XASDOS MODULE                                   **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+      IF(ID.EQ.'ACTIVE') THEN
+        TACTIVE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$SETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$GETI4(ID,VAL)  ! MARK: XASDOS$GETI4
+!     **************************************************************************
+!     ** GET INTEGER VALUE FROM XASDOS MODULE                                 **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,NBB,NKPT,NSET
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+      IF(.NOT.TACTIVE) THEN
+        CALL ERROR$MSG('XASDOS MODULE NOT ACTIVE')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETI4')
+      END IF
+      IF(ID.EQ.'NBB') THEN
+        VAL=NBB
+      ELSE IF(ID.EQ.'NKPT') THEN
+        VAL=NKPT
+      ELSE IF(ID.EQ.'NSET') THEN
+        VAL=NSET
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$GETCH(ID,VAL)  ! MARK: XASDOS$GETCH
+!     **************************************************************************
+!     ** GET CHARACTER VALUE FROM XASDOS MODULE                               **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,FILE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+      IF(.NOT.TACTIVE) THEN
+        CALL ERROR$MSG('XASDOS MODULE NOT ACTIVE')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETCH')
+      END IF
+      IF(ID.EQ.'FILE') THEN
+        VAL=FILE
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$GETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$SETCH(ID,VAL)  ! MARK: XASDOS$SETCH
+!     **************************************************************************
+!     ** SET CHARACTER VALUE IN XASDOS MODULE                                 **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: FILE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(IN) :: VAL
+      IF(ID.EQ.'FILE') THEN
+        IF(LEN_TRIM(VAL).EQ.0) THEN
+          CALL ERROR$MSG('FILE NAME CANNOT BE EMPTY')
+          CALL ERROR$CHVAL('VAL',VAL)
+          CALL ERROR$STOP('XASDOS$SETCH')
+        END IF
+        FILE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$SETCH')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$SETCH
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE POLARISATION_CONVERT(K,N,POL,POLXYZ)  ! MARK: POLARISATION_CONVERT
