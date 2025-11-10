@@ -11927,11 +11927,13 @@
       INTEGER(4) :: IE
       INTEGER(4) :: NSPIN
       INTEGER(4) :: ISPIN
+      INTEGER(4) :: ISPINLOOP
       CHARACTER(256) :: FILENAME
       CHARACTER(6) :: ID
       INTEGER(4) :: NFIL
       REAL(8) :: EV
       REAL(8) :: FAC
+      REAL(8) :: SIG
       INTEGER(4) :: NTASKS,THISTASK,RTASK
 !     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
@@ -11970,24 +11972,61 @@
           WRITE(NFIL,FMT='(A30)',ADVANCE='NO') TRIM(SETID(ISET))
         ENDDO
         WRITE(NFIL,*) ''
-        ! WRITE ENERGY AND WEIGHTED DOS VALUES
-        DO IE=1,NE
-          ! THIS FACTOR IS INCLUDED TO MATCH THE XAS OUTPUT SCALING WITH ENERGY
-          FAC=EDOS(IE)/EV
+        ! OUTPUT SIMILAR TO PAW_DOS OUTPUT
+        ! ALWAYS OUTPUT IF IT WAS SPIN-POLARIZED
+        DO ISPINLOOP=1,2
+          ! SET VALUES POSITIVE FOR SPIN UP, NEGATIVE FOR SPIN DOWN
+          SIG=REAL(3-2*ISPINLOOP) ! +1 FOR ISPIN=1 (UP), -1 FOR ISPIN=2 (DOWN)
+          ! MODULO TO HANDLE NSPIN=1 CASE
+          ISPIN=MOD(ISPINLOOP-1,NSPIN)+1
+          ! WRITE FIRST ZERO LINE (REQUIRED FOR PLOTTING)
+          FAC=EDOS(1)/EV
           WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') FAC
           DO ISET=1,NSET
-            DO ISPIN=1,NSPIN
-              WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') &
-     &                                              FAC*DOS(IE,ISPIN,ISET,ISPEC)
+            WRITE(NFIL,FMT='(2(1X,ES14.7))',ADVANCE='NO')0.D0,0.D0
+          ENDDO
+          WRITE(NFIL,*) ''
+          ! WRITE ENERGY AND WEIGHTED DOS VALUES
+          DO IE=1,NE
+            FAC=EDOS(IE)/EV
+            WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') FAC
+            DO ISET=1,NSET
+              ! ONLY CONTAINS EMPTY ORBITALS
+              ! WRITTEN AS IF THEY ARE ALL OCCUPIED FOR PLOTTING COLORS
+              WRITE(NFIL,FMT='(2(1X,ES14.7))',ADVANCE='NO') &
+     &                      FAC*SIG*DOS(IE,ISPIN,ISET,ISPEC), &
+     &                      FAC*SIG*DOS(IE,ISPIN,ISET,ISPEC)
             ENDDO
-            ! FOR NSPIN=1 WRITE 1ST SPIN AGAIN
-            IF(NSPIN.EQ.1) THEN
-              WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') &
-     &                                                  FAC*DOS(IE,1,ISET,ISPEC)
-            END IF
+            WRITE(NFIL,*) ''
+          ENDDO
+          ! WRITE LAST ZERO LINE (REQUIRED FOR PLOTTING)
+          WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') FAC
+          DO ISET=1,NSET
+            WRITE(NFIL,FMT='(2(1X,ES14.7))',ADVANCE='NO')0.D0,0.D0
           ENDDO
           WRITE(NFIL,*) ''
         ENDDO
+
+    !     ! WRITE SPIN UP IN FIRST AND SPIN DOWN IN SECOND COLUMN
+    !     ! WRITE ENERGY AND WEIGHTED DOS VALUES
+    !     DO IE=1,NE
+    !       ! THIS FACTOR IS INCLUDED TO MATCH THE XAS OUTPUT SCALING WITH ENERGY
+    !       FAC=EDOS(IE)/EV
+    !       WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') FAC
+    !       DO ISET=1,NSET
+    !         DO ISPIN=1,NSPIN
+    !           WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') &
+    !  &                                              FAC*DOS(IE,ISPIN,ISET,ISPEC)
+    !         ENDDO
+    !         ! FOR NSPIN=1 WRITE 1ST SPIN AGAIN
+    !         IF(NSPIN.EQ.1) THEN
+    !           WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') &
+    !  &                                                  FAC*DOS(IE,1,ISET,ISPEC)
+    !         END IF
+    !       ENDDO
+    !       WRITE(NFIL,*) ''
+    !     ENDDO
+        
         CALL FILEHANDLER$CLOSE(ID)
       ENDDO ! END ISPEC
 
