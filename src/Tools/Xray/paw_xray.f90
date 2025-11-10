@@ -481,8 +481,9 @@
       CALL OVERLAP$REPORT(NFIL)
 
       CALL XRAY$WRITEOVERLAP
+
+      CALL XASDOS$REPORT(NFIL)
  
-      
       ! ========================================================================
       ! == XAS                                                                ==
       ! ========================================================================
@@ -1903,7 +1904,7 @@
       CALL CONSTANTS('EV',EV)
       CALL CONSTANTS('ANGSTROM',ANGSTROM)
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A20,A14)')'SIMULATION REPORT',THIS%ID
+      WRITE(NFIL,FMT='(A,A14)')'SIMULATION REPORT',THIS%ID
       WRITE(NFIL,'(80("#"))')
       IF(TPR) WRITE(NFIL,FMT='(A12,X,A)')'FILE:',TRIM(THIS%FILE)
       WRITE(NFIL,FMT='(A12,I10)')'NAT:',THIS%NAT
@@ -3176,10 +3177,11 @@
         CALL ERROR$STOP('XSETUP$REPORT')
       END IF
       WRITE(NFIL,FMT='(A)')'SETUP REPORT'
-      WRITE(NFIL,FMT='(7A10)')'SETUP','GID','ECORE[H]','LNX','LOX', &
+      WRITE(FORMAT,'("(3A10,2A5,",I0,"X,2A10)")')((THIS(1)%LNXX-1)*5)
+      WRITE(NFIL,FMT=FORMAT)'SETUP','GID','ECORE[H]','LNX','LOX', &
      &                        'SYMBOL','R(ASA)'
       ! LNXX IS THE SAME FOR ALL SPECIES WITHIN ONE SIMULATION
-      WRITE(FORMAT,'("(2I10,F10.4,I10,",I0,"I10,A10,F10.4)")')THIS(1)%LNXX
+      WRITE(FORMAT,'("(2I10,F10.4,I5,",I0,"I5,A10,F10.6)")')THIS(1)%LNXX
       DO ISP=1,THISNSP
         WRITE(NFIL,FMT=FORMAT)ISP,THIS(ISP)%GID,THIS(ISP)%ECORE, &
      &                        THIS(ISP)%LNX,THIS(ISP)%L(:),THIS(ISP)%SYMBOL, &
@@ -3909,6 +3911,7 @@
       WRITE(NFIL,'(80("#"))')
       WRITE(NFIL,FMT='(A)')'KSMAP REPORT'
       WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,'(A)')'TASKS AND THEIR ASSIGNED KPOINTS AND SPINS'
       WRITE(NFIL,FMT='(A8,I5)')'NTASKS:',NTASKS    
       WRITE(NFIL,FMT='(A8,I5)')'RW TASK:',RTASK
       BEGINKPT=1
@@ -4031,7 +4034,7 @@
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
                           CALL TRACE$PUSH('SETTINGS$REPORT')
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A19)')'SETTINGS'
+      WRITE(NFIL,FMT='(A)')'SETTINGS FOR THE CORE HOLE'
       WRITE(NFIL,'(80("#"))')
       IF(TOVERLAP) WRITE(NFIL,FMT='(A)')'SETTINGS TAKEN FROM OVERLAP FILE'
       WRITE(NFIL,FMT='(A10,X,A)')'HOLE ATOM:',TRIM(COREHOLE)
@@ -4685,7 +4688,7 @@
       CALL XCNTL$GETL4('NORMALIZE',TNORMALIZE)
       WRITE(NFIL,'(A)')''
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A19)')'XAS MODULE'
+      WRITE(NFIL,FMT='(A)')'XAS MODULE'
       WRITE(NFIL,'(80("#"))')
       IF(SINGLEPARTICLE) THEN
         WRITE(NFIL,FMT='(A)')'SINGLE PARTICLE CALCULATION (SINGLEPARTICLE=T)'
@@ -8682,6 +8685,7 @@
 !     ** REPORT OVERLAP MODULE                                                **
 !     ** REQUIRES NO SELECTED OVERLAP                                         **
 !     **************************************************************************
+      USE STRINGS_MODULE
       USE OVERLAP_MODULE, ONLY: THIS,NKPTG,NSPING,INITIALIZED,THIS,ADETSUM
       USE MPE_MODULE
       IMPLICIT NONE
@@ -8707,7 +8711,7 @@
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
           CALL OVERLAP$SELECT(IKPT,ISPIN)
-          WRITE(NFIL,FMT='(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') &
+          WRITE(NFIL,FMT=-'(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') &
      &                                       IKPT,ISPIN,THIS%ADET,ABS(THIS%ADET)**2
           CALL OVERLAP$UNSELECT
         ENDDO
@@ -10986,9 +10990,10 @@
       CALL SIMULATION$SELECT('GROUND')
       CALL SIMULATION$GETI4('NKPT',NKPT)
       CALL SIMULATION$UNSELECT
-      WRITE(NFIL,'(80("-"))')
-      WRITE(NFIL,'(A)') ' BASIS OVERLAP REPORT TO FIRST ORDER'
-      WRITE(NFIL,'(80("-"))')
+      WRITE(NFIL,'(A)')''
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,'(A)') ' ORBITAL BASIS OVERLAP REPORT TO FIRST ORDER'
+      WRITE(NFIL,'(80("#"))')
       IF(TBASISWGHT) THEN
         WRITE(NFIL,'(A)') ' BASIS WEIGHTED USED IN SIMULATION'
       ELSE
@@ -11989,6 +11994,53 @@
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XASDOS$OUTPUT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$REPORT(NFIL)  ! MARK: XASDOS$REPORT
+!     **************************************************************************
+!     ** REPORT XAS DOS MODULE SETTINGS                                       **
+!     **************************************************************************
+      USE STRINGS_MODULE
+      USE XASDOS_MODULE, ONLY: TACTIVE,NSPEC,NSET,SETID,FILE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      LOGICAL(4) :: TOVERLAP
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: ISET
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      ! WEIGHTED DOS AND PDOS WRITING NOT ACTIVE
+      IF(TOVERLAP.AND..NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('XASDOS$REPORT')
+      WRITE(NFIL,'(A)')''
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A)')'XAS DOS REPORT'
+      WRITE(NFIL,'(80("#"))')
+      ! PDOS WRITING ACTIVE IF NOT FROM RESTART FILE
+      IF(.NOT.TOVERLAP) THEN
+        WRITE(NFIL,FMT='(A)')'PDOS FILE CREATION UNDER '//-'<ROOT>_XAS.PDOS'
+        WRITE(NFIL,FMT='(A)')'  REPLACES EMPTY ORBITALS OF EXCITE SIMULATION'
+        WRITE(NFIL,FMT='(A)')'  WITH AUXILIARY ORBITALS FROM THE XAS CALCULATION'
+      END IF
+      ! WEIGHTED DOS ACTIVE
+      IF(TACTIVE) THEN
+        WRITE(NFIL,FMT='(A)')''
+        WRITE(NFIL,FMT='(A)')'WEIGHTED DENSITY OF STATES FOR EACH XAS SPECTRUM'
+        WRITE(NFIL,FMT='(A)')'  WRITTEN TO INDIVIDUAL FILES WITH SUFFIX '//-'DOS'
+        WRITE(NFIL,FMT='(A12,X,A)')'DOS FILE:',TRIM(FILE)
+        WRITE(NFIL,FMT='(A12,I4)')'NUMBER SETS:',NSET
+        DO ISET=1,NSET
+          WRITE(NFIL,FMT='(A4,I4,A)')'  SET',ISET,': '//TRIM(SETID(ISET))
+        ENDDO
+      END IF
+      WRITE(NFIL,FMT='(A)')''
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$REPORT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XASDOS_INITIALIZE  ! MARK: XASDOS_INITIALIZE
