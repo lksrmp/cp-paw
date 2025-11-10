@@ -139,6 +139,12 @@
       INTEGER(4) :: NBATOM ! #(ATOMIC WAVE FUNCTIONS)
       INTEGER(4), ALLOCATABLE :: LATOM(:) ! (NBATOM) L QUANTUM NUMBER
       REAL(8), ALLOCATABLE :: AEPSI(:,:) ! (NR,NBATOM) AE ATOMIC WAVE FUNCTION
+
+      ! ELEMENT INFO AND RASA TAKEN FROM ATOM NAMES
+! WARNING: RELIES ON CORRECT NAMING OF ATOMS TO WORK AROUND DATA NOT BEING
+!          PASSED TO THE PAW_XRAY TOOL PROPERLY
+      CHARACTER(2) :: SYMBOL
+      REAL(8) :: RASA
       END TYPE XSETUP_TYPE
 
       INTEGER(4) :: NSPGROUND
@@ -333,6 +339,34 @@
       END MODULE AUXORB_MODULE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      MODULE XASDOS_MODULE  ! MARK: XASDOS_MODULE
+      USE BRILLOUIN_MODULE, ONLY: EWGHT_TYPE
+      TYPE(EWGHT_TYPE), ALLOCATABLE :: EWGHT(:,:,:) ! (NB,NKPT,NSPIN)
+      REAL(8), ALLOCATABLE :: WGHT(:,:,:) ! (NB,NKPT,NSPIN)
+
+      REAL(8) :: EF ! FERMI LEVEL
+
+      CHARACTER(32) :: FILE ! FILENAME FOR DOSRAW
+      INTEGER(4) :: NBB ! NUMBER OF BANDS
+      INTEGER(4) :: NKPT ! NUMBER OF KPOINTS
+      INTEGER(4) :: NSET ! NUMBER OF SETS
+
+      REAL(8), ALLOCATABLE :: EIGVAL(:,:) ! (NBB,NKPT) EIGENVALUES
+      REAL(8), ALLOCATABLE :: EIG(:,:,:) ! (NB,NKPT,NSPIN)
+      REAL(8), ALLOCATABLE :: SETVAL(:,:,:,:) ! (NBB,NKPT,2,NSET) PROJECTED DOS
+      REAL(8), ALLOCATABLE :: SET(:,:,:,:) ! (NB,NKPT,NSPIN,NSET) PROJECTED DOS
+      CHARACTER(32), ALLOCATABLE :: SETID(:) ! (NSET) SET IDENTIFIERS
+
+      ! NSPEC, NE, DE, EMIN, EMAX, EBROAD, BROADMODE TAKEN FROM XAS_MODULE
+      INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR DOS
+      INTEGER(4) :: NE ! NUMBER OF ENERGY POINTS FOR DOS
+
+      REAL(8), ALLOCATABLE :: EDOS(:) ! (NE) ENERGY GRID FOR DOS
+      REAL(8), ALLOCATABLE :: DOS(:,:,:,:) ! (NE,NSPIN,NSET,NSPEC) DOS
+      LOGICAL(4) :: TACTIVE=.FALSE.
+      END MODULE XASDOS_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       MODULE SHARED_DATA_MODULE  ! MARK: SHARED_DATA_MODULE
 !     **************************************************************************
 !     ** SHARED DATA MODULE FOR PAW XRAY TOOL                                 **
@@ -404,6 +438,12 @@
       ! DETERMINE K VECTORS AND MOMENTUM TRANSFER IN RIXS_MODULE
       CALL RIXS$KVECTORS
 
+      ! READ DOS FILE AND SAVE DATA ON READ TASK ONLY
+      CALL XASDOS$READ
+      ! VALIDATE XASDOS DATA AGAINST SIMULATION DATA
+      ! REFORMAT INTO COMPATIBLE ARRAYS
+      CALL XASDOS$VALIDATE
+
       CALL TIMING$CLOCKON('REPORTS')
       CALL KSMAP$REPORT(NFIL)
       CALL SIMULATION$SELECT('GROUND')
@@ -441,18 +481,30 @@
       CALL OVERLAP$REPORT(NFIL)
 
       CALL XRAY$WRITEOVERLAP
- 
-      ! FREE UP MEMORY CONTAINING PROJECTIONS
-      CALL STATE$DEALLOCATEPROJ
 
+      CALL XASDOS$REPORT(NFIL)
+ 
       ! ========================================================================
       ! == XAS                                                                ==
       ! ========================================================================
       CALL XAS$CALCULATE
-
+      
       CALL XAS$OUTPUT
+
+      ! ========================================================================
+      ! == XAS DOS                                                            ==
+      ! ========================================================================
+      CALL XASDOS$WRITEPDOS
+
+      CALL XASDOS$CALCULATE
+      
+      CALL XASDOS$OUTPUT
+
       ! FREE UP MEMORY CONTAINING XAS SPECTRA
       CALL XAS$DEALLOCATESPECTRA
+
+      ! FREE UP MEMORY CONTAINING PROJECTIONS
+      CALL STATE$DEALLOCATEPROJ
       
       ! ========================================================================
       ! == AUXILIARY ORBITALS                                                 ==
@@ -497,7 +549,7 @@
       CHARACTER(256) :: CNTLNAME
       INTEGER(4)     :: ISVAR
       INTEGER(4)     :: NARGS
-      ! **************************************************************************
+!     **************************************************************************
                           CALL TRACE$PUSH('INITIALIZEFILEHANDLER')
       NARGS=COMMAND_ARGUMENT_COUNT()
       IF(NARGS.LT.1) THEN
@@ -527,12 +579,12 @@
       CHARACTER(32)        :: ID
       INTEGER(4)          :: THISTASK
       INTEGER(4)          :: NTASKS
-      ! **************************************************************************
-                                   CALL TRACE$PUSH('STANDARDFILES')
-      ! ========================================================================
-      ! == SET STANDARD FILENAMES                                             ==
-      ! ========================================================================
-      ! ==  ERROR FILE =========================================================
+!     **************************************************************************
+                          CALL TRACE$PUSH('STANDARDFILES')
+!     ========================================================================
+!     == SET STANDARD FILENAMES                                             ==
+!     ========================================================================
+!     ==  ERROR FILE =========================================================
       ID=+'ERR'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XERR')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
@@ -558,7 +610,7 @@
       CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','READ')
       CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
-                                   CALL TRACE$POP
+                          CALL TRACE$POP
       RETURN
       END SUBROUTINE STANDARDFILES
 !
@@ -579,6 +631,7 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       LOGICAL(4) :: TCHK
+!     **************************************************************************
                           CALL TRACE$PUSH('XCNTL$READ')
       CALL LINKEDLIST$NEW(LL_CNTL)
       CALL LINKEDLIST$READ(LL_CNTL,NFIL,'~')
@@ -641,6 +694,7 @@
       LOGICAL(4) :: TCHK2
       LOGICAL(4) :: TCHK3
       CHARACTER(256) :: FILENAME
+!     **************************************************************************
                           CALL TRACE$PUSH('XCNTL$FILES')
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
@@ -732,6 +786,7 @@
       CHARACTER(32) :: ATOM
       INTEGER(4) :: NCORE
       INTEGER(4) :: LCORE
+!     **************************************************************************
       IF(TOVERLAP) RETURN
                           CALL TRACE$PUSH('XCNTL$COREHOLE')
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
@@ -820,6 +875,7 @@
       INTEGER(4) :: NAUXORB
       INTEGER(4) :: IORB
       INTEGER(4) :: IVAR
+!     **************************************************************************
       ! ONLY READ IF XAS IS ACTIVE
       CALL XAS$GETL4('ACTIVE',TCHK)
       IF(.NOT.TCHK) RETURN
@@ -963,7 +1019,7 @@
         ! READ FILENAME
         CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
         IF(.NOT.TCHK) THEN
-          CALL ERROR$MSG('!XAS:SPECTRUM:FILE NOT FOUND')
+          CALL ERROR$MSG('!XAS!SPECTRUM:FILE NOT FOUND')
           CALL ERROR$I4VAL('ISPEC',ISPEC)
           CALL ERROR$STOP('XCNTL$XAS')
         END IF
@@ -1104,6 +1160,24 @@
           CALL AUXORB$UNSELECT
         ENDDO
       END IF
+
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'XAS')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'DOS',1,TCHK)
+      CALL XASDOS$SETL4('ACTIVE',TCHK)
+
+      IF(TCHK) THEN
+        CALL LINKEDLIST$SELECT(LL_CNTL,'DOS')
+        ! READ FILENAME
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('!XAS!DOS:FILE NOT FOUND')
+          CALL ERROR$STOP('XCNTL$XAS')
+        END IF
+        CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
+        CALL XASDOS$SETCH('FILE',TRIM(ADJUSTL(FILENAME)))
+      END IF
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE XCNTL$XAS
@@ -1160,8 +1234,8 @@
       REAL(8) :: RVAR3(3)
       COMPLEX(8) :: CVAR2(2)
 
-
       REAL(8) :: EV
+!     **************************************************************************
       ! ONLY READ IF RIXS IS ACTIVE
       CALL RIXS$GETL4('ACTIVE',TCHK)
       IF(.NOT.TCHK) RETURN
@@ -1282,7 +1356,7 @@
         ! READ FILENAME
         CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
         IF(.NOT.TCHK) THEN
-          CALL ERROR$MSG('!RIXS:SPECTRUM:FILE NOT FOUND')
+          CALL ERROR$MSG('!RIXS!SPECTRUM:FILE NOT FOUND')
           CALL ERROR$I4VAL('ISPEC',ISPEC)
           CALL ERROR$STOP('XCNTL$RIXS')
         END IF
@@ -1420,6 +1494,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'TOVERLAP') THEN
         VAL=TOVERLAP
       ELSE IF(ID.EQ.'ADET') THEN
@@ -1447,6 +1522,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TOVERLAP) THEN
         CALL ERROR$MSG('XCNTL$GETCH: OVERLAP NOT ACTIVE')
         CALL ERROR$STOP('XCNTL$GETCH')
@@ -1491,6 +1567,7 @@
       INTEGER(4) :: IKPT
       INTEGER(4) :: I
       REAL(8) :: SVAR
+!     **************************************************************************
                           CALL TRACE$PUSH('SIMULATION$CHECKINVERSION')
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
@@ -1534,6 +1611,7 @@
       INTEGER(4) :: NKPTTOT
       INTEGER(4) :: NKPT
       REAL(8) :: XK(3)
+!     **************************************************************************
                           CALL TRACE$PUSH('SIMULATION$KPTMAP')
       IF(.NOT.THIS%INITIALIZED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
@@ -1616,6 +1694,7 @@
       INTEGER(4) :: IAT1
       INTEGER(4) :: IAT2
       LOGICAL(4) :: FOUND
+!     **************************************************************************
                           CALL TRACE$PUSH('SIMULATION_ATOMMAP')
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
@@ -1666,6 +1745,7 @@
       USE SIMULATION_MODULE
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
+!     **************************************************************************
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT SIMULATION WHEN ALREADY SELECTED')
@@ -1693,6 +1773,7 @@
 !     **************************************************************************
       USE SIMULATION_MODULE
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT UNSELECT SIMULATION WHEN NOT SELECTED')
@@ -1711,6 +1792,7 @@
       USE SIMULATION_MODULE
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
+!     **************************************************************************
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT SIMULATION WHEN ALREADY SELECTED')
@@ -1748,6 +1830,7 @@
       INTEGER(4), INTENT(IN) :: NPRO
       INTEGER(4), INTENT(IN) :: LNXX
       CHARACTER(6), INTENT(IN) :: FLAG
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$INIT')
@@ -1802,7 +1885,7 @@
       REAL(8) :: K(3)
       REAL(8) :: VOLUME
       REAL(8) :: ANGSTROM
-
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -1821,7 +1904,7 @@
       CALL CONSTANTS('EV',EV)
       CALL CONSTANTS('ANGSTROM',ANGSTROM)
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A20,A14)')'SIMULATION REPORT',THIS%ID
+      WRITE(NFIL,FMT='(A,A14)')'SIMULATION REPORT',THIS%ID
       WRITE(NFIL,'(80("#"))')
       IF(TPR) WRITE(NFIL,FMT='(A12,X,A)')'FILE:',TRIM(THIS%FILE)
       WRITE(NFIL,FMT='(A12,I10)')'NAT:',THIS%NAT
@@ -1901,6 +1984,72 @@
       END SUBROUTINE SIMULATION$REPORT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SIMULATION$POPULATEPDOS  ! MARK: SIMULATION$POPULATEPDOS
+!     **************************************************************************
+!     ** POPULATE PDOS MODULE WITH DATA FROM EXCITE SIMULATION                **
+!     ** REQUIRES EXCITE SIMULATION TO BE INITIALIZED                         **
+!     **************************************************************************
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
+      IMPLICIT NONE
+      CHARACTER(6) :: ID
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('SIMULATION$POPULATEPDOS')
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO SIMULATION SELECTED')
+        CALL ERROR$STOP('SIMULATION$POPULATEPDOS')
+      END IF
+      IF(THIS%ID.NE.'EXCITE') THEN
+        CALL ERROR$MSG('PDOS CAN ONLY BE POPULATED FROM EXCITE SIMULATION')
+        CALL ERROR$CHVAL('SELECTED SIMULATION ID: ',THIS%ID)
+        CALL ERROR$STOP('SIMULATION$POPULATEPDOS')
+      END IF
+!     ==========================================================================
+!     == GENERAL QUANTITIES                                                   ==
+!     ==========================================================================
+      CALL PDOS$SETI4('NAT',THIS%NAT)
+      CALL PDOS$SETI4('NSP',THIS%NSP)
+      CALL PDOS$SETI4('NKPT',THIS%NKPT)
+      CALL PDOS$SETI4A('NKDIV',3,THIS%NKDIV)
+      CALL PDOS$SETI4A('ISHIFT',3,THIS%ISHIFT)
+      CALL PDOS$SETR8('NEL',THIS%NEL)
+      IF(THIS%NSPIN.EQ.1.AND.THIS%NDIM.EQ.1) THEN
+        CALL PDOS$SETR8('RNTOT',0.5D0*THIS%NEL)
+      ELSE
+        CALL PDOS$SETR8('RNTOT',THIS%NEL)
+      END IF
+      CALL PDOS$SETI4('NSPIN',THIS%NSPIN)
+      CALL PDOS$SETI4('NDIM',THIS%NDIM)
+      CALL PDOS$SETI4('NPRO',THIS%NPRO)
+      CALL PDOS$SETI4('LNXX',THIS%LNXX)
+      CALL PDOS$SETI4A('LNX',THIS%NSP,THIS%LNX)
+      CALL PDOS$SETI4A('LOX',THIS%LNXX*THIS%NSP,THIS%LOX)
+      CALL PDOS$SETI4A('ISPECIES',THIS%NAT,THIS%ISPECIES)
+      IF(THIS%TINV) THEN
+        CALL PDOS$SETI4('SPACEGROUP',2)
+      ELSE
+        CALL PDOS$SETI4('SPACEGROUP',1)
+      END IF
+      CALL PDOS$SETL4('TSHIFT',THIS%TSHIFT)
+      CALL PDOS$SETL4('TINV',THIS%TINV)
+!     ==========================================================================
+!     == ATOMIC STRUCTURE                                                     ==
+!     ==========================================================================
+      CALL PDOS$SETR8A('RBAS',9,THIS%RBAS)
+      CALL PDOS$SETR8A('R',3*THIS%NAT,THIS%R)
+      CALL PDOS$SETCHA('ATOMID',THIS%NAT,THIS%ATOMID)
+!     ==========================================================================
+!     == ELEMENT SPECIFIC QUANTITIES                                          ==
+!     ==========================================================================
+      ! DONE IN XSETUP$POPULATEPDOS
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE SIMULATION$POPULATEPDOS
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE SIMULATION$SETI4A(ID,LEN,VAL)  ! MARK: SIMULATION$SETI4A
 !     **************************************************************************
 !     ** SET INTEGER VALUE IN SIMULATION MODULE                               **
@@ -1911,6 +2060,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       INTEGER(4), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$SETI4')
@@ -2002,6 +2152,7 @@
       INTEGER(4) :: IAT
       INTEGER(4) :: L
       INTEGER(4) :: M
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETI4A')
@@ -2153,6 +2304,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$SETI4')
@@ -2182,6 +2334,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETI4')
@@ -2241,6 +2394,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       ! SETTING S REQUIRES NO SELECTED SIMULATION
       IF(ID.EQ.'S') THEN
         IF(SELECTED) THEN
@@ -2337,6 +2491,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       ! GETTING S REQUIRES NO SELECTED SIMULATION
       IF(ID.EQ.'S') THEN
         CALL OVERLAPCHECK
@@ -2440,6 +2595,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$SETR8')
@@ -2477,6 +2633,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETR8')
@@ -2530,6 +2687,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$SETL4')
@@ -2561,6 +2719,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETL4')
@@ -2593,6 +2752,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       LOGICAL(4), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETL4A')
@@ -2637,6 +2797,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       CHARACTER(*), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$SETCHA')
@@ -2673,6 +2834,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       CHARACTER(*), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETCHA')
@@ -2709,6 +2871,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$SETCH')
@@ -2736,6 +2899,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION$GETCH')
@@ -2777,6 +2941,7 @@
       REAL(8) :: E
       INTEGER(4) :: IAT
       INTEGER(4) :: ISP
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO SIMULATION SELECTED')
         CALL ERROR$STOP('SIMULATION_ECORE')
@@ -2808,7 +2973,7 @@
       INTEGER(4) :: ISIM
       INTEGER(4) :: ILOGICAL
       CHARACTER(10) :: KEY
-
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(RTASK.NE.THISTASK) RETURN
@@ -2880,7 +3045,7 @@
       INTEGER(4), ALLOCATABLE :: ATOMMAP(:)
       REAL(8) :: VCELL
       CHARACTER(10) :: KEY
-
+!     **************************************************************************
                           CALL TRACE$PUSH('SIMULATION_READOVERLAP')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       ! CHECK FOR KEY
@@ -3000,6 +3165,7 @@
       CHARACTER(256) :: FORMAT
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(RTASK.NE.THISTASK) RETURN
@@ -3011,12 +3177,15 @@
         CALL ERROR$STOP('XSETUP$REPORT')
       END IF
       WRITE(NFIL,FMT='(A)')'SETUP REPORT'
-      WRITE(NFIL,FMT='(5A10)')'SETUP','GID','ECORE[H]','LNX','LOX'
+      WRITE(FORMAT,'("(3A10,2A5,",I0,"X,2A10)")')((THIS(1)%LNXX-1)*5)
+      WRITE(NFIL,FMT=FORMAT)'SETUP','GID','ECORE[H]','LNX','LOX', &
+     &                        'SYMBOL','R(ASA)'
       ! LNXX IS THE SAME FOR ALL SPECIES WITHIN ONE SIMULATION
-      WRITE(FORMAT,'("(2I10,F10.4,I10,",I0,"I10)")')THIS(1)%LNXX
+      WRITE(FORMAT,'("(2I10,F10.4,I5,",I0,"I5,A10,F10.6)")')THIS(1)%LNXX
       DO ISP=1,THISNSP
         WRITE(NFIL,FMT=FORMAT)ISP,THIS(ISP)%GID,THIS(ISP)%ECORE, &
-     &                          THIS(ISP)%LNX,THIS(ISP)%L(:)
+     &                        THIS(ISP)%LNX,THIS(ISP)%L(:),THIS(ISP)%SYMBOL, &
+     &                        THIS(ISP)%RASA
       ENDDO
       WRITE(NFIL,FMT='(A)')'RADIAL REPORT'
       CALL RADIAL$REPORT(NFIL)
@@ -3034,6 +3203,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
       IF(SELECTED) THEN
@@ -3072,6 +3242,7 @@
       USE XSETUP_MODULE, ONLY: SELECTED,THIS,THISNSP
       IMPLICIT NONE
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
       IF(.NOT.SELECTED) THEN
@@ -3095,6 +3266,7 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
       IF(SELECTED) THEN
@@ -3136,6 +3308,7 @@
       INTEGER(4), INTENT(IN) :: I
       INTEGER(4), INTENT(IN) :: NSP
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
       IF(NSP.LE.0) THEN
@@ -3166,12 +3339,13 @@
       END SUBROUTINE XSETUP$INIT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
-      SUBROUTINE XSETUP$NEW(ISP,GID,ECORE,LNXX,LNX,L,NBATOM)  ! MARK: XSETUP$NEW
+      SUBROUTINE XSETUP$NEW(ISP,GID,ECORE,LNXX,LNX,L,NBATOM,SYMBOL)  ! MARK: XSETUP$NEW
 !     **************************************************************************
 !     ** ADD NEW SETUP TO SETUP ARRAY                                         **
 !     ** REQUIRES SELECTED SETUP ARRAY                                        **
 !     **************************************************************************
       USE XSETUP_MODULE, ONLY: SELECTED,THIS
+      USE PERIODICTABLE_MODULE
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: ISP
       INTEGER(4), INTENT(IN) :: GID
@@ -3180,8 +3354,10 @@
       INTEGER(4), INTENT(IN) :: LNX
       INTEGER(4), INTENT(IN) :: L(LNXX)
       INTEGER(4), INTENT(IN) :: NBATOM
+      CHARACTER(2), INTENT(IN) :: SYMBOL
       INTEGER(4) :: NR
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
       IF(.NOT.SELECTED) THEN
@@ -3205,8 +3381,127 @@
       THIS(ISP)%NBATOM=NBATOM
       ALLOCATE(THIS(ISP)%LATOM(NBATOM))
       ALLOCATE(THIS(ISP)%AEPSI(NR,NBATOM))
+      THIS(ISP)%SYMBOL=SYMBOL
+      CALL PERIODICTABLE$GET(SYMBOL,'R(ASA)',THIS(ISP)%RASA)
       RETURN
       END SUBROUTINE XSETUP$NEW
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XSETUP$POPULATEPDOS  ! MARK: XSETUP$POPULATEPDOS
+!     **************************************************************************
+!     ** POPULATE PDOS MODULE WITH DATA FROM SELECTED SETUP                   **
+!     ** REQUIRES SELECTED SETUP ARRAY                                        **
+!     **************************************************************************
+      USE XSETUP_MODULE, ONLY: SELECTED,THIS,THISNSP
+      USE PERIODICTABLE_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: ISP
+      REAL(8), ALLOCATABLE :: OV(:,:,:) ! (LNXX,LNXX,NSP)
+      REAL(8), ALLOCATABLE :: RI(:)
+      INTEGER(4) :: LNX
+      INTEGER(4) :: LNXX
+      INTEGER(4) :: LN1,LN2
+      INTEGER(4) :: GID
+      INTEGER(4), ALLOCATABLE :: LOX(:)
+      INTEGER(4), ALLOCATABLE :: WORK(:,:)
+      REAL(8), ALLOCATABLE :: TEMP(:)
+      REAL(8), ALLOCATABLE :: TEMP1(:)
+      INTEGER(4), ALLOCATABLE :: IZ(:)
+      REAL(8), ALLOCATABLE :: RAD(:)
+      REAL(8), ALLOCATABLE :: VAL(:,:)
+      REAL(8), ALLOCATABLE :: DER(:,:)
+      INTEGER(4) :: NR
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XSETUP$POPULATEPDOS')
+      IF(.NOT.SELECTED) THEN
+        CALL ERROR$MSG('NO SETUP SELECTED')
+        CALL ERROR$MSG('PLEASE SELECT EXCITE')
+        CALL ERROR$STOP('XSETUP$POPULATEPDOS')
+      END IF
+
+      LNXX = THIS(1)%LNXX
+      ALLOCATE(OV(LNXX,LNXX,THISNSP))
+      ALLOCATE(LOX(LNXX))
+      ALLOCATE(WORK(LNXX,THISNSP))
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4A('LOX',LNXX*THISNSP,WORK)
+      CALL SIMULATION$UNSELECT
+      OV(:,:,:)=0.D0
+      DO ISP=1,THISNSP
+        GID=THIS(ISP)%GID
+        CALL RADIAL$GETI4(GID,'NR',NR)
+        ALLOCATE(RI(NR))
+        CALL RADIAL$R(GID,NR,RI)
+        LNX=THIS(ISP)%LNX
+        LOX(:)=WORK(:,ISP)
+        ALLOCATE(TEMP(NR))
+        ALLOCATE(TEMP1(NR))
+        DO LN1=1,LNX
+          DO LN2=LN1,LNX
+            IF(LOX(LN1).NE.LOX(LN2)) CYCLE
+            TEMP(:)=THIS(ISP)%AEPHI(:,LN1)*THIS(ISP)%AEPHI(:,LN2)*RI(:)**2
+! ERROR: THIS SHOULD BE RADIAL$INTEGRATE AND THEN RADIAL$VALUE AT RAD
+!        RAD IS NOT AVAILABLE AND WOULD REQUIRE REWRITING THE OVERLAP FILE
+!        THIS MAKES ALL ALREADY CREATED ONE INVALID
+!        TEMPORARY FIX USING ATOM NAMES TO GET SYMBOL AND THEN RASA
+! TODO: THIS SHOULD BE FIXED IN A FUTURE ITERATION
+            CALL RADIAL$INTEGRATE(GID,NR,TEMP,TEMP1)
+            CALL RADIAL$VALUE(GID,NR,TEMP1,THIS(ISP)%RASA,OV(LN1,LN2,ISP))
+            OV(LN2,LN1,ISP)=OV(LN1,LN2,ISP)
+          ENDDO
+        ENDDO
+        DEALLOCATE(RI)
+        DEALLOCATE(TEMP)
+        DEALLOCATE(TEMP1)
+      END DO
+      DEALLOCATE(WORK)
+      
+! ERROR: NO ACCESS TO SOME PARAMETERS. FILL WITH ZEROS FOR NOW AS THEY ARE NOT
+!        ACTUALLY USED IN THE CURRENT IMPLEMENTATION OF PAW_DOS
+
+! ERROR: NO ACCESS TO IZ (COMING FROM NINT(AEZ)), TAKING IT FROM PERIODICTABLE
+      ! CALL PDOS$SETI4A('IZ',NSP,IZ)
+      ALLOCATE(IZ(THISNSP))
+      DO ISP=1,THISNSP
+        CALL PERIODICTABLE$GET(THIS(ISP)%SYMBOL,'Z',IZ(ISP))
+      ENDDO
+      CALL PDOS$SETI4A('IZ',THISNSP,IZ)
+      DEALLOCATE(IZ)
+
+! ERROR: NO ACCESS TO RAD (SEE ABOVE)
+      ! CALL PDOS$SETR8A('RAD',NSP,RAD)
+      ALLOCATE(RAD(THISNSP))
+      DO ISP=1,THISNSP
+        RAD(ISP)=THIS(ISP)%RASA
+      ENDDO
+      CALL PDOS$SETR8A('RAD',THISNSP,RAD)
+      DEALLOCATE(RAD)
+
+! ERROR: NO ACCESS TO PHI AS IT EVALUATES AT RAD (SEE ABOVE)
+      ! CALL PDOS$SETR8A('PHI',LNXX*NSP,VAL)
+      ALLOCATE(VAL(LNXX,THISNSP))
+      VAL(:,:)=0.D0
+      CALL PDOS$SETR8A('PHI',LNXX*THISNSP,VAL)
+      DEALLOCATE(VAL)
+
+! ERROR: NO ACCESS TO DPHIDR AS IT REQUIRES RAD (SEE ABOVE)
+      ! CALL PDOS$SETR8A('DPHIDR',LNXX*NSP,DER)
+      ALLOCATE(DER(LNXX,THISNSP))
+      DER(:,:)=0.D0
+      CALL PDOS$SETR8A('DPHIDR',LNXX*THISNSP,DER)
+      DEALLOCATE(DER)
+
+      CALL PDOS$SETR8A('OVERLAP',LNXX*LNXX*THISNSP,OV)
+
+      DEALLOCATE(LOX)
+      DEALLOCATE(OV)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XSETUP$POPULATEPDOS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE XSETUP$GETI4A(ID,ISP,LEN,VAL)  ! MARK: XSETUP$GETI4A
@@ -3221,6 +3516,7 @@
       INTEGER(4), INTENT(IN) :: LEN
       INTEGER(4), INTENT(OUT) :: VAL(LEN)
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP GETI4A NOT ALLOWED IN OVERLAP MODE')
@@ -3264,6 +3560,7 @@
       INTEGER(4), INTENT(IN) :: LEN
       INTEGER(4), INTENT(IN) :: VAL(LEN)
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP SETI4A NOT ALLOWED IN OVERLAP MODE')
@@ -3306,6 +3603,7 @@
       INTEGER(4), INTENT(IN) :: ISP
       INTEGER(4), INTENT(OUT) :: VAL
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP GETI4 NOT ALLOWED IN OVERLAP MODE')
@@ -3346,6 +3644,7 @@
       REAL(8), INTENT(OUT) :: VAL(LEN)
       INTEGER(4) :: NR
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP GETR8A NOT ALLOWED IN OVERLAP MODE')
@@ -3407,6 +3706,7 @@
       REAL(8), INTENT(IN) :: VAL(LEN)
       INTEGER(4) :: NR
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP SETR8A NOT ALLOWED IN OVERLAP MODE')
@@ -3466,6 +3766,7 @@
       INTEGER(4), INTENT(IN) :: ISP
       REAL(8), INTENT(OUT) :: VAL
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP GETR8 NOT ALLOWED IN OVERLAP MODE')
@@ -3502,6 +3803,7 @@
       INTEGER(4), INTENT(IN) :: ISP
       REAL(8), INTENT(IN) :: VAL
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) THEN
         CALL ERROR$MSG('XSETUP SETR8 NOT ALLOWED IN OVERLAP MODE')
@@ -3545,6 +3847,7 @@
       INTEGER(4), INTENT(IN) :: NSPING_
       INTEGER(4) :: NTASKS,THISTASK
       INTEGER(4) :: IKPT,ISPIN,IND
+!     **************************************************************************
       IF(INITIALIZED) THEN
         ! IF ALREADY INITIALIZED, CHECK IF SAME VALUES
         IF(NKPTG_.NE.NKPTG.OR.NSPING_.NE.NSPING) THEN
@@ -3596,6 +3899,7 @@
       INTEGER(4) :: IKPT
       INTEGER(4) :: BEGINKPT,ENDKPT
       INTEGER(4) :: NTASKS,THISTASK
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       IF(THISTASK.NE.RTASK) RETURN
                           CALL TRACE$PUSH('KSMAP$REPORT')
@@ -3607,6 +3911,7 @@
       WRITE(NFIL,'(80("#"))')
       WRITE(NFIL,FMT='(A)')'KSMAP REPORT'
       WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,'(A)')'TASKS AND THEIR ASSIGNED KPOINTS AND SPINS'
       WRITE(NFIL,FMT='(A8,I5)')'NTASKS:',NTASKS    
       WRITE(NFIL,FMT='(A8,I5)')'RW TASK:',RTASK
       BEGINKPT=1
@@ -3642,6 +3947,7 @@
       USE KSMAP_MODULE, ONLY: RTASK,INITIALIZED
       IMPLICIT NONE
       INTEGER(4), INTENT(OUT) :: RTASK_
+!     **************************************************************************
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('KSMAP NOT INITIALIZED')
         CALL ERROR$STOP('KSMAP$READTASK')
@@ -3661,6 +3967,7 @@
       INTEGER(4), INTENT(IN) :: IKPT
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4), INTENT(OUT) :: TASK_
+!     **************************************************************************
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('KSMAP NOT INITIALIZED')
         CALL ERROR$STOP('KSMAP$WORKTASK')
@@ -3689,6 +3996,7 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: IKPT
       INTEGER(4), INTENT(OUT) :: TASKS_(NSPING)
+!     **************************************************************************
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('KSMAP NOT INITIALIZED')
         CALL ERROR$STOP('KSMAP$WORKTASK')
@@ -3719,13 +4027,14 @@
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
                           CALL TRACE$PUSH('SETTINGS$REPORT')
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A19)')'SETTINGS'
+      WRITE(NFIL,FMT='(A)')'SETTINGS FOR THE CORE HOLE'
       WRITE(NFIL,'(80("#"))')
       IF(TOVERLAP) WRITE(NFIL,FMT='(A)')'SETTINGS TAKEN FROM OVERLAP FILE'
       WRITE(NFIL,FMT='(A10,X,A)')'HOLE ATOM:',TRIM(COREHOLE)
@@ -3751,6 +4060,7 @@
       INTEGER(4) :: NAT
       INTEGER(4) :: IAT
       LOGICAL(4) :: FOUND
+!     **************************************************************************
                           CALL TRACE$PUSH('SETTINGS_IATOM')
       IF(IATOM.NE.-HUGE(1)) THEN
         CALL ERROR$MSG('SAFEGUARD: IATOM ALREADY SET')
@@ -3787,6 +4097,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'NCORE') THEN
         VAL=NCORE
       ELSE IF(ID.EQ.'LCORE') THEN
@@ -3812,6 +4123,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'NCORE') THEN
         NCORE=VAL
       ELSE IF(ID.EQ.'LCORE') THEN
@@ -3835,6 +4147,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'COREHOLE') THEN
         VAL=COREHOLE
       ELSE
@@ -3854,6 +4167,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'COREHOLE') THEN
         COREHOLE=VAL
       ELSE
@@ -3876,6 +4190,7 @@
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       CHARACTER(8) :: KEY
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -3899,6 +4214,7 @@
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       CHARACTER(8) :: KEY
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -3966,6 +4282,7 @@
       COMPLEX(8) :: ADET
       COMPLEX(8) :: ADETOP ! ADET FROM OPPOSITE SPIN DIRECTION
       INTEGER(4) :: ISPINOP ! SPIN OPPOSITE TO ISPIN
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('XAS$CALCULATE')
                           CALL TIMING$CLOCKON('XAS$CALCULATE')
@@ -4190,7 +4507,7 @@
       CHARACTER(6) :: ID
       REAL(8), ALLOCATABLE :: SUMK(:,:) ! (3,NE) 
       INTEGER(4) :: I
-
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
@@ -4350,6 +4667,7 @@
       LOGICAL(4) :: TADET
       LOGICAL(4) :: TBASISWGHT
       LOGICAL(4) :: TNORMALIZE
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -4370,7 +4688,7 @@
       CALL XCNTL$GETL4('NORMALIZE',TNORMALIZE)
       WRITE(NFIL,'(A)')''
       WRITE(NFIL,'(80("#"))')
-      WRITE(NFIL,FMT='(A19)')'XAS MODULE'
+      WRITE(NFIL,FMT='(A)')'XAS MODULE'
       WRITE(NFIL,'(80("#"))')
       IF(SINGLEPARTICLE) THEN
         WRITE(NFIL,FMT='(A)')'SINGLE PARTICLE CALCULATION (SINGLEPARTICLE=T)'
@@ -4444,6 +4762,7 @@
       INTEGER(4) :: NKPT,NSPIN
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: ISPEC
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('XAS$DEALLOCATESPECTRA')
       IF(.NOT.TINITIALIZE) THEN
@@ -4504,6 +4823,7 @@
       INTEGER(4) :: IFINAL
       REAL(8) :: EFINAL
       INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
@@ -4611,6 +4931,7 @@
       LOGICAL(4) :: TADET
       LOGICAL(4) :: TBASISWGHT
       LOGICAL(4) :: TNORMALIZE
+!     **************************************************************************
       INCLUDE 'CPPAW_VERSION.INFO'  ! FILENAME MADE LOWERCASE BY F90PP.SED 
       IF(.NOT.TACTIVE) RETURN
       IF(.NOT.TINITIALIZE) THEN
@@ -4688,6 +5009,7 @@
       USE XAS_MODULE, ONLY: TINITIALIZE,NSPEC,SELECTED,SPECTRA,THIS
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: ISPEC
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$ISELECT')
@@ -4715,6 +5037,7 @@
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$UNSELECT')
@@ -4739,6 +5062,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'INITIALIZE') THEN
         VAL=TINITIALIZE
       ELSE IF(ID.EQ.'ACTIVE') THEN
@@ -4785,6 +5109,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'ACTIVE') THEN
         TACTIVE=VAL
       ELSE IF(ID.EQ.'INITIALIZE') THEN
@@ -4818,6 +5143,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$GETI4')
@@ -4847,6 +5173,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'NSPEC') THEN
         NSPEC=VAL
         IF(.NOT.ALLOCATED(SPECTRA)) THEN
@@ -4876,6 +5203,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$GETR8')
@@ -4911,6 +5239,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'EMIN') THEN
         EMIN=VAL
       ELSE IF(ID.EQ.'EMAX') THEN
@@ -4940,6 +5269,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$GETCH')
@@ -4969,6 +5299,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('XAS SPECTRUM NOT SELECTED')
         CALL ERROR$STOP('XAS$SETCH')
@@ -4996,6 +5327,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$GETR8A')
@@ -5036,6 +5368,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('XAS SPECTRUM NOT SELECTED')
         CALL ERROR$STOP('XAS$SETR8A')
@@ -5073,6 +5406,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('XAS NOT INITIALIZED')
         CALL ERROR$STOP('XAS$GETC8A')
@@ -5117,6 +5451,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('XAS SPECTRUM NOT SELECTED')
         CALL ERROR$STOP('XAS$SETC8A')
@@ -5158,6 +5493,7 @@
       USE RIXS_MODULE, ONLY: TACTIVE,TINITIALIZE
       USE MPE_MODULE
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('RIXS$CALCULATE')
                           CALL TIMING$CLOCKON('RIXS$CALCULATE')
@@ -5170,6 +5506,10 @@
       
       CALL RIXS_ONEKPT
 
+! WARNING: FOR CALCULATIONS WITH NO KPOINT DISPERSION, I.E. WATER MOLECULE, TWOKPT
+!          CALCULATIONS GIVE THE SAME RESULT AS ONEKPT CALCULATIONS REDUCED BY A
+!          FACTOR OF ~|A_DET(IKPT,ISPIN)|^4 OR ~|A_DET(IKPT)|^2 AS THE OVERLAP
+!          FACTOR FROM TWO KPOINTS PLAYS A ROLE COMPARED TO ONLY ONE KPOINT
       CALL RIXS_TWOKPT
 
       ! DIFFERENTIATE BETWEEN SPECTRA THAT ARE AT ONE KPT AND ONES THAT ARE AT TWO
@@ -5200,7 +5540,7 @@
       INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
       CHARACTER(256) :: FILENAME
       CHARACTER(7) :: ID
-
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('RIXS$OUTPUT')
       IF(.NOT.TINITIALIZE) THEN
@@ -5257,6 +5597,7 @@
       LOGICAL(4) :: TBASISWGHT
       LOGICAL(4) :: TNORMALIZE
       LOGICAL(4) :: TMOMENTUM
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -5366,6 +5707,7 @@
       INTEGER(4) :: ISPEC
       REAL(8) :: RBAS(3,3)
       LOGICAL(4) :: TACTIVE
+!     **************************************************************************
       CALL RIXS$GETL4('ACTIVE',TACTIVE)
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('RIXS$KVECTORS')
@@ -5429,6 +5771,7 @@
       INTEGER(4) :: BASE(3)
       INTEGER(4) :: DI,DJ,DK
       LOGICAL(4) :: TMOMENTUM
+!     **************************************************************************
                           CALL TRACE$PUSH('RIXS_QTRANSFER')
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
@@ -5541,7 +5884,7 @@
       INTEGER(4), ALLOCATABLE :: TOIRRKPT(:)
       LOGICAL(4), ALLOCATABLE :: TIRRKPT(:)
       INTEGER(4), ALLOCATABLE :: TOTOTKPT(:)
-
+!     **************************************************************************
       CALL SIMULATION$SELECT('GROUND')
       CALL SIMULATION$GETI4('NKPT',NKPT)
       ALLOCATE(XK(3,NKPT))
@@ -5632,6 +5975,7 @@
       COMPLEX(8) :: ADETOP
       INTEGER(4) :: ISPINOP
       INTEGER(4) :: I
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('RIXS_ABSORB')
       IF(.NOT.TINITIALIZE) THEN
@@ -6006,6 +6350,7 @@
       COMPLEX(8) :: ADETOP
       INTEGER(4) :: ISPINOP
       REAL(8) :: ADETSUM
+!     **************************************************************************
       ! SKIP COMPLETELY IF ONLY SPECTRA AT TWO KPTS
       IF(.NOT.TONEK) RETURN
                           CALL TRACE$PUSH('RIXS_ONEKPT')
@@ -6394,6 +6739,7 @@
       LOGICAL(4) :: TBASISWGHT
       LOGICAL(4) :: TNORMALIZE
       REAL(8) :: ADETSUM
+!     **************************************************************************
       ! SKIP COMPLETELY IF ONLY SPECTRA AT ONE KPT
       IF(.NOT.TTWOK) RETURN
                           CALL TRACE$PUSH('RIXS_TWOKPT')
@@ -6671,6 +7017,7 @@
       LOGICAL(4) :: TBASISWGHT
       LOGICAL(4) :: TNORMALIZE
       LOGICAL(4) :: TMOMENTUM
+!     **************************************************************************
       INCLUDE 'CPPAW_VERSION.INFO' ! FILENAME MADE LOWERCASE BY F90PP.SED
 
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -6792,6 +7139,7 @@
       COMPLEX(8), ALLOCATABLE :: XY(:,:)
       COMPLEX(8), ALLOCATABLE :: X(:)
       COMPLEX(8), ALLOCATABLE :: Y(:)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS_OUTPUTDATA')
@@ -6892,6 +7240,7 @@
       USE RIXS_MODULE, ONLY: TINITIALIZE,NSPEC,SELECTED,SPECTRA,THIS
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: ISPEC
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$ISELECT')
@@ -6919,6 +7268,7 @@
 !     **************************************************************************
       USE RIXS_MODULE, ONLY: TINITIALIZE,SELECTED,THIS
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$UNSELECT')
@@ -6942,6 +7292,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'INITIALIZE') THEN
         VAL=TINITIALIZE
       ELSE IF(ID.EQ.'ACTIVE') THEN
@@ -6983,6 +7334,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'ACTIVE') THEN
         TACTIVE=VAL
       ELSE IF(ID.EQ.'INITIALIZE') THEN
@@ -7017,6 +7369,7 @@
       ! NE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$GETI4')
@@ -7040,6 +7393,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'NSPEC') THEN
         NSPEC=VAL
         IF(.NOT.ALLOCATED(SPECTRA)) THEN
@@ -7067,6 +7421,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$GETR8')
@@ -7104,6 +7459,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'EMIN') THEN
         EMIN=VAL
       ELSE IF(ID.EQ.'EMAX') THEN
@@ -7137,6 +7493,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$GETCH')
@@ -7164,6 +7521,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('RIXS SPECTRUM NOT SELECTED')
         CALL ERROR$STOP('RIXS$SETCH')
@@ -7189,6 +7547,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$GETR8A')
@@ -7294,6 +7653,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$SETR8A')
@@ -7398,6 +7758,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$GETC8A')
@@ -7461,6 +7822,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.TINITIALIZE) THEN
         CALL ERROR$MSG('RIXS NOT INITIALIZED')
         CALL ERROR$STOP('RIXS$SETC8A')
@@ -7523,6 +7885,7 @@
       INTEGER(4), INTENT(IN) :: NSPIN_
       INTEGER(4), INTENT(IN) :: NDIM_
       INTEGER(4), INTENT(IN) :: NPRO_
+!     **************************************************************************
                           CALL TRACE$PUSH('STATE$INIT')
       IF(INITIALIZED) THEN
         ! IF ALREADY INITIALIZED, CHECK IF SAME VALUES
@@ -7563,6 +7926,7 @@
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -7604,8 +7968,7 @@
       INTEGER(4) :: ITEN,I1,I2
       INTEGER(4) :: IB
       REAL(8), ALLOCATABLE :: WKPT(:)
-
-
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -7661,6 +8024,7 @@
       INTEGER(4), PARAMETER :: NSIM=2
       INTEGER(4) :: ISIM
       INTEGER(4) :: IKPT,ISPIN
+!     **************************************************************************
                           CALL TRACE$PUSH('STATE$DEALLOCATEPROJ')
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('STATE NOT INITIALIZED')
@@ -7701,6 +8065,7 @@
       INTEGER(4) :: IB
       INTEGER(4) :: NTASKS,THISTASK,WTASK,RTASK
       REAL(8), ALLOCATABLE :: WKPT(:)
+!     **************************************************************************
                           CALL TRACE$PUSH('STATE_OCCUPATION')
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('STATE NOT INITIALIZED')
@@ -7768,6 +8133,7 @@
       USE STATE_MODULE, ONLY: GROUND,EXCITE,THIS,SELECTED
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
+!     **************************************************************************
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT STATE ARRAY WHEN ALREADY SELECTED')
@@ -7801,6 +8167,7 @@
 !     **************************************************************************
       USE STATE_MODULE, ONLY: THIS,SELECTED
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT UNSELECT STATE ARRAY WHEN NOT SELECTED')
@@ -7819,6 +8186,7 @@
       USE STATE_MODULE, ONLY: GROUND,EXCITE,THIS,SELECTED
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
+!     **************************************************************************
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT STATE ARRAY WHEN ALREADY SELECTED')
@@ -7856,6 +8224,7 @@
       INTEGER(4), INTENT(IN) :: IKPT
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4), INTENT(IN) :: NB
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO STATE ARRAY SELECTED')
         CALL ERROR$STOP('STATE$NEW')
@@ -7901,6 +8270,7 @@
       INTEGER(4), INTENT(IN) :: IKPT
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO STATE ARRAY SELECTED')
         CALL ERROR$STOP('STATE$GETI4')
@@ -7944,6 +8314,7 @@
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO STATE ARRAY SELECTED')
         CALL ERROR$STOP('STATE$SETR8A')
@@ -7997,6 +8368,7 @@
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO STATE ARRAY SELECTED')
         CALL ERROR$STOP('STATE$GETR8A')
@@ -8050,6 +8422,7 @@
       INTEGER(4), INTENT(IN) :: ISPIN
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO STATE ARRAY SELECTED')
         CALL ERROR$STOP('STATE$SETC8A')
@@ -8098,6 +8471,7 @@
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(OUT) :: VAL(LEN)
       LOGICAL(4) :: TOVERLAP
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO STATE ARRAY SELECTED')
         CALL ERROR$STOP('STATE$GETC8A')
@@ -8158,6 +8532,7 @@
       INTEGER(4) :: IKPT,ISPIN
       INTEGER(4) :: ISIM
       CHARACTER(5) :: KEY
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       ! EIG AND OCC ARE AVAILABLE ON RTASK AND CORRESPONDING WORKTASK
@@ -8215,6 +8590,7 @@
       REAL(8), ALLOCATABLE :: EIG(:)
       REAL(8), ALLOCATABLE :: OCC(:)
       CHARACTER(5) :: KEY
+!     **************************************************************************
                           CALL TRACE$PUSH('STATE_READOVERLAP')
       IF(INITIALIZED) THEN
         CALL ERROR$MSG('STATE ALREADY INITIALIZED')
@@ -8289,6 +8665,7 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NKPT_
       INTEGER(4), INTENT(IN) :: NSPIN_
+!     **************************************************************************
                           CALL TRACE$PUSH('OVERLAP$INIT')
       IF(INITIALIZED) THEN
         CALL ERROR$MSG('OVERLAP ALREADY INITIALIZED')
@@ -8308,12 +8685,14 @@
 !     ** REPORT OVERLAP MODULE                                                **
 !     ** REQUIRES NO SELECTED OVERLAP                                         **
 !     **************************************************************************
+      USE STRINGS_MODULE
       USE OVERLAP_MODULE, ONLY: THIS,NKPTG,NSPING,INITIALIZED,THIS,ADETSUM
       USE MPE_MODULE
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NFIL
       INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
       INTEGER(4) :: IKPT,ISPIN
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -8332,7 +8711,7 @@
       DO IKPT=1,NKPTG
         DO ISPIN=1,NSPING
           CALL OVERLAP$SELECT(IKPT,ISPIN)
-          WRITE(NFIL,FMT='(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') &
+          WRITE(NFIL,FMT=-'(I5,I5,X,(F10.7,SP,F10.7,"I ",S),X,F10.7)') &
      &                                       IKPT,ISPIN,THIS%ADET,ABS(THIS%ADET)**2
           CALL OVERLAP$UNSELECT
         ENDDO
@@ -8353,6 +8732,7 @@
       INTEGER(4), INTENT(IN) :: NOCC    ! NOCC
       COMPLEX(8), INTENT(OUT) :: KMAT(NB2NOCC,NOCC)
       COMPLEX(8), ALLOCATABLE :: WORK(:,:)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$K')
@@ -8401,6 +8781,7 @@
       COMPLEX(8), ALLOCATABLE :: U(:)
       COMPLEX(8), ALLOCATABLE :: ASWITCHINV(:,:)
       COMPLEX(8), ALLOCATABLE :: CSWITCH(:,:)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$L')
@@ -8437,6 +8818,7 @@
       INTEGER(4), INTENT(IN) :: NOCC
       COMPLEX(8), INTENT(OUT) :: H(NOCC,NB1-NOCC)
       COMPLEX(8), ALLOCATABLE :: AINV(:,:)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$H')
@@ -8466,6 +8848,7 @@
       COMPLEX(8), INTENT(OUT) :: MU(NB2-NOCC,NB1-NOCC)
       COMPLEX(8), ALLOCATABLE :: AINV(:,:)
       COMPLEX(8), ALLOCATABLE :: WORK(:,:)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$MU')
@@ -8489,6 +8872,7 @@
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: IKPT
       INTEGER(4), INTENT(IN) :: ISPIN
+!     **************************************************************************
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT SELECT OVERLAP WHEN ALREADY SELECTED')
@@ -8516,6 +8900,7 @@
 !     **************************************************************************
       USE OVERLAP_MODULE, ONLY: THIS,SELECTED
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('CANNOT UNSELECT OVERLAP WHEN NOT SELECTED')
@@ -8536,6 +8921,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$GETI4')
@@ -8568,6 +8954,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$SETI4')
@@ -8618,6 +9005,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$SETL4')
@@ -8648,6 +9036,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'ADETSUM') THEN
         VAL=ADETSUM
       ELSE
@@ -8667,6 +9056,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'ADETSUM') THEN
         ADETSUM=VAL
       ELSE
@@ -8689,6 +9079,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(ID.EQ.'S') THEN
         CALL SIMULATION$GETR8A(ID,LEN,VAL)
       ELSE
@@ -8711,6 +9102,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       REAL(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(ID.EQ.'S') THEN
         CALL SIMULATION$SETR8A(ID,LEN,VAL)
       ELSE
@@ -8731,6 +9123,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       COMPLEX(8), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$GETC8')
@@ -8755,6 +9148,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       COMPLEX(8), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$SETC8')
@@ -8780,6 +9174,7 @@
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(OUT) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$GETC8A')
@@ -8965,13 +9360,14 @@
       SUBROUTINE OVERLAP$SETC8A(ID,LEN,VAL)  ! MARK: OVERLAP$SETC8A
 !     **************************************************************************
 !     ** SET COMPLEX VALUE ARRAY IN SELECTED OVERLAP                          **
-!     ** REQUIRES SELECTED OVERLAP                                           **
+!     ** REQUIRES SELECTED OVERLAP                                            **
 !     **************************************************************************
       USE OVERLAP_MODULE, ONLY: THIS,SELECTED
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
       COMPLEX(8), INTENT(IN) :: VAL(LEN)
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO OVERLAP SELECTED')
         CALL ERROR$STOP('OVERLAP$SETC8A')
@@ -9051,6 +9447,7 @@
       INTEGER(4) :: NB1,NB2,NOCC
       INTEGER(4) :: IKPT,ISPIN
       CHARACTER(7) :: KEY
+!     **************************************************************************
                           CALL TRACE$PUSH('OVERLAP_WRITEOVERLAP')
       IF(.NOT.INITIALIZED) THEN
         CALL ERROR$MSG('OVERLAP NOT INITIALIZED')
@@ -9140,6 +9537,7 @@
       COMPLEX(8), ALLOCATABLE :: AUG(:,:)
       COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:)
       CHARACTER(7) :: KEY
+!     **************************************************************************
                           CALL TRACE$PUSH('OVERLAP_READOVERLAP')
       IF(INITIALIZED) THEN
         CALL ERROR$MSG('OVERLAP ALREADY INITIALIZED')
@@ -9273,8 +9671,11 @@
       REAL(8), ALLOCATABLE :: EIG2(:) ! (NB)
 
       COMPLEX(8), ALLOCATABLE :: PW(:,:) ! (NB2,NB1)
+      CHARACTER(2) :: SYMBOL
+      REAL(8) :: RASA
 
       INTEGER(4) :: ISIM
+      INTEGER(4) :: IAT
       INTEGER(4) :: ISP
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
@@ -9282,6 +9683,7 @@
       INTEGER(4) :: IB2
       INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
       INTEGER(4), ALLOCATABLE :: WTASKSKPT(:) ! (NSPING)
+!     **************************************************************************
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
                           CALL TRACE$PUSH('XRAY$READSIMULATIONS')
@@ -9296,9 +9698,9 @@
           IF(TPR) CALL TRACE$PASS('READING GENERAL QUANTITIES')
           CALL FILEHANDLER$UNIT(ID,NFIL(ISIM))
           REWIND(NFIL(ISIM))
-          ! ======================================================================
-          ! == READ GENERAL QUANTATIES                                          ==
-          ! ======================================================================
+          ! ====================================================================
+          ! == READ GENERAL QUANTATIES                                        ==
+          ! ====================================================================
           ! NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
           READ(NFIL(ISIM))NAT,NSP,NKPT,NSPIN,NDIM,NPRO(ISIM),LNXX,FLAG
         END IF
@@ -9414,7 +9816,15 @@
           END IF
           CALL MPE$BROADCAST('~',RTASK,LATOM)
           CALL MPE$BROADCAST('~',RTASK,AEPSI)
-          CALL XSETUP$NEW(ISP,GID,ECORE,LNXX,LNX(ISP),LOX(:,ISP),NBATOM)
+! WARNING: GETTING ATOM SYMBOL FROM ATOMID ASSUMES THAT THE FIRST
+!          TWO CHARACTERS CORRESPOND TO THE ELEMENT SYMBOL E.G. MN OR O_
+          DO IAT=1,NAT
+            IF(ISPECIES(IAT).EQ.ISP) THEN
+              SYMBOL=ATOMID(IAT)(1:2)
+              EXIT
+            ENDIF
+          ENDDO
+          CALL XSETUP$NEW(ISP,GID,ECORE,LNXX,LNX(ISP),LOX(:,ISP),NBATOM,SYMBOL)
           CALL XSETUP$SETR8A('PSPHI',ISP,NR*LNX(ISP),PSPHI)
           CALL XSETUP$SETR8A('AEPHI',ISP,NR*LNX(ISP),AEPHI)
           CALL XSETUP$SETI4A('LATOM',ISP,NBATOM,LATOM)
@@ -9687,7 +10097,7 @@
       INTEGER(4) :: NFIL
       CHARACTER(256) :: FILENAME
       INTEGER(4) :: NTASKS,THISTASK,RTASK
-
+!     **************************************************************************
       ! DO NOT WRITE OVERLAP IF OVERLAP FILE IS READ
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(TOVERLAP) RETURN
@@ -9737,7 +10147,7 @@
       INTEGER(4) :: NFIL
       CHARACTER(256) :: FILENAME
       INTEGER(4) :: NTASKS,THISTASK
-
+!     **************************************************************************
       ! DO NOT READ OVERLAP IF OVERLAP IS NOT ACTIVE
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
       IF(.NOT.TOVERLAP) RETURN
@@ -9787,7 +10197,7 @@
       REAL(8) :: ADETSUM
       REAL(8) :: SVAR
       LOGICAL(4) :: TNORMALIZE
-
+!     **************************************************************************
                           CALL TRACE$PUSH('XRAY$OVERLAP')
                           CALL TIMING$CLOCKON('XRAY$OVERLAP')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -9915,6 +10325,7 @@
       INTEGER(4) :: LLVAL
       REAL(8) :: GAUNT(3)
       COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:) ! (NDIM,NB,NPRO)
+!     **************************************************************************
                           CALL TRACE$PUSH('XRAY_DIPOLEMATRIX')
                           CALL TIMING$CLOCKON('XRAY_DIPOLEMATRIX')
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
@@ -10087,6 +10498,7 @@
       INTEGER(4), ALLOCATABLE :: ISPECIES1(:),ISPECIES2(:)
       INTEGER(4), ALLOCATABLE :: ATOMMAP(:)
       INTEGER(4) :: L1,L2
+!     **************************************************************************
                           CALL TRACE$PUSH('XRAY_ATOMMATRIX')
                           CALL TIMING$CLOCKON('XRAY_ATOMMATRIX')
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
@@ -10227,6 +10639,7 @@
       COMPLEX(8) :: OVLAP
       COMPLEX(8) :: CVAR
       REAL(8), ALLOCATABLE :: S(:,:,:)
+!     **************************************************************************
                           CALL TRACE$PUSH('XRAY_AUGMENTATION')
                           CALL TIMING$CLOCKON('XRAY_AUGMENTATION')
       CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
@@ -10384,8 +10797,7 @@
       INTEGER(4) :: LN
       INTEGER(4) :: L
       INTEGER(4) :: NTASKS,THISTASK,RTASK
-
-
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -10569,6 +10981,7 @@
       INTEGER(4) :: NKPT
       INTEGER(4) :: NTASKS,THISTASK,RTASK
       LOGICAL(4) :: TBASISWGHT
+!     **************************************************************************
       CALL MPE$QUERY('~',NTASKS,THISTASK)
       CALL KSMAP$READTASK(RTASK)
       IF(THISTASK.NE.RTASK) RETURN
@@ -10577,9 +10990,10 @@
       CALL SIMULATION$SELECT('GROUND')
       CALL SIMULATION$GETI4('NKPT',NKPT)
       CALL SIMULATION$UNSELECT
-      WRITE(NFIL,'(80("-"))')
-      WRITE(NFIL,'(A)') ' BASIS OVERLAP REPORT TO FIRST ORDER'
-      WRITE(NFIL,'(80("-"))')
+      WRITE(NFIL,'(A)')''
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,'(A)') ' ORBITAL BASIS OVERLAP REPORT TO FIRST ORDER'
+      WRITE(NFIL,'(80("#"))')
       IF(TBASISWGHT) THEN
         WRITE(NFIL,'(A)') ' BASIS WEIGHTED USED IN SIMULATION'
       ELSE
@@ -10621,6 +11035,7 @@
       COMPLEX(8) :: ADET
       COMPLEX(8) :: ADETOP
       INTEGER(4) :: ISPINOP
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('AUXORB$CALCULATE')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -10723,6 +11138,7 @@
       INTEGER(4) :: NTASKS,THISTASK,WTASK,RTASK
       INTEGER(4) :: IB
       INTEGER(4) :: I
+!     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('AUXORB$OUTPUT')
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -10790,6 +11206,7 @@
       USE AUXORB_MODULE, ONLY: SELECTED,THIS,AUXORB,NAUXORB
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: IORB  ! INDEX OF AUXILIARY
+!     **************************************************************************
       IF(SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('AUXORB$SELECT ALREADY SELECTED')
@@ -10818,6 +11235,7 @@
 !     **************************************************************************
       USE AUXORB_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('SAFEGUARD FUNCTION:')
         CALL ERROR$MSG('AUXORB NOT SELECTED')
@@ -10837,6 +11255,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'NAUXORB') THEN
         VAL=NAUXORB
       ELSE IF(ID.EQ.'B') THEN
@@ -10877,6 +11296,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'NAUXORB') THEN
         IF(VAL.LT.1) THEN
           CALL ERROR$MSG('NAUXORB MUST BE >= 1')
@@ -10947,6 +11367,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO AUXORB SELECTED')
         CALL ERROR$CHVAL('ID',ID)
@@ -10971,6 +11392,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(.NOT.SELECTED) THEN
         CALL ERROR$MSG('NO AUXORB SELECTED')
         CALL ERROR$CHVAL('ID',ID)
@@ -11000,6 +11422,7 @@
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
+!     **************************************************************************
       IF(ID.EQ.'ACTIVE') THEN
         TACTIVE=VAL
       ELSE
@@ -11009,6 +11432,794 @@
       END IF
       RETURN
       END SUBROUTINE AUXORB$SETL4
+! 
+!     ==========================================================================
+!     ==========================================================================
+!     == XASDOS MODULE                                                        ==
+!     ==========================================================================
+!     ==========================================================================
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$CALCULATE  ! MARK: XASDOS$CALCULATE
+!     **************************************************************************
+!     ** CALCULATE XAS DOS DATA                                               **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,SET,SETID,NSET,NSPEC,EWGHT,DOS,NE,EDOS
+      USE XAS_MODULE, ONLY: THIS
+      IMPLICIT NONE
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: NB
+      INTEGER(4) :: NOCC
+      INTEGER(4) :: IB
+      INTEGER(4) :: IEMP
+      INTEGER(4) :: ISET
+      INTEGER(4) :: ISPEC
+      REAL(8) :: DE
+      REAL(8) :: EMIN
+      REAL(8) :: EBROAD
+      CHARACTER(1) :: BROADMODE
+      REAL(8), ALLOCATABLE :: SVAR(:)
+      REAL(8) :: XAS
+      INTEGER(4) :: I1
+      INTEGER(4) :: I2
+      INTEGER(4) :: IE
+      INTEGER(4) :: RTASK
+      INTEGER(4) :: THISTASK,NTASKS
+!     **************************************************************************
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$CALCULATE')
+                          CALL TIMING$CLOCKON('XASDOS$CALCULATE')
+      ! INITIALIZE ENERGY GRID AND STORAGE ARRAYS                  
+      CALL XASDOS_INITIALIZE
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+
+      CALL XAS$GETR8('DE',DE)
+      CALL XAS$GETR8('EMIN',EMIN)
+
+      CALL STATE$SELECT('EXCITE')
+
+      ALLOCATE(SVAR(NSET))
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        DO IKPT=1,NKPT
+          DO ISPIN=1,NSPIN
+            CALL STATE$GETI4('NB',IKPT,ISPIN,NB)
+            CALL STATE$GETI4('NOCC',IKPT,ISPIN,NOCC)
+            DO IEMP=1,NB-NOCC
+              IB=NOCC+IEMP
+              XAS=THIS%SRAW(IKPT,ISPIN)%V(IEMP)
+! TODO: CHECK IF IT NEEDS TO BE WEIGHTED BY KPOINT WEIGHT OR IF THAT IS ALREADY
+!       INCLUDED IN XAS: SRAW(IKPT) SHOULD BE TWICE THE CONTRIBUTION OF IKPT IF
+!       -IKPT IS CONNECTED VIA INVERSION SYMMETRY
+              SVAR(:)=XAS*SET(IB,IKPT,ISPIN,:)*DE
+
+! WARNING: TETRAHEDRON METHOD IS THE DEFAULT DOS CALCULATION METHOD IN PAW_DOS
+!          HERE THE DELTA FUNCTION METHOD IS IMPLEMENTED TO MATCH THE MAPPING
+!          OF THE XAS SPECTRUM
+    !           TETRAHEDRON METHOD TO CALCULATE DOS
+    !           I1=EWGHT(IB,IKPT,ISPIN)%I1
+    !           I2=EWGHT(IB,IKPT,ISPIN)%I2
+    !           DO IE=I1,I2
+    !             DOS(IE,ISPIN,:,ISPEC)=DOS(IE,ISPIN,:,ISPEC)+ &
+    !  &                                EWGHT(IB,IKPT,ISPIN)%WGHT(IE)*SVAR(:)
+    !           ENDDO
+
+              ! DELTA FUNCTION METHOD TO CALCULATE DOS
+              DO ISET=1,NSET
+                CALL MAPGRID(THIS%ERAW(IKPT,ISPIN)%V(IEMP),SVAR(ISET),NE, &
+     &                       DOS(:,ISPIN,ISET,ISPEC),EMIN,DE)
+              ENDDO ! END ISET
+
+            ENDDO ! END IEMP
+          ENDDO ! END ISPIN
+        ENDDO ! END IKPT
+        CALL XAS$UNSELECT
+      ENDDO ! END ISPEC
+      DEALLOCATE(SVAR)
+
+      ! BROADENING OF THE DOS
+! WARNING: BROADENING DEVIATES FROM THE BROADENING OF THE DENSITY OF STATES
+!          IN PAW_DOS. THIS IS TO MATCH THE SHAPE OF THE XAS SPECTRUM.
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        CALL XAS$GETR8('EBROAD',EBROAD)
+        CALL XAS$GETCH('BROADMODE',BROADMODE)
+        DO ISET=1,NSET
+          DO ISPIN=1,NSPIN
+            IF(BROADMODE.EQ.'G') THEN
+              CALL GAUSSCONV(NE,EDOS,DOS(:,ISPIN,ISET,ISPEC),EBROAD)
+            ELSE IF(BROADMODE.EQ.'L') THEN
+              CALL LORENTZCONV(NE,EDOS,DOS(:,ISPIN,ISET,ISPEC),EBROAD)
+            ELSE IF(BROADMODE.EQ.'N') THEN
+              ! NO BROADENING
+            ELSE
+              CALL ERROR$MSG('BROADMODE NOT RECOGNISED IN XASDOS MODULE')
+              CALL ERROR$CHVAL('BROADMODE',BROADMODE)
+              CALL ERROR$STOP('XASDOS$CALCULATE')
+            END IF
+          ENDDO ! END ISPIN
+        ENDDO ! END ISET
+        CALL XAS$UNSELECT
+      ENDDO ! END ISPEC
+
+      ! CONVERT DELTA-NOS INTO DOS
+! TODO: UNDERSTAND IF THIS IS VALID FOR ALL BROADENINGS, WHY IS IT MULTIPLIED
+!       AND THEN DIVIDED AGAIN? MAYBE ONLY NECESSARY FOR TETRAHEDRON METHOD?
+      DOS(:,:,:,:)=DOS(:,:,:,:)/DE
+
+      ! ROUND INSIGNIFICANT VALUES TO ZERO
+      DO ISPEC=1,NSPEC
+        DO ISET=1,NSET
+          DO ISPIN=1,NSPIN
+            DO IE=1,NE
+              IF(ABS(DOS(IE,ISPIN,ISET,ISPEC)).LE.1.D-99) &
+     &                                             DOS(IE,ISPIN,ISET,ISPEC)=0.D0
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+
+      CALL STATE$UNSELECT
+                          CALL TIMING$CLOCKOFF('XASDOS$CALCULATE')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$CALCULATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$WRITEPDOS  ! MARK: XASDOS$WRITEPDOS
+!     **************************************************************************
+!     ** WRITE PDOS FILE WITH AUXILIARY ORBITALS FROM EXCITED SIMULATION      **
+!     ** DOES NOT WORK WHEN STARTING FROM RESTART FILE                        **
+!     **************************************************************************
+      USE STRINGS_MODULE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      LOGICAL(4) :: TOVERLAP
+      INTEGER(4) :: NKPT
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: NDIM
+      INTEGER(4) :: NB
+      INTEGER(4) :: NOCC
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: IB
+      INTEGER(4) :: IEMP
+      INTEGER(4) :: IEMPTOT
+      INTEGER(4) :: NFIL
+      LOGICAL(4) :: TADET
+      COMPLEX(8) :: ADET
+      COMPLEX(8) :: ADETOP
+      INTEGER(4) :: ISPINOP
+      REAL(8), ALLOCATABLE :: XK(:,:)
+      REAL(8), ALLOCATABLE :: WKPT(:)
+      REAL(8), ALLOCATABLE :: EIG(:)
+      REAL(8), ALLOCATABLE :: OCC(:)
+      COMPLEX(8), ALLOCATABLE :: PROJ(:,:,:)
+      COMPLEX(8), ALLOCATABLE :: PROJREORDERED(:,:,:)
+      INTEGER(4) :: NPRO
+      COMPLEX(8), ALLOCATABLE :: KMAT(:,:)
+      CHARACTER(4) :: ID
+      INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
+!     **************************************************************************
+      ! PROJECTIONS ARE NOT AVAILABLE IN RESTART FILES
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      CALL XCNTL$GETL4('ADET',TADET)
+      IF(TOVERLAP) RETURN
+                          CALL TRACE$PUSH('XASDOS$WRITEPDOS')
+                          CALL TIMING$CLOCKON('XASDOS$WRITEPDOS')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+
+      IF(THISTASK.EQ.RTASK) THEN
+        ! POPULATE PDOS MODULE WITH DATA FROM EXCITED SIMULATION
+        CALL SIMULATION$SELECT('EXCITE')
+        CALL SIMULATION$POPULATEPDOS
+        CALL SIMULATION$UNSELECT
+        CALL XSETUP$SELECT('EXCITE')
+        CALL XSETUP$POPULATEPDOS
+        CALL XSETUP$UNSELECT
+        ! WRITE GENERAL PDOS FILE HEADER 
+        ! SOME DATA IS PLACEHOLDER AS NOT AVAILABLE INSIDE PAW_XRAY
+        ID=+'PDOS'
+        CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'_XAS.PDOS')
+        CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','UNKNOWN')
+        CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+        CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
+        CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','UNFORMATTED')
+        CALL FILEHANDLER$UNIT(ID,NFIL)
+        CALL PDOS$WRITE(NFIL,'181213')
+      END IF
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      ALLOCATE(XK(3,NKPT))
+      ALLOCATE(WKPT(NKPT))
+      CALL SIMULATION$GETR8A('XK',3*NKPT,XK)
+      CALL SIMULATION$GETR8A('WKPT',NKPT,WKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+
+      CALL STATE$SELECT('EXCITE')
+      DO IKPT=1,NKPT
+        DO ISPIN=1,NSPIN
+          ! ONLY LET READTASK AND WORKTASKS CONTINUE (WORKTASK FOR OVERLAP)
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          IF(THISTASK.NE.WTASK.AND.THISTASK.NE.RTASK) CYCLE
+
+          ! GET ADET VALUES
+          ! NSPIN=1: OPPOSITE SPIN IS THE SAME
+          ! NSPIN=2: OPPOSITE SPIN IS DIFFERENT 1->2, 2->1
+          ISPINOP=MOD(ISPIN,NSPIN)+1 ! GET OPPOSITE SPIN
+          IF(THISTASK.EQ.WTASK) THEN
+            CALL OVERLAP$SELECT(IKPT,ISPINOP)
+            CALL OVERLAP$GETC8('ADET',ADETOP)
+            CALL OVERLAP$UNSELECT
+            CALL OVERLAP$SELECT(IKPT,ISPIN)
+            CALL OVERLAP$GETC8('ADET',ADET)
+            CALL OVERLAP$UNSELECT
+          END IF
+          CALL MPE$SENDRECEIVE('~',WTASK,RTASK,ADET)
+          CALL MPE$SENDRECEIVE('~',WTASK,RTASK,ADETOP)
+
+          ! GET PROJECTIONS AND OTHER DATA
+          CALL STATE$GETI4('NB',IKPT,ISPIN,NB)
+          CALL STATE$GETI4('NOCC',IKPT,ISPIN,NOCC)
+          CALL STATE$GETI4('NPRO',IKPT,ISPIN,NPRO)
+          CALL STATE$GETI4('NDIM',IKPT,ISPIN,NDIM)
+          ALLOCATE(EIG(NB))
+          ALLOCATE(OCC(NB))
+          ALLOCATE(PROJ(NDIM,NB,NPRO))
+          CALL STATE$GETR8A('EIG',IKPT,ISPIN,NB,EIG)
+          CALL STATE$GETR8A('OCC',IKPT,ISPIN,NB,OCC)
+          CALL STATE$GETC8A('PROJ',IKPT,ISPIN,NDIM*NB*NPRO,PROJ)
+          ! PROJ IS (NDIM,NB,NPRO) BUT NEEDS TO BE WRITTEN AS (NDIM,NPRO,NB)
+          ALLOCATE(PROJREORDERED(NDIM,NPRO,NB))
+          DO IB=1,NB
+            PROJREORDERED(:,:,IB)=PROJ(:,IB,:)
+          ENDDO
+          ! GET LINEAR DEPENDENCE MATRIX KMAT
+          ALLOCATE(KMAT(NB-NOCC,NOCC))
+          IF(THISTASK.EQ.WTASK) THEN
+            CALL OVERLAP$SELECT(IKPT,ISPIN)
+            CALL OVERLAP$K(NB-NOCC,NOCC,KMAT)
+            CALL OVERLAP$UNSELECT
+          END IF
+          CALL MPE$SENDRECEIVE('~',WTASK,RTASK,KMAT)
+
+          IF(THISTASK.EQ.RTASK) THEN
+            ! CALCULATE NEW PROJECTIONS FOR AUXILIARY ORBITALS |AUX_F>
+            ! |AUX_F>=[ |PSI_F>-SUM_{I OCC}|PSI_I>*KMAT(F,I) ]*(-1)^NOCC*ADET
+            ! LOOP OVER EMPTY STATES (F)
+            DO IEMP=1,NB-NOCC
+              IEMPTOT=NOCC+IEMP
+              ! LOOP OVER OCCUPIED STATES (I)
+              DO IB=1,NOCC
+                PROJREORDERED(:,:,IEMPTOT)=PROJREORDERED(:,:,IEMPTOT)- &
+                &               KMAT(IEMP,IB)*PROJREORDERED(:,:,IB)
+              ENDDO
+            ENDDO
+            ! MULTIPLY BY (-1)^NOCC
+            PROJREORDERED(:,:,NOCC+1:NB)=PROJREORDERED(:,:,NOCC+1:NB)* &
+     &                                   (-1.D0)**NOCC
+            ! MULTIPLY BY ADET = ADET-UP * ADET-DOWN
+            IF(TADET) THEN
+              PROJREORDERED(:,:,NOCC+1:NB)=PROJREORDERED(:,:,NOCC+1:NB)* &
+     &                                     ADET*ADETOP
+            END IF
+            ! WRITE PDOS DATA
+            CALL PDOS$WRITEK(NFIL,XK(:,IKPT),NB,NDIM,NPRO,WKPT(IKPT),EIG,OCC, &
+     &                       PROJREORDERED(:,:,:))
+          END IF
+          DEALLOCATE(EIG)
+          DEALLOCATE(OCC)
+          DEALLOCATE(PROJ)
+          DEALLOCATE(PROJREORDERED)
+          DEALLOCATE(KMAT)
+        ENDDO
+      ENDDO
+      CALL STATE$UNSELECT
+                          CALL TIMING$CLOCKOFF('XASDOS$WRITEPDOS')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$WRITEPDOS
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$READ  ! MARK: XASDOS$READ
+!     **************************************************************************
+!     ** READ DOS RAW DATA FROM FILE                                          **
+!     **************************************************************************
+      USE STRINGS_MODULE
+      USE XASDOS_MODULE, ONLY: TACTIVE,FILE,EF,NBB,NKPT,NSET,EIGVAL,SETVAL,SETID
+      IMPLICIT NONE
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: ISET
+      CHARACTER(8) :: KEY
+      INTEGER(4) :: THISTASK,NTASKS,RTASK
+!     **************************************************************************
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      ! ONLY READ TASK READS THE FILE AS ALL CALCULATION HAPPENS ON THAT TASK
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$READ')
+      CALL FILEHANDLER$SETFILE('XASDOS',.FALSE.,TRIM(FILE))
+      CALL FILEHANDLER$SETSPECIFICATION('XASDOS','ACTION','READ')
+      CALL FILEHANDLER$SETSPECIFICATION('XASDOS','FORM','UNFORMATTED')
+      CALL FILEHANDLER$UNIT('XASDOS',NFIL)
+      ! NSET,NKPT,NBB
+      READ(NFIL) NSET,NKPT,NBB
+      ALLOCATE(EIGVAL(NBB,NKPT))
+      ALLOCATE(SETVAL(NBB,NKPT,2,NSET))
+      ALLOCATE(SETID(NSET))
+      ! EIGVAL(NBB,NKPT),EF
+      READ(NFIL) EIGVAL,EF
+      ! SETID(NSET)
+      DO ISET=1,NSET
+        READ(NFIL) SETID(ISET)
+      ENDDO
+      ! SETVAL(NBB,NKPT,2,NSET)
+      READ(NFIL) SETVAL
+      ! KEY(8)
+      READ(NFIL) KEY
+      IF(.NOT.KEY.EQ.+'FINISHED') THEN
+        CALL ERROR$MSG('XASDOS DATA FILE NOT PROPERLY TERMINATED')
+        CALL ERROR$CHVAL('FILE',FILE)
+        CALL ERROR$CHVAL('KEY',KEY)
+        CALL ERROR$STOP('XASDOS$READ')
+      END IF
+      CALL FILEHANDLER$CLOSE('XASDOS')
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$READ
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$VALIDATE  ! MARK: XASDOS$VALIDATE
+!     **************************************************************************
+!     ** VALIDATE XASDOS MODULE DATA                                          **
+!     ** DATA SHOULD CORRESPOND TO DATA CONTAINED IN THE EXCITATED SIMULATION **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,NBB,NKPT,EIGVAL,EIG,SETVAL,SET,NSET,SETID
+      IMPLICIT NONE
+      INTEGER(4) :: NKPTSIM
+      INTEGER(4) :: NSPINSIM
+      INTEGER(4) :: NBSIM
+      INTEGER(4) :: NDIM
+      INTEGER(4) :: NB
+      REAL(8), ALLOCATABLE :: EIGSIM(:)
+      INTEGER(4) :: IB
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: ISET
+      REAL(8) :: ETOTGROUND
+      REAL(8) :: ETOTEXCITE
+      INTEGER(4) :: RTASK
+      INTEGER(4) :: THISTASK,NTASKS
+!     **************************************************************************
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      ! ONLY VALIDATE ON THE READ TASK
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$VALIDATE')
+      ! CHECK NKPT
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NKPT',NKPTSIM)
+      CALL SIMULATION$GETR8('ETOT',ETOTEXCITE)
+      IF(NKPT.NE.NKPTSIM) THEN
+        CALL ERROR$MSG('NKPT IN XASDOS MODULE DOES NOT MATCH EXCITATED &
+     &                  SIMULATION')
+        CALL ERROR$I4VAL('XASDOS NKPT',NKPT)
+        CALL ERROR$I4VAL('EXCITATED NKPT',NKPTSIM)
+        CALL ERROR$STOP('XASDOS$VALIDATE')
+      END IF
+      ! DOS FILES ALWAYS ACT AS IF NSPIN=2
+      CALL SIMULATION$GETI4('NSPIN',NSPINSIM)
+      ! CHECK NDIM
+      CALL SIMULATION$GETI4('NDIM',NDIM)
+      IF(NDIM.NE.1) THEN
+        CALL ERROR$MSG('XASDOS MODULE ONLY VALID NSPIN=1 OR NSPIN=2 &
+     &                  SIMULATIONS')
+        CALL ERROR$I4VAL('NDIM',NDIM)
+        CALL ERROR$STOP('XASDOS$VALIDATE')
+      END IF
+      CALL SIMULATION$UNSELECT
+
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETR8('ETOT',ETOTGROUND)
+      CALL SIMULATION$UNSELECT
+
+      CALL STATE$SELECT('EXCITE')
+      DO ISPIN=1,NSPINSIM
+        DO IKPT=1,NKPTSIM
+          ! CHECK NB
+          CALL STATE$GETI4('NB',IKPT,ISPIN,NBSIM)
+          IF(NBB.NE.2*NBSIM) THEN
+            CALL ERROR$MSG('NBB IN XASDOS MODULE DOES NOT MATCH &
+     &                      EXCITATED SIMULATION')
+            CALL ERROR$I4VAL('XASDOS NBB',NBB)
+            CALL ERROR$I4VAL('EXCITATED NB',NBSIM)
+            CALL ERROR$I4VAL('IKPT',IKPT)
+            CALL ERROR$I4VAL('ISPIN',ISPIN)
+            CALL ERROR$MSG('THIS IS POSSIBLE IF THE SIMULATION HAS UNEQUAL &
+     &                      NUMBER OF BANDS PER KPOINT OR SPIN')
+            CALL ERROR$MSG('IN THIS CASE PLEASE CHANGE THE CHECK')
+            CALL ERROR$STOP('XASDOS$VALIDATE')
+          END IF
+          ! CHECK EIGENVALUES
+          ALLOCATE(EIGSIM(NBSIM))
+          CALL STATE$GETR8A('EIG',IKPT,ISPIN,NBSIM,EIGSIM)
+          DO IB=1,NBSIM
+            IF(ABS(EIGVAL(IB+NBSIM*(ISPIN-1),IKPT)-EIGSIM(IB)).GT.1.D-7) THEN
+              CALL ERROR$MSG('EIGENVALUES IN XASDOS MODULE DO NOT MATCH &
+     &                        EXCITATED SIMULATION')
+              CALL ERROR$I4VAL('IKPT',IKPT)
+              CALL ERROR$I4VAL('ISPIN',ISPIN)
+              CALL ERROR$I4VAL('IB',IB)
+              CALL ERROR$R8VAL('XASDOS EIG',EIGVAL(IB+NBSIM*(ISPIN-1),IKPT))
+              CALL ERROR$R8VAL('EXCITATED EIG',EIGSIM(IB))
+              CALL ERROR$STOP('XASDOS$VALIDATE')
+            END IF
+          ENDDO
+          DEALLOCATE(EIGSIM)
+        ENDDO
+      ENDDO
+      CALL STATE$UNSELECT
+
+      ! SHIFT ENERGY VALUES TO ALIGN WITH XAS ENERGIES
+      ! THIS IS JUST A CONSTANT SHIFT OF ALL ENERGIES
+      EIGVAL(:,:)=EIGVAL(:,:)+ETOTEXCITE-ETOTGROUND
+      NB=NBB/2
+      ! REARRANGE EIGVAL INTO EIG
+      ! EIGVAL ENCODES SPIN UP IN 1:NB AND SPIN DOWN IN NB+1:2*NB
+      ALLOCATE(EIG(NB,NKPT,NSPINSIM))
+      DO ISPIN=1,NSPINSIM
+        DO IKPT=1,NKPT
+          DO IB=1,NB
+            EIG(IB,IKPT,ISPIN)=EIGVAL(IB+NB*(ISPIN-1),IKPT)
+          ENDDO
+        ENDDO
+      ENDDO
+      ! REARRRANGE SETVAL INTO SET
+      ! FOR NSPIN=2 SETVAL(:,:,1,:) ONLY CONTAINS DATA IN SETVAL(1:NB,:,1,:)
+      !        AND SETVAL(:,:,2,:) ONLY CONTAINS DATA IN SETVAL(NB+1:2*NB,:,2,:)
+! WARNING: THIS SEEMS TO NOT BE THE CASE FOR "TOTAL" FOR NSPIN=1
+!          ALL ENTRIES ARE 0.5
+      ALLOCATE(SET(NB,NKPT,NSPINSIM,NSET))
+      SET(:,:,1,:)=SETVAL(1:NB,:,1,:)
+      IF(NSPINSIM.EQ.2) THEN
+        SET(:,:,2,:)=SETVAL(NB+1:2*NB,:,2,:)
+      END IF
+      ! FOR NSPIN=1 DOUBLE SET TO GET TOTAL (WORKAROUND FOR WARNING ABOVE)
+      ! DETECTS IF ANY ENTRIES ARE IN THE NORMALLY ZEROED PART
+      DO ISET=1,NSET
+        IF(NSPINSIM.EQ.1) THEN
+          IF(SUM(SETVAL(1:NB,:,2,ISET)).GT.1.D-6) THEN
+            SET(:,:,1,ISET)=2.D0*SET(:,:,1,ISET)
+          END IF
+        END IF
+      ENDDO
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$VALIDATE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$OUTPUT  ! MARK: XASDOS$OUTPUT
+!     **************************************************************************
+!     ** OUTPUT XAS DOS DATA TO FILE                                          **
+!     ** FIRST COLUMN: ENERGY IN EV                                           **
+!     ** FOLLOWING COLUMNS: WEIGHTED DOS SPIN-UP AND SPIN-DOWN FOR EACH SET   **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,NSPEC,NSET,SETID,NE,EDOS,DOS
+      USE STRINGS_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: ISET
+      INTEGER(4) :: IE
+      INTEGER(4) :: NSPIN
+      INTEGER(4) :: ISPIN
+      CHARACTER(256) :: FILENAME
+      CHARACTER(6) :: ID
+      INTEGER(4) :: NFIL
+      REAL(8) :: EV
+      REAL(8) :: FAC
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      ! ONLY OUTPUT ON THE READ TASK
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS$OUTPUT')
+      CALL CONSTANTS('EV',EV)
+      ! CREATE FILEHANDLER (WILL BE ATTACHED TO MULTIPLE FILES)
+      ID=+'XASDOS'
+      CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XASDOS')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'STATUS','REPLACE')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'POSITION','REWIND')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'FORM','FORMATTED')
+      CALL FILEHANDLER$SETSPECIFICATION(ID,'ACTION','WRITE')
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+
+      DO ISPEC=1,NSPEC
+        CALL XAS$ISELECT(ISPEC)
+        CALL XAS$GETCH('FILE',FILENAME)
+        ! SET TO FILENAME OF XAS SPECTRUM APPENDED BY 'DOS'
+        CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(ADJUSTL(FILENAME))//-'DOS')
+        CALL FILEHANDLER$UNIT(ID,NFIL)
+        ! WRITE GENERAL HEADER CONTAINING INFO ABOUT THE XAS SETTINGS
+        CALL XAS_OUTPUTHEADER(NFIL)
+        CALL XAS$UNSELECT
+        WRITE(NFIL,FMT='(A)') '# DENSITY OF STATES DATA'
+        WRITE(NFIL,FMT='(A)') '# DOS IS WEIGHTED BY THE TRANSITION PROBABILITY'
+        ! WRITE HEADER LINE
+        WRITE(NFIL,FMT='(A14)',ADVANCE='NO') '# ENERGY(EV)'
+        DO ISET=1,NSET
+          WRITE(NFIL,FMT='(A30)',ADVANCE='NO') TRIM(SETID(ISET))
+        ENDDO
+        WRITE(NFIL,*) ''
+        ! WRITE ENERGY AND WEIGHTED DOS VALUES
+        DO IE=1,NE
+          ! THIS FACTOR IS INCLUDED TO MATCH THE XAS OUTPUT SCALING WITH ENERGY
+          FAC=EDOS(IE)/EV
+          WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') FAC
+          DO ISET=1,NSET
+            DO ISPIN=1,NSPIN
+              WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') &
+     &                                              FAC*DOS(IE,ISPIN,ISET,ISPEC)
+            ENDDO
+            ! FOR NSPIN=1 WRITE 1ST SPIN AGAIN
+            IF(NSPIN.EQ.1) THEN
+              WRITE(NFIL,FMT='(1X,ES14.7)',ADVANCE='NO') &
+     &                                                  FAC*DOS(IE,1,ISET,ISPEC)
+            END IF
+          ENDDO
+          WRITE(NFIL,*) ''
+        ENDDO
+        CALL FILEHANDLER$CLOSE(ID)
+      ENDDO ! END ISPEC
+
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$OUTPUT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$REPORT(NFIL)  ! MARK: XASDOS$REPORT
+!     **************************************************************************
+!     ** REPORT XAS DOS MODULE SETTINGS                                       **
+!     **************************************************************************
+      USE STRINGS_MODULE
+      USE XASDOS_MODULE, ONLY: TACTIVE,NSPEC,NSET,SETID,FILE
+      IMPLICIT NONE
+      INTEGER(4), INTENT(IN) :: NFIL
+      LOGICAL(4) :: TOVERLAP
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: ISET
+      INTEGER(4) :: NTASKS,THISTASK,RTASK
+!     **************************************************************************
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      ! WEIGHTED DOS AND PDOS WRITING NOT ACTIVE
+      IF(TOVERLAP.AND..NOT.TACTIVE) RETURN
+                          CALL TRACE$PUSH('XASDOS$REPORT')
+      WRITE(NFIL,'(A)')''
+      WRITE(NFIL,'(80("#"))')
+      WRITE(NFIL,FMT='(A)')'XAS DOS REPORT'
+      WRITE(NFIL,'(80("#"))')
+      ! PDOS WRITING ACTIVE IF NOT FROM RESTART FILE
+      IF(.NOT.TOVERLAP) THEN
+        WRITE(NFIL,FMT='(A)')'PDOS FILE CREATION UNDER '//-'<ROOT>_XAS.PDOS'
+        WRITE(NFIL,FMT='(A)')'  REPLACES EMPTY ORBITALS OF EXCITE SIMULATION'
+        WRITE(NFIL,FMT='(A)')'  WITH AUXILIARY ORBITALS FROM THE XAS CALCULATION'
+      END IF
+      ! WEIGHTED DOS ACTIVE
+      IF(TACTIVE) THEN
+        WRITE(NFIL,FMT='(A)')''
+        WRITE(NFIL,FMT='(A)')'WEIGHTED DENSITY OF STATES FOR EACH XAS SPECTRUM'
+        WRITE(NFIL,FMT='(A)')'  WRITTEN TO INDIVIDUAL FILES WITH SUFFIX '//-'DOS'
+        WRITE(NFIL,FMT='(A12,X,A)')'DOS FILE:',TRIM(FILE)
+        WRITE(NFIL,FMT='(A12,I4)')'NUMBER SETS:',NSET
+        DO ISET=1,NSET
+          WRITE(NFIL,FMT='(A4,I4,A)')'  SET',ISET,': '//TRIM(SETID(ISET))
+        ENDDO
+      END IF
+      WRITE(NFIL,FMT='(A)')''
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS$REPORT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS_INITIALIZE  ! MARK: XASDOS_INITIALIZE
+!     **************************************************************************
+!     ** INITIALIZE ENERGY GRID AND STORAGE ARRAYS FOR XASDOS MODULE          **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,EDOS,DOS,NSPEC,NE,NSET,WGHT,EWGHT,NKPT, &
+     &                         NBB,EIG,EIGVAL
+      USE BRILLOUIN_MODULE, ONLY: EWGHT_TYPE
+      IMPLICIT NONE
+      INTEGER(4) :: ISPEC
+      INTEGER(4) :: NSPIN
+      REAL(8) :: EMIN,EMAX,DE
+      REAL(8) :: RNTOT
+      REAL(8) :: EFERMI
+      INTEGER(4) :: NB
+      INTEGER(4) :: IKPT
+      INTEGER(4) :: ISPIN
+      INTEGER(4) :: I
+      REAL(8) :: EV
+      TYPE(EWGHT_TYPE), ALLOCATABLE :: EWGHTVAL(:,:) ! (NBB,NKPT)
+      REAL(8), ALLOCATABLE :: WGHTVAL(:,:) ! (NBB,NKPT)
+      INTEGER(4) :: RTASK,THISTASK,NTASKS
+!     **************************************************************************
+      IF(.NOT.TACTIVE) RETURN
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(THISTASK.NE.RTASK) RETURN
+                          CALL TRACE$PUSH('XASDOS_INITIALIZE')
+      CALL CONSTANTS('EV',EV)
+      ! SET NUMBER OF XAS SPECTRA FROM XAS_MODULE
+      CALL XAS$GETI4('NSPEC',NSPEC)
+      ! GET NUMBER OF GRID POINTS FROM XAS_MODULE
+      CALL XAS$GETI4('NE',NE)
+
+      CALL XAS$GETR8('EMIN',EMIN)
+      CALL XAS$GETR8('EMAX',EMAX)
+      CALL XAS$GETR8('DE',DE)
+
+      CALL SIMULATION$SELECT('EXCITE')
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$GETR8('RNTOT',RNTOT)
+      CALL SIMULATION$UNSELECT
+      
+      ! ALLOCATE ENERGY GRID AND DOS ARRAYS
+      ALLOCATE(EDOS(NE))
+      ALLOCATE(DOS(NE,NSPIN,NSET,NSPEC))
+      ! INITIALIZE ENERGY GRID
+      DO I=1,NE
+        EDOS(I)=EMIN+DE*REAL(I-1,8)
+      ENDDO
+      ! INITIALIZE DOS ARRAY TO ZERO
+      DOS(:,:,:,:)=0.D0
+
+      NB=NBB/2
+      ! CALCULATE INTEGRATION WEIGHTS FOR THE TETRAHEDRON METHOD
+      ! CURRENTLY NOT USED
+      ALLOCATE(WGHTVAL(NBB,NKPT))
+! WARNING: DOES RNTOT NEED TO BE MULTIPLIED BY 2 FOR NON SPIN-POLARIZED CASES?
+      CALL BRILLOUIN$DOS(NBB,NKPT,EIGVAL,WGHTVAL,RNTOT,EFERMI)
+      ALLOCATE(EWGHTVAL(NBB,NKPT))
+      CALL BRILLOUIN$WGHT(NKPT,NBB,EMIN,EIGVAL,WGHTVAL)
+      CALL BRILLOUIN$EWGHT(NKPT,NBB,EIGVAL,EMIN,EMAX,NE,EWGHTVAL)
+
+! TODO: CHECK IF MAPPING IS CORRECT
+      ALLOCATE(WGHT(NB,NKPT,NSPIN))
+      ALLOCATE(EWGHT(NB,NKPT,NSPIN))
+      DO ISPIN=1,NSPIN
+        DO IKPT=1,NKPT
+          DO I=1,NB
+            WGHT(I,IKPT,ISPIN)=WGHTVAL(I+NB*(ISPIN-1),IKPT)
+            EWGHT(I,IKPT,ISPIN)=EWGHTVAL(I+NB*(ISPIN-1),IKPT)
+          ENDDO
+        ENDDO
+      ENDDO
+      DEALLOCATE(WGHTVAL)
+      DEALLOCATE(EWGHTVAL)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XASDOS_INITIALIZE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$SETL4(ID,VAL)  ! MARK: XASDOS$SETL4
+!     **************************************************************************
+!     ** SET LOGICAL VALUE IN XASDOS MODULE                                   **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      LOGICAL(4), INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'ACTIVE') THEN
+        TACTIVE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$SETL4')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$SETL4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$GETI4(ID,VAL)  ! MARK: XASDOS$GETI4
+!     **************************************************************************
+!     ** GET INTEGER VALUE FROM XASDOS MODULE                                 **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,NBB,NKPT,NSET
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      INTEGER(4), INTENT(OUT) :: VAL
+!     **************************************************************************
+      IF(.NOT.TACTIVE) THEN
+        CALL ERROR$MSG('XASDOS MODULE NOT ACTIVE')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETI4')
+      END IF
+      IF(ID.EQ.'NBB') THEN
+        VAL=NBB
+      ELSE IF(ID.EQ.'NKPT') THEN
+        VAL=NKPT
+      ELSE IF(ID.EQ.'NSET') THEN
+        VAL=NSET
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETI4')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$GETI4
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$GETCH(ID,VAL)  ! MARK: XASDOS$GETCH
+!     **************************************************************************
+!     ** GET CHARACTER VALUE FROM XASDOS MODULE                               **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: TACTIVE,FILE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(OUT) :: VAL
+!     **************************************************************************
+      IF(.NOT.TACTIVE) THEN
+        CALL ERROR$MSG('XASDOS MODULE NOT ACTIVE')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETCH')
+      END IF
+      IF(ID.EQ.'FILE') THEN
+        VAL=FILE
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$GETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XASDOS$SETCH(ID,VAL)  ! MARK: XASDOS$SETCH
+!     **************************************************************************
+!     ** SET CHARACTER VALUE IN XASDOS MODULE                                 **
+!     **************************************************************************
+      USE XASDOS_MODULE, ONLY: FILE
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: ID
+      CHARACTER(*), INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'FILE') THEN
+        IF(LEN_TRIM(VAL).EQ.0) THEN
+          CALL ERROR$MSG('FILE NAME CANNOT BE EMPTY')
+          CALL ERROR$CHVAL('VAL',VAL)
+          CALL ERROR$STOP('XASDOS$SETCH')
+        END IF
+        FILE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNISED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('XASDOS$SETCH')
+      END IF
+      RETURN
+      END SUBROUTINE XASDOS$SETCH
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE POLARISATION_CONVERT(K,N,POL,POLXYZ)  ! MARK: POLARISATION_CONVERT
@@ -11028,6 +12239,7 @@
       REAL(8) :: WORK(3)
       REAL(8) :: WORK2(3)
       REAL(8) :: SVAR
+!     **************************************************************************
       CALL CROSS_PROD(K,N,WORK)
       SVAR=NORM2(WORK)
       IF(SVAR.LT.TOL) THEN
@@ -11054,6 +12266,7 @@
       REAL(8), INTENT(IN) :: A(3)
       REAL(8), INTENT(IN) :: B(3)
       REAL(8), INTENT(OUT) :: C(3)
+!     **************************************************************************
       C(1)=A(2)*B(3)-A(3)*B(2)
       C(2)=A(3)*B(1)-A(1)*B(3)
       C(3)=A(1)*B(2)-A(2)*B(1)
@@ -11070,6 +12283,7 @@
       REAL(8), INTENT(IN) :: A(3)
       REAL(8), INTENT(OUT) :: B(3)
       REAL(8) :: VECVAR(3)
+!     **************************************************************************
       VECVAR = (/1.D0,0.D0,0.D0/)
       IF(DOT_PRODUCT(A,VECVAR).EQ.NORM2(A)) THEN
         VECVAR = (/0.D0,1.D0,0.D0/)
@@ -11086,6 +12300,7 @@
       INTEGER(4), INTENT(IN) :: L
       INTEGER(4), INTENT(IN) :: M
       INTEGER(4), INTENT(OUT) :: LL
+!     **************************************************************************
       LL=L*L+L-M+1
       RETURN
       END SUBROUTINE LLOFLM
@@ -11108,6 +12323,7 @@
       LOGICAL(4), INTENT(IN) :: SP ! SINGLE PARTICLE AMPLITUDE
       INTEGER(4) :: IFINAL ! INDEX OF EMPTY BAND WITHIN ALL BANDS
       INTEGER(4) :: IB
+!     **************************************************************************
       IFINAL=IEMP+NOCC
       IF(IFINAL.GT.NB) THEN
         CALL ERROR$MSG('INDEX OF EMPTY BAND IS OUT OF RANGE')
@@ -11152,6 +12368,7 @@
       INTEGER(4) :: I1,I2
       REAL(8) :: X0
       REAL(8) :: W1,W2
+!     **************************************************************************
       X0=(X-XMIN)/DE+1.D0
       I1=INT(X0)
       I2=I1+1
@@ -11178,6 +12395,7 @@
       INTEGER(4) :: I,J
       REAL(8) :: GAMMA2
       REAL(8) :: SVAR
+!     **************************************************************************
       DO I=1,N
         WORK(I)=0.D0
         GAMMA2=0.25D0*GAMMA*GAMMA
@@ -11205,6 +12423,7 @@
       REAL(8) :: WORK(N)
       INTEGER(4) :: I,J
       REAL(8) :: SVAR
+!     **************************************************************************
       DO I=1,N
         WORK(I)=0.D0
         DO J=1,N
@@ -11230,6 +12449,7 @@
       REAL(8) :: SVAR
       REAL(8) :: HBAR
       REAL(8) :: C
+!     **************************************************************************
       CALL CONSTANTS('HBAR',HBAR)
       CALL CONSTANTS('C',C)
       K=N/NORM2(N)  ! NORMALISE DIRECTION
@@ -11250,6 +12470,7 @@
       REAL(8) :: INVGBAS(3,3)
       REAL(8) :: VOL
       INTEGER(4) :: I
+!     **************************************************************************
       CALL GBASS(RBAS,GBAS,VOL)
       CALL LIB$INVERTR8(3,GBAS,INVGBAS)
       XK=MATMUL(INVGBAS,K)
@@ -11268,6 +12489,7 @@
       REAL(8) :: GBAS(3,3)
       REAL(8) :: VOL
       INTEGER(4) :: I
+!     **************************************************************************
       CALL GBASS(RBAS,GBAS,VOL)
       K=MATMUL(GBAS,XK)
       END SUBROUTINE XKTOK

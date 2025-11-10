@@ -8775,6 +8775,51 @@ produced by the !CONTROL!ANALYSE!OVL option for a ground state and a
 core-hole calculation or one file produced by a previous run of the
 paw\_xray tool.
 
+The restart file contains the overlap matrix elements and further information
+necessary to calculate XAS and RIXS spectra in later runs. This avoid the costly
+calculation of the overlap matrix elements each time. The default is to use
+the root name with the extension '.overlap'.
+
+\subsection{Auxiliary orbital DOS}
+Furthermore, a ''root\_xas.pdos'' file is created. This is the file format used
+by the paw\_dos tool. It contains the occupied states from the excited 
+simulation. The unoccupied states are replaced by auxiliary states 
+$|\psi_n^{aux}\rangle$.
+These are superpositions of one unoccupied and all occupied states that produce
+the same XAS amplitude for a single-particle dipole transition operator as the 
+Slater-determinant final states produce for the many-body dipole transition 
+operator.
+\begin{eqnarray}
+  |\psi_n^{aux}\rangle =& \bigl[ |\psi_n\rangle - \sum_i^{N_{occ}}\kappa_{n,i}
+  |\psi_i\rangle \bigr] (-1)^{N_{occ}}A_{det}
+\end{eqnarray}
+where $A_{det}$ is the determinant of the overlap matrix between occupied
+states in the ground and excited state and $\kappa_{n,i}$ are the expansion
+coefficients of the unoccupied state $|\psi_n\rangle$ in the occupied
+states of the ground state.
+
+\subsection{Weighted X-Ray DOS}
+In order to visualize the contributions of different atomic orbitals to the
+XAS spectrum, a weighted X-Ray DOS is calculated. This is done by weighting
+the unoccupied DOS with the XAS cross section for each unoccupied state.
+As input a dosraw file created by the paw\_dos tool is required. It contains
+the projected density of states for every set per k-point, spin, and band.
+
+In combination with the auxiliary orbital DOS, the weighted X-Ray DOS
+can be used to analyze the character of the unoccupied states that
+contribute to the XAS spectrum.
+
+A typical workflow to calculate and analyze XAS spectra is:
+\begin{enumerate}
+  \item run paw\_xray starting from ground and core-hole calculations
+  \item ''.overlap'' and ''\_xas.pdos'' files are created
+  \item run paw\_dos with ''\_xas.pdos'' as input
+  \item use ''\_xas.dosraw'' as input for paw\_xray under !XCNTL!XAS!DOS
+  \item run using the ''.overlap'' file created in step 1
+  \item weighted DOS is created for each spectrum in file appended by ''dos''
+\end{enumerate}
+
+
 %==========================================================================
 \subsection{Command}
 %==========================================================================
@@ -8803,6 +8848,7 @@ the paw\_xray tool. The extension should be ``.xcntl''.
       NORMAL=0.0 0.0 1.0 KDIR=0.0 1.0 -1.0 POL=1.0 0.0 0.0 0.0
     !END
     !AUXORB FILE='auxorb.dat' B=421 K=1 S=1 !END
+    !DOS FILE='root.dosraw' !END
   !END
 !END
 \end{verbatim}
@@ -9052,6 +9098,52 @@ features might not be at the experimental energy values.}
 \vrules{optional; NORMAL, KDIR, POL together must be given either
   here or in the !XCNTL!XAS block.}
 \vdefault{value from !XCNTL!XAS}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!XAS!AUXORB}
+%----------------------------------------------------------------------
+\brules{optional, multiple}
+\bdescr{outputs the auxiliary orbital coefficients, amplitudes, and
+dipole matrix elements for a given band, k-point, and spin channel}
+
+\mbax{\key{FILE}
+\vdescr{file name of the output file}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
+
+\mbax{\key{B}
+\vdescr{band index of the unoccupied state for which the auxiliary
+ orbital is calculated}
+\vformat{integer}
+\vrules{mandatory}
+\vdefault{none}}
+
+\mbax{\key{K}
+\vdescr{k-point index of the unoccupied state for which the auxiliary
+  orbital is calculated}
+\vformat{integer}
+\vrules{optional}
+\vdefault{1}}
+
+\mbax{\key{S}
+\vdescr{spin channel index of the unoccupied state for which the auxiliary
+ orbital is calculated}
+\vformat{integer}
+\vrules{optional}
+\vdefault{1}}
+
+%----------------------------------------------------------------------
+\block{!XCNTL!XAS!DOS}
+%----------------------------------------------------------------------
+\brules{optional}
+\bdescr{calculates the weighted X-Ray DOS using the provided dosraw file}
+
+\mbax{\key{FILE}
+\vdescr{file name of the dosraw file created by paw\_dos tool}
+\vformat{character}
+\vrules{mandatory}
+\vdefault{none}}
 
 %==========================================================================
 \newpage
