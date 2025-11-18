@@ -9145,6 +9145,33 @@ dipole matrix elements for a given band, k-point, and spin channel}
 \vrules{mandatory}
 \vdefault{none}}
 
+\mbax{\key{EMIN[EV]}
+\vdescr{minimum energy of XAS weighted DOS; Careful,
+features might not be at the experimental energy values.
+Energy values are shifted to align with the XAS spectrum.
+}
+\vformat{real}
+\vrules{optional}
+\vdefault{value from !XCNTL!XAS}}
+}
+
+\mbax{\key{EMAX[EV]}
+\vdescr{maximum energy of XAS weighted DOS; Careful,
+features might not be at the experimental energy values.
+Energy values are shifted to align with the XAS spectrum.
+}
+\vformat{real}
+\vrules{optional}
+\vdefault{value from !XCNTL!XAS}}
+}
+
+\mbax{\key{DE}
+\vdescr{energy step size of XAS weighted DOS in eV}
+\vformat{real}
+\vrules{optional}
+\vdefault{0.01 eV}}
+}
+
 %==========================================================================
 \newpage
 \section{Scripts}
