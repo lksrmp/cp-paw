@@ -438,6 +438,12 @@
       ! READ OVERLAP FILE
       CALL XRAY$READOVERLAP
 
+      ! ======================================================================
+      ! ==  UNCOMMENT TO TEST PARALLEL EXECUTION BEHAVIOR                   ==
+      ! ======================================================================
+      ! CALL XRAY$TEST_PARALLEL_TIMING
+      ! ======================================================================
+
       ! DETERMINE K VECTORS AND MOMENTUM TRANSFER IN RIXS_MODULE
       CALL RIXS$KVECTORS
 
@@ -10112,6 +10118,132 @@
         END IF
         END SUBROUTINE TESTKPT
       END SUBROUTINE XRAY$READSIMULATIONS
+
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY$TEST_PARALLEL_TIMING  ! MARK: XRAY$TEST_PARALLEL_TIMING
+!     **************************************************************************
+!     ** TEST SUBROUTINE TO DEMONSTRATE BLOCKING VS NON-BLOCKING BEHAVIOR     **
+!     ** CALL THIS FROM DRIVER TO VERIFY PARALLEL EXECUTION PATTERN           **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE CLOCK_MODULE
+      IMPLICIT NONE
+      INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
+      INTEGER(4), ALLOCATABLE :: WTASKSKPT(:) ! (NSPIN)
+      INTEGER(4) :: NKPT,NSPIN,IKPT,ISPIN
+      REAL(8) :: T_START,T_NOW,T_INIT
+      COMPLEX(8), ALLOCATABLE :: TEST_DATA(:)
+      INTEGER(4), PARAMETER :: DATA_SIZE=100000
+      INTEGER(4) :: I
+      CHARACTER(32) :: DATTIME
+!     **************************************************************************
+                          CALL TRACE$PUSH('XRAY$TEST_PARALLEL_TIMING')
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+
+      
+      
+      ! GET SIMULATION PARAMETERS
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+      
+      ALLOCATE(TEST_DATA(DATA_SIZE))
+      TEST_DATA=(1.0D0,0.0D0)
+      ALLOCATE(WTASKSKPT(NSPIN))
+      
+      
+      
+      IF(THISTASK.EQ.RTASK) THEN
+        WRITE(*,'(/,A)') '========================================='
+        WRITE(*,'(A)') 'PARALLEL EXECUTION TEST'
+        WRITE(*,'(A,I4,A)') 'Testing with ', NKPT*NSPIN, ' work items'
+        WRITE(*,'(A,I4)') 'Number of tasks: ', NTASKS
+        WRITE(*,'(A,I4)') 'RTASK: ', RTASK
+        WRITE(*,'(A)') '========================================='
+      END IF
+
+      CALL MPE$SYNC('~')
+      
+      ! ========================================================================
+      ! ==  TEST 1: BLOCKING BEHAVIOR (CURRENT IMPLEMENTATION)               ==
+      ! ========================================================================
+      CALL CPU_TIME(T_INIT)
+      CALL CPU_TIME(T_START)
+      DO IKPT=1,NKPT
+        CALL KSMAP$WORKTASKSKPT(IKPT,WTASKSKPT)
+        ! CYCLE EARLY IF THIS TASK IS NOT WORKING ON THIS KPOINT
+        IF(ALL(THISTASK.NE.WTASKSKPT(:)).AND.THISTASK.NE.RTASK) CYCLE
+
+        IF(THISTASK.EQ.RTASK) THEN
+          CALL CPU_TIME(T_NOW)
+          CALL CLOCK$NOW(DATTIME)
+          WRITE(*,'(A,A,I2)') &
+            DATTIME, ' RTASK: FIRST READ IKPT=', IKPT
+        END IF
+        DO ISPIN=1,NSPIN
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          ! IF(THISTASK.EQ.RTASK.OR.THISTASK.EQ.WTASK) THEN
+            CALL MPE$SENDRECEIVE('~',RTASK,WTASK,TEST_DATA)
+            CALL CLOCK$NOW(DATTIME)
+            WRITE(*,'(A,A,I2,A,I2,A,I3)') &
+            DATTIME, ' RTASK: SEND IKPT=', IKPT, &
+            ' ISPIN=', ISPIN, ' to WTASK ', WTASK
+          ! END IF
+        ENDDO
+
+        DO ISPIN=1,NSPIN
+          CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+          IF(THISTASK.NE.WTASK.AND.THISTASK.NE.RTASK) CYCLE
+
+          IF(THISTASK.EQ.RTASK) THEN
+            CALL CPU_TIME(T_NOW)
+            CALL CLOCK$NOW(DATTIME)
+            WRITE(*,'(A,A,I2,A,I2,A,I3)') &
+              DATTIME, ' RTASK: SECOND READ IKPT=', IKPT, &
+              ' ISPIN=', ISPIN
+            ! Simulate read time
+            CALL SLEEP(1)
+            CALL CPU_TIME(T_NOW)
+            CALL CLOCK$NOW(DATTIME)
+            WRITE(*,'(A,A,I2,A,I2)') &
+              DATTIME, ' RTASK: DONE READ IKPT=', IKPT, &
+              ' ISPIN=', ISPIN
+          END IF
+          
+          CALL CPU_TIME(T_NOW)
+          
+          ! BLOCKING COMMUNICATION - WAITS HERE
+          CALL MPE$SENDRECEIVE('~',RTASK,WTASK,TEST_DATA)
+          CALL CLOCK$NOW(DATTIME)
+          WRITE(*,'(A,A,I3,A,I2,A,I2,A,I3)') &
+            DATTIME, ' THISTASK ', THISTASK, &
+            ': SEND IKPT=', IKPT, ' ISPIN=', ISPIN, ' to WTASK ', WTASK
+          
+          IF(THISTASK.EQ.WTASK) THEN
+            CALL CPU_TIME(T_NOW)
+            CALL CLOCK$NOW(DATTIME)
+            WRITE(*,'(A,A,I3,A,I2,A,I2)') &
+              DATTIME, ' WTASK ', THISTASK, &
+              ': CALC IKPT=', IKPT, ' ISPIN=', ISPIN
+            CALL SLEEP(5)
+            CALL CPU_TIME(T_NOW)
+            CALL CLOCK$NOW(DATTIME)
+            WRITE(*,'(A,A,I3,A)') &
+              DATTIME, ' WTASK ', THISTASK, ': Done'
+          END IF
+        ENDDO
+      ENDDO
+      CALL CPU_TIME(T_NOW)
+      
+      
+      DEALLOCATE(TEST_DATA)
+      DEALLOCATE(WTASKSKPT)
+                          CALL TRACE$POP
+      RETURN
+      END SUBROUTINE XRAY$TEST_PARALLEL_TIMING
 
       ! TODO: DATACONSISTENCY
 !
