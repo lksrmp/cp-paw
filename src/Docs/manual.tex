@@ -8770,15 +8770,22 @@ where
 \section{The X-ray Spectrum Tool: paw\_xray}
 The paw\_xray tool allows calculation of X-ray absorption spectra (XAS) or
 resonant inelastic X-ray scattering (RIXS) spectra. The RIXS calculation
-is implemented but not yet documented. It requires either two files 
+is implemented but not yet documented. 
+
+The tool requires either two files 
 produced by the !CONTROL!ANALYSE!OVL option for a ground state and a
-core-hole calculation or one file produced by a previous run of the
+core-hole calculation, or one file produced by a previous run of the
 paw\_xray tool.
 
 The restart file contains the overlap matrix elements and further information
-necessary to calculate XAS and RIXS spectra in later runs. This avoid the costly
+necessary to calculate XAS and RIXS spectra in later runs. This avoids the costly
 calculation of the overlap matrix elements each time. The default is to use
 the root name with the extension '.overlap'.
+
+\textcolor{red}{Warning! This section is under construction and requires more work especially
+on the theoretical background. The auxiliary orbitals are being devided by 
+$\sqrt{\langle \psi^{aux}_n|\psi^{aux}_n\rangle}$ in order to make the projection
+fractional. This is not yet documented here.}
 
 \subsection{Auxiliary orbital DOS}
 Furthermore, a ''root\_xas.pdos'' file is created. This is the file format used
