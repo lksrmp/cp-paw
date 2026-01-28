@@ -8826,6 +8826,57 @@ A typical workflow to calculate and analyze XAS spectra is:
   \item weighted DOS is created for each spectrum in file appended by ''dos''
 \end{enumerate}
 
+\subsection{Beam direction and polarisation}
+The direction and polarisation of the incoming X-ray beam can be specified
+by giving the normal vector of the surface, the polarisation vectors in the
+sample surface plane and in the scattering plane, and the direction of the
+scattered beam. The polarisation in Cartesian coordinates is calculated based
+on these vectors. A visual representation of the vectors is given in
+Fig. \ref{fig:xray_polarisation}.
+
+The beam direction can be specified in two ways:
+\begin{itemize}
+  \item KDIR: direction of the incident beam in Cartesian coordinates
+  \item THETAPHI[DEG]: polar and azimuthal angle of the incident beam
+    direction with respect to the surface normal
+\end{itemize}
+The angles $\theta$ and $\phi$ are defined in a coordinate system where the
+surface normal is along the z-axis. The definition deviates slightly from
+the usual spherical coordinates in order to have the vector pointing into
+the surface:
+\begin{eqnarray}
+  \vec{k}_z=-\begin{pmatrix}
+    \sin(\theta)\cos(\phi) \\
+    \sin(\theta)\sin(\phi) \\
+    \cos(\theta)
+  \end{pmatrix}
+\end{eqnarray}
+In order to obtain the final Cartesian coordinates for the incident beam
+direction, a rotation from the surface normal direction to the specified
+normal vector is performed using Rodrigues' rotation formula.
+A visual representation of the angles is given in Fig. \ref{fig:xray_angles}.
+
+
+\begin{figure}
+  \centering
+  \includegraphics[width=\textwidth]{Figs/xray_vector_definition.png}
+  \caption{Definition of angles $\theta$ and $\phi$ for the incident beam
+    direction with respect to the surface normal. On the left side the
+    coordinate system is shown where the surface normal is along the z-axis.
+    On the right side the coordinate system is rotated such that the surface
+    normal points along the specified normal vector e.g. the [1 0 1] direction.}
+  \label{fig:xray_angles}
+\end{figure}
+
+\begin{figure}
+  \centering
+  \includegraphics[width=0.5\textwidth]{Figs/xray_polarisation_definition.png}
+  \caption{Definition of the polarisation vectors with respect to the surface normal
+    and incident beam direction. The polarisation vector in the surface plane
+    is denoted as $\epsilon_\sigma$, the polarisation vector in the scattering plane
+    as $\epsilon_\pi$.}
+  \label{fig:xray_polarisation}
+\end{figure}
 
 %==========================================================================
 \subsection{Command}
@@ -9001,7 +9052,7 @@ or 'N' for no broadening}
   spectra in this block. Will be overwritten by the
   !XCNTL!XAS!SPECTRUM blocks if they contain a NORMAL.}
 \vformat{real(3)}
-\vrules{optional; NORMAL, KDIR, POL must be given either
+\vrules{optional; NORMAL must be given either
   here or in the !XCNTL!XAS!SPECTRUM blocks.}
 \vdefault{none}}
 
@@ -9009,11 +9060,24 @@ or 'N' for no broadening}
 \vdescr{direction of the incoming X-ray beam, used for the
   calculation of the polarisation vector; Used as default for all
   spectra in this block. Will be overwritten by the
-  !XCNTL!XAS!SPECTRUM blocks if they contain a KDIR.}
+  !XCNTL!XAS!SPECTRUM blocks if they contain a KDIR or THETAPHI[DEG].}
 \vformat{real(3)}
-\vrules{optional; NORMAL, KDIR, POL must be given either
-  here or in the !XCNTL!XAS!SPECTRUM blocks.}
+\vrules{optional; KDIR and THETAPHI[DEG] mutually exclusive, one of them
+  must be given either here or in the !XCNTL!XAS!SPECTRUM blocks.}
 \vdefault{none}}
+
+\mbax{\key{THETAPHI[DEG]}
+\vdescr{angles theta and phi (in degrees) defining the direction of the
+  incoming X-ray beam, used for the calculation of the polarisation vector;
+  theta is the angle between the beam direction and the sample surface normal,
+  phi is the azimuthal angle in the sample surface plane; Used as default for all
+  spectra in this block. Will be overwritten by the
+  !XCNTL!XAS!SPECTRUM blocks if they contain a KDIR or THETAPHI[DEG].}
+\vformat{real(2)}
+\vrules{optional; KDIR and THETAPHI[DEG] mutually exclusive, one of them
+  must be given either here or in the !XCNTL!XAS!SPECTRUM blocks.}
+\vdefault{none}}
+
 
 \mbax{\key{POL}
 \vdescr{polarisation of the X-ray beam, used for the
