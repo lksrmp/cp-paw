@@ -9144,18 +9144,31 @@ features might not be at the experimental energy values.}
   calculation of the polarisation vector; Will overwrite the value
   from !XCNTL!XAS.}
 \vformat{real(3)}
-\vrules{optional; NORMAL, KDIR, POL together must be given either
+\vrules{optional; must be given either
   here or in the !XCNTL!XAS block.}
 \vdefault{value from !XCNTL!XAS}}
 
 \mbax{\key{KDIR}
 \vdescr{direction of the incoming X-ray beam, used for the
-  calculation of the polarisation vector; Will overwrite the value
-  from !XCNTL!XAS.}
+  calculation of the polarisation vector; Will overwrite the value of KDIR or
+  THETAPHI[DEG] from !XCNTL!XAS.}
 \vformat{real(3)}
-\vrules{optional; NORMAL, KDIR, POL together must be given either
-  here or in the !XCNTL!XAS block.}
-\vdefault{value from !XCNTL!XAS}}
+\vrules{optional; KDIR and THETAPHI[DEG] mutually exclusive, one of them
+  must be given either here or in the !XCNTL!XAS block.}
+\vdefault{setting from !XCNTL!XAS if given}
+}
+
+\mbax{\key{THETAPHI[DEG]}
+\vdescr{angles theta and phi (in degrees) defining the direction of the
+  incoming X-ray beam, used for the calculation of the polarisation vector;
+  theta is the angle between the beam direction and the sample surface normal,
+  phi is the azimuthal angle in the sample surface plane; Will overwrite the 
+  value of KDIR or THETAPHI[DEG] from !XCNTL!XAS.}
+\vformat{real(2)}
+\vrules{optional; KDIR and THETAPHI[DEG] mutually exclusive, one of them
+  must be given either here or in the !XCNTL!XAS block.}
+\vdefault{value from !XCNTL!XAS if given}
+}
 
 \mbax{\key{POL}
 \vdescr{polarisation of the X-ray beam, used for the
@@ -9166,7 +9179,7 @@ features might not be at the experimental energy values.}
   real and imaginary part of the polarisation vector in the scattering
   plane.}
 \vformat{real(4)}
-\vrules{optional; NORMAL, KDIR, POL together must be given either
+\vrules{optional; must be given either
   here or in the !XCNTL!XAS block.}
 \vdefault{value from !XCNTL!XAS}}
 
