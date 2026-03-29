@@ -8901,8 +8901,8 @@ the paw\_xray tool. The extension should be ``.xcntl''.
   !EXCITE FILE='excited.ovl' !END
   !OVERLAP_x FILE='overlap.overlap' !END
   !COREHOLE ATOM='O_3' NCORE=1 LCORE=0 !END
-  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G' 
-    EMIN[EV]=520.0 EMAX[EV]=540.0 DE[EV]=0.1
+  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G'
+    EMIN[EV]=520.0 EMAX[EV]=540.0 DE[EV]=0.1 EFAC=T
     NORMAL=0.0 0.0 1.0 KDIR=0.0 1.0 -1.0 POL=1.0 0.0 0.0 0.0
     !SPECTRUM FILE='xas1.dat' !END
     !SPECTRUM FILE='xas2.dat' EBROAD[EV]=0.1 BROADMODE='L'
@@ -9115,6 +9115,21 @@ features might not be at the experimental energy values.}
 \vformat{real}
 \vrules{optional}
 \vdefault{0.01 eV}}
+
+\mbax{\key{EFAC}
+\vdescr{energy factor for cross-section
+\begin{eqnarray}
+  \sigma(\hbar\omega) \propto E_{fac} \cdot \sum_F|\langle F|\hat{O}|G\rangle|^2 
+  \delta(\hbar\omega-(E_F-E_G))
+\end{eqnarray}
+if true, $E_{fac}=\hbar\omega$ in eV; if false, $E_{fac}=1$.
+Useful if the energy values in the calculation are not in the same range as the 
+experimental energy values. The change from e.g. 530\;eV to 535\;eV is 
+negligible whereas the change from 30\;eV to 35\;eV is significant.}
+\vformat{logical}
+\vrules{optional}
+\vdefault{T}
+}
 
 %----------------------------------------------------------------------
 \block{!XCNTL!XAS!SPECTRUM}

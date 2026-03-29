@@ -238,6 +238,7 @@
       LOGICAL(4) :: TRAW
       LOGICAL(4) :: TKPTSPIN
       LOGICAL(4) :: SINGLEPARTICLE ! SINGLE PARTICLE XAS
+      LOGICAL(4) :: EFAC ! FLAG FOR INCLUSION OF ENERGY FACTOR IN SPECTRUM
       INTEGER(4) :: NSPEC ! NUMBER OF SPECTRA FOR XAS
       REAL(8) :: EMIN=-HUGE(1.D0) ! MINIMUM ENERGY FOR XAS
       REAL(8) :: EMAX=HUGE(1.D0) ! MAXIMUM ENERGY FOR XAS
@@ -934,6 +935,15 @@
         CALL XAS$SETL4('KPTSPIN',TCHK)
       ELSE
         CALL XAS$SETL4('KPTSPIN',.FALSE.) ! DEFAULT
+      END IF
+
+      ! EFAC
+      CALL LINKEDLIST$EXISTD(LL_CNTL,'EFAC',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$GET(LL_CNTL,'EFAC',1,TCHK)
+        CALL XAS$SETL4('EFAC',TCHK)
+      ELSE
+        CALL XAS$SETL4('EFAC',.TRUE.) ! DEFAULT
       END IF
       
       ! EMIN[EV]
@@ -4593,7 +4603,7 @@
 !     ** OUTPUT XAS SPECTRA TO FILES                                          **
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,TRAW,TKPTSPIN
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,TRAW,TKPTSPIN,EFAC
       USE SHARED_DATA_MODULE, ONLY: ADETPROD
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -4673,9 +4683,15 @@
           ENDDO
         END IF
         ! ERROR: CHECK THE FACTOR OMEGA, HOW TO DEAL WITH IT? UNIT CONVERSION?
-        DO I=1,NE
-          WRITE(NFIL,*) THIS%E(I)/EV,THIS%E(I)/EV*SUMK(3,I),THIS%E(I)/EV*SUMK(1,I),THIS%E(I)/EV*SUMK(2,I)
-        ENDDO
+        IF(EFAC) THEN
+          DO I=1,NE
+            WRITE(NFIL,*) THIS%E(I)/EV,THIS%E(I)/EV*SUMK(3,I),THIS%E(I)/EV*SUMK(1,I),THIS%E(I)/EV*SUMK(2,I)
+          ENDDO
+        ELSE
+          DO I=1,NE
+            WRITE(NFIL,*) THIS%E(I)/EV,SUMK(3,I),SUMK(1,I),SUMK(2,I)
+          ENDDO
+        END IF
         CALL FILEHANDLER$CLOSE(ID)
 
         ! WRITE RAW FILE
@@ -4693,11 +4709,19 @@
               WRITE(NFIL,'("# ",A,I4," ",A,I4)') &
                 'KPOINT:',IKPT,'SPIN:',ISPIN
               WRITE(NFIL,'(80("#"))')
-              DO I=1,NB2-NOCC
-                WRITE(NFIL,*) THIS%ERAW(IKPT,ISPIN)%V(I)/EV, &
-     &            THIS%ERAW(IKPT,ISPIN)%V(I)/EV*THIS%SRAW(IKPT,ISPIN)%V(I), &
-     &            I+NOCC
-              ENDDO
+              IF(EFAC) THEN
+                DO I=1,NB2-NOCC
+                  WRITE(NFIL,*) THIS%ERAW(IKPT,ISPIN)%V(I)/EV, &
+     &              THIS%ERAW(IKPT,ISPIN)%V(I)/EV*THIS%SRAW(IKPT,ISPIN)%V(I), &
+     &              I+NOCC
+                ENDDO
+              ELSE
+                DO I=1,NB2-NOCC
+                  WRITE(NFIL,*) THIS%ERAW(IKPT,ISPIN)%V(I)/EV, &
+     &              THIS%SRAW(IKPT,ISPIN)%V(I), &
+     &              I+NOCC
+                ENDDO
+              END IF
             ENDDO
           ENDDO
           CALL FILEHANDLER$CLOSE(ID)
@@ -4738,9 +4762,15 @@
             ENDDO
           ENDDO
           WRITE(NFIL,FMT='(A)')''
-          DO I=1,NE
-            WRITE(NFIL,FMT='(*(ES14.7,1X))') THIS%E(I)/EV,THIS%E(I)/EV*THIS%SPECTRUM(1:NKPTMAX,:,I)
-          ENDDO
+          IF(EFAC) THEN
+            DO I=1,NE
+              WRITE(NFIL,FMT='(*(ES14.7,1X))') THIS%E(I)/EV,THIS%E(I)/EV*THIS%SPECTRUM(1:NKPTMAX,:,I)
+            ENDDO
+          ELSE
+            DO I=1,NE
+              WRITE(NFIL,FMT='(*(ES14.7,1X))') THIS%E(I)/EV,THIS%SPECTRUM(1:NKPTMAX,:,I)
+            ENDDO
+          END IF
           CALL FILEHANDLER$CLOSE(ID)
         END IF
 
@@ -4759,7 +4789,7 @@
 !     ** REQUIRES XAS ACTIVE, INITIALIZED, AND UNSELECTED                     **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,NSPEC,DE,THIS, &
-     &                      SINGLEPARTICLE,TRAW,TKPTSPIN
+     &                      SINGLEPARTICLE,TRAW,TKPTSPIN,EFAC
       USE STRINGS_MODULE
       IMPLICIT NONE
       REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
@@ -4819,6 +4849,11 @@
         WRITE(NFIL,FMT='(A)')'K POINT BASIS WEIGHT USED (BASISWEIGHT=T)'
       ELSE
         WRITE(NFIL,FMT='(A)')'NO K POINT BASIS WEIGHT USED (BASISWEIGHT=F)'
+      END IF
+      IF(EFAC) THEN
+        WRITE(NFIL,FMT='(A)')'ENERGY FACTOR INCLUDED IN OUTPUT (EFAC=T)'
+      ELSE
+        WRITE(NFIL,FMT='(A)')'NO ENERGY FACTOR INCLUDED IN OUTPUT (EFAC=F)'
       END IF
       WRITE(NFIL,FMT='(A12,I10)')'NSPEC:',NSPEC
       ! SAFEGUARD TO SET EMIN IF NOT PROVIDED
@@ -5024,7 +5059,8 @@
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     ** REQUIRES XAS SPECTRUM SELECTED                                      **
 !     **************************************************************************
-      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS,SINGLEPARTICLE
+      USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS,SINGLEPARTICLE, &
+     &                      EFAC
       USE CLOCK_MODULE
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -5098,6 +5134,11 @@
         WRITE(NFIL,FMT='("# ",A)')'K POINT BASIS WEIGHT USED (BASISWEIGHT=T)'
       ELSE
         WRITE(NFIL,FMT='("# ",A)')'NO K POINT BASIS WEIGHT USED (BASISWEIGHT=F)'
+      END IF
+      IF(EFAC) THEN
+        WRITE(NFIL,FMT='("# ",A)')'ENERGY FACTOR INCLUDED IN OUTPUT (EFAC=T)'
+      ELSE
+        WRITE(NFIL,FMT='("# ",A)')'NO ENERGY FACTOR INCLUDED IN OUTPUT (EFAC=F)'
       END IF
       IF(THIS%BROADMODE.EQ.+'N') THEN
         WRITE(NFIL,FMT='("# ",A12,X,A)')'BROADEN:','NONE'
@@ -5217,7 +5258,7 @@
 !     ** GET LOGICAL FROM XAS MODULE                                         **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS, &
-     &                      SINGLEPARTICLE,TRAW,TKPTSPIN
+     &                      SINGLEPARTICLE,TRAW,TKPTSPIN,EFAC
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
@@ -5250,6 +5291,12 @@
           CALL ERROR$STOP('XAS$GETL4')
         END IF
         VAL=TKPTSPIN
+      ELSE IF(ID.EQ.'EFAC') THEN
+        IF(.NOT.TINITIALIZE) THEN
+          CALL ERROR$MSG('XAS NOT INITIALIZED')
+          CALL ERROR$STOP('XAS$GETL4')
+        END IF
+        VAL=EFAC
       ELSE
         CALL ERROR$MSG('XAS GETL4 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
@@ -5264,7 +5311,7 @@
 !     ** SET LOGICAL IN XAS MODULE                                           **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS, &
-     &                      SINGLEPARTICLE,TRAW,TKPTSPIN
+     &                      SINGLEPARTICLE,TRAW,TKPTSPIN,EFAC
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
@@ -5285,6 +5332,8 @@
         TRAW=VAL
       ELSE IF(ID.EQ.'KPTSPIN') THEN
         TKPTSPIN=VAL
+      ELSE IF(ID.EQ.'EFAC') THEN
+        EFAC=VAL
       ELSE
         CALL ERROR$MSG('XAS SETL4 ID NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID: ',ID)
