@@ -12294,6 +12294,7 @@
       INTEGER(4) :: NE
       CHARACTER(6) :: ID
       INTEGER(4) :: NFIL
+      LOGICAL(4) :: EFAC
       REAL(8) :: EV
       REAL(8) :: FAC
       REAL(8) :: SIG
@@ -12306,6 +12307,7 @@
       IF(THISTASK.NE.RTASK) RETURN
                           CALL TRACE$PUSH('XASDOS$OUTPUT')
       CALL CONSTANTS('EV',EV)
+      CALL XAS$GETL4('EFAC',EFAC)
       ! CREATE FILEHANDLER (WILL BE ATTACHED TO MULTIPLE FILES)
       ID=+'XASDOS'
       CALL FILEHANDLER$SETFILE(ID,.TRUE.,-'.XASDOS')
@@ -12356,11 +12358,17 @@
             FAC=EDOS(IE)/EV
             WRITE(NFIL,FMT='(F14.6)',ADVANCE='NO') FAC
             DO ISET=1,NSET
-              ! ONLY CONTAINS EMPTY ORBITALS
-              ! WRITTEN AS IF THEY ARE ALL OCCUPIED FOR PLOTTING COLORS
-              WRITE(NFIL,FMT='(2(1X,ES14.7))',ADVANCE='NO') &
-     &                      FAC*SIG*DOS(IE,ISPIN,ISET,ISPEC), &
-     &                      FAC*SIG*DOS(IE,ISPIN,ISET,ISPEC)
+              IF(EFAC) THEN
+                ! ONLY CONTAINS EMPTY ORBITALS
+                ! WRITTEN AS IF THEY ARE ALL OCCUPIED FOR PLOTTING COLORS
+                WRITE(NFIL,FMT='(2(1X,ES14.7))',ADVANCE='NO') &
+     &                        FAC*SIG*DOS(IE,ISPIN,ISET,ISPEC), &
+     &                        FAC*SIG*DOS(IE,ISPIN,ISET,ISPEC)
+              ELSE
+                WRITE(NFIL,FMT='(2(1X,ES14.7))',ADVANCE='NO') &
+     &                        SIG*DOS(IE,ISPIN,ISET,ISPEC), &
+     &                        SIG*DOS(IE,ISPIN,ISET,ISPEC)
+              END IF
             ENDDO
             WRITE(NFIL,*) ''
           ENDDO
