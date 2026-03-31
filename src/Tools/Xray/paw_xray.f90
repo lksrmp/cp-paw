@@ -9744,7 +9744,7 @@ WRITE(NFIL, *) '# NORM ',THIS%NORM
 !     ** FILE FOR THE SIMULATION                                              **
 !     ** REQUIRES NO SELECTED OVERLAP                                         **
 !     **************************************************************************
-      USE OVERLAP_MODULE, ONLY: INITIALIZED,SELECTED,THIS,NKPTG,NSPING
+      USE OVERLAP_MODULE, ONLY: INITIALIZED,SELECTED,THIS,NKPTG,NSPING,R2CORE
       USE MPE_MODULE
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -9827,6 +9827,7 @@ WRITE(NFIL, *) '# NORM ',THIS%NORM
           CALL OVERLAP$UNSELECT
         ENDDO
       ENDDO
+      WRITE(NFIL) R2CORE
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE OVERLAP_WRITEOVERLAP
@@ -9851,6 +9852,7 @@ WRITE(NFIL, *) '# NORM ',THIS%NORM
       COMPLEX(8), ALLOCATABLE :: AUG(:,:)
       COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:)
       COMPLEX(8), ALLOCATABLE :: DIPOLEGS(:,:)
+      REAL(8) :: R2CORE(2)
       CHARACTER(7) :: KEY
 !     **************************************************************************
                           CALL TRACE$PUSH('OVERLAP_READOVERLAP')
@@ -9920,6 +9922,8 @@ WRITE(NFIL, *) '# NORM ',THIS%NORM
           CALL OVERLAP$UNSELECT
         ENDDO
       ENDDO
+      IF(THISTASK.EQ.RTASK) READ(NFIL) R2CORE
+      CALL MPE$BROADCAST('~',RTASK,R2CORE)
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE OVERLAP_READOVERLAP
