@@ -2848,11 +2848,13 @@ CALL LMTO$SETL4('ON',.FALSE.)
       INTEGER(4)               :: NEELS
       INTEGER(4)               :: IEELS
       INTEGER(4)               :: IC
+      INTEGER(4)               :: S
       INTEGER(4)               :: NR3
       INTEGER(4)               :: NI,NF !BI,BF
       CHARACTER(256)           :: CH256
       CHARACTER(32)            :: CH32
       CHARACTER(8)             :: CH8
+      CHARACTER(1)             :: CH1
       REAL(8)                  :: SVAR
       REAL(8)                  :: ZI,ZF
       REAL(8)                  :: EMAX
@@ -2900,9 +2902,17 @@ CALL LMTO$SETL4('ON',.FALSE.)
         END IF
         CALL OPTEELS$SETR8('BROADENING',SVAR)
 !
+!       == SPIN SELECTION FOR EELS =============================================
+        S=0
+        CALL LINKEDLIST$EXISTD(LL_CNTL,'S',1,TCHK)
+        IF(TCHK) CALL LINKEDLIST$GET(LL_CNTL,'S',1,S)
+        CALL OPTEELS$SETI4('S',S)
+!
 !       == SET FILENAME FOR THE DATA============================================
         WRITE(CH256,*)IC
-        CH256=TRIM(ADJUSTL(CH32))//'_IC'//TRIM(ADJUSTL(CH256))//'.EELS'
+        WRITE(CH1,FMT='(I1)')S
+        CH256=TRIM(ADJUSTL(CH32))//'_IC'//TRIM(ADJUSTL(CH256))// &
+      &       '_S'//TRIM(ADJUSTL(CH1))//'.EELS'
         CALL LINKEDLIST$EXISTD(LL_CNTL,'FILE',1,TCHK)
         IF(TCHK)CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,CH256)
         CALL OPTEELS$SETCH('FILE',TRIM(CH256))

@@ -16,6 +16,8 @@ TYPE EELS_TYPE           !CALCULATE OPTICAL MATRIX ELEMENTS
  LOGICAL(4)     :: QUAD   ! QUADRUPOLE CONTRIBUTION
  INTEGER(4)     :: IC     ! CORE SHELL NUMBER FOR EELS
  REAL(8)        :: INSTRUMENTALFWHM !INSTR. BROADENING (FULL-WIDTH HALF-MAX)
+ INTEGER(4)     :: S      ! SPIN SELECTION 0 ALL SPINS, 1 SPIN UP, 2 SPIN DOWN
+                          ! 2 ONLY POSSIBLE IF NSPIN=2
 END TYPE EELS_TYPE
 LOGICAL(4)                     :: TON=.FALSE.
 INTEGER(4)                     :: NOPT=0
@@ -159,6 +161,17 @@ END MODULE OPTEELS_MODULE
          EELS(IEELS)%IC=VAL
 !
 !      =========================================================================
+!      == SPECIFY SPIN SELECTION FOR EELS CALCULATION                         ==
+!      =========================================================================
+       ELSE IF(ID.EQ.'S') THEN
+         IF(IEELS.EQ.0) THEN
+           CALL ERROR$MSG('IEELS HAS NOT BEEN SET')
+           CALL ERROR$CHVAL('ID',ID)
+           CALL ERROR$STOP('OPTEELS$SETI4')
+         END IF
+         EELS(IEELS)%S=VAL
+!
+!      =========================================================================
 !      ==  WRONG ID                                                           ==
 !      =========================================================================
        ELSE
@@ -278,6 +291,7 @@ END MODULE OPTEELS_MODULE
        REAL(8)        :: INSTRUMENTALFWHM
        REAL(8)        :: ZF
        INTEGER(4)     :: IC
+       INTEGER(4)     :: S
 !      *************************************************************************
        IF(.NOT.TON) RETURN
                                CALL TRACE$PUSH('OPTEELS$PLOT')
@@ -290,7 +304,8 @@ END MODULE OPTEELS_MODULE
          IC  =EELS(I)%IC
          FILE=EELS(I)%FILE
          INSTRUMENTALFWHM=EELS(I)%INSTRUMENTALFWHM
-         CALL OPTEELS_EELS(FILE,ATOM,IC,INSTRUMENTALFWHM)
+         S   =EELS(I)%S
+         CALL OPTEELS_EELS(FILE,ATOM,IC,INSTRUMENTALFWHM,S)
        ENDDO
 !
 !      =========================================================================
@@ -784,7 +799,7 @@ END MODULE OPTEELS_MODULE
        END SUBROUTINE OPTEELS_OPTAT
 
 !      ..1.........2.........3.........4.........5.........6.........7.........8
-       SUBROUTINE OPTEELS_EELS(FILE,ATOM,IC,INSTRUMENTALFWHM)
+       SUBROUTINE OPTEELS_EELS(FILE,ATOM,IC,INSTRUMENTALFWHM,S)
 !      *************************************************************************
 !      **   CALCULATE ALL EELS MATRIX ELEMENTS AND WRITE TO FILE              **
 !      **                                                                     **
@@ -796,7 +811,8 @@ END MODULE OPTEELS_MODULE
        CHARACTER(512),INTENT(IN) :: FILE
        CHARACTER(32) ,INTENT(IN) :: ATOM ! ATOM NAME
        INTEGER(4)    ,INTENT(IN) :: IC 
-       REAL(8)       ,INTENT(IN) :: INSTRUMENTALFWHM  ! INSTRUMENTAL BROADENING 
+       REAL(8)       ,INTENT(IN) :: INSTRUMENTALFWHM  ! INSTRUMENTAL BROADENING
+       INTEGER(4)    ,INTENT(IN) :: S ! SPIN SELECTION 
        INTEGER(4)    ,PARAMETER  :: NE=1000
        COMPLEX(8)    ,PARAMETER  :: CI=(0.D0,1.D0)
        REAL(8)       ,PARAMETER  :: TOL=1.D-3
@@ -863,6 +879,7 @@ END MODULE OPTEELS_MODULE
        REAL(8)                   :: BANDLEVEL
        REAL(8)                   :: ENBMIN
        INTEGER(4)                :: NDEL,IDEL
+       INTEGER(4)                :: SMIN,SMAX
        REAL(8)       ,PARAMETER  :: PI=4.D0*ATAN(1.D0)
        REAL(8)       ,PARAMETER  :: SQPI43=SQRT(4.D0*PI/3.D0)
 !      *************************************************************************
@@ -984,6 +1001,32 @@ PRINT*,'GAMMACORE[EV] ',GAMMACORE/EV
        ALLOCATE(EIGVAL(NB))
        CALL DYNOCC$GETR8A('WKPT',NKPT,WKPT) 
        CALL DYNOCC$GETR8A('OCC',NB*NKPT*NSPIN,OCC) !0<OCC<2*WKPT(IKPT)/NSPIN
+
+       IF(NSPIN.EQ.1.AND.S.NE.0) THEN
+         CALL ERROR$MSG('SPIN SELECTION OUT OF RANGE')
+         CALL ERROR$I4VAL('S',S)
+         CALL ERROR$I4VAL('NSPIN',NSPIN)
+         CALL ERROR$MSG('VALID VALUES ARE 0 (ALL SPINS), &
+      &                    IF NSPIN=2 THEN ALSO 1 (SPIN UP) AND 2 (SPIN DOWN)')
+         CALL ERROR$STOP('OPTEELS$SETI4')
+       ELSE IF(NSPIN.EQ.2.AND.(S.LT.0.OR.S.GT.2)) THEN
+         CALL ERROR$MSG('SPIN SELECTION OUT OF RANGE')
+         CALL ERROR$I4VAL('S',S)
+         CALL ERROR$I4VAL('NSPIN',NSPIN)
+         CALL ERROR$MSG('VALID VALUES ARE 0 (ALL SPINS), &
+      &                    IF NSPIN=2 THEN ALSO 1 (SPIN UP) AND 2 (SPIN DOWN)')
+         CALL ERROR$STOP('OPTEELS$SETI4')
+       END IF
+       IF(S.EQ.0) THEN
+         SMIN=1
+         SMAX=NSPIN
+       ELSE IF(S.EQ.1) THEN
+         SMIN=1
+         SMAX=1
+       ELSE IF(S.EQ.2) THEN
+         SMIN=2
+         SMAX=2
+       END IF
 !       
 !      =========================================================================
 !      == ESTIMATE FERMI LEVEL FOR LIFETIME CALCULATION (ONLY A ROUGH ESTIMATE)=
@@ -1036,7 +1079,7 @@ PRINT*,'UPPER LIMIT OF ENERGY RANGE[EV] ',ENBMIN/EV
        EELSDOS(:)=0.D0
        DO IKPT=1,NKPT
          CALL WAVES$SETI4('IKPT',IKPT)
-         DO ISPIN=1,NSPIN 
+         DO ISPIN=SMIN,SMAX
            CALL WAVES$SETI4('ISPIN',ISPIN)
            CALL WAVES$SETI4('IB',1)
            CALL WAVES$STATESELECTED(TKGROUP)
