@@ -718,7 +718,7 @@ END MODULE FILEHANDLER_MODULE
      &        ,FORM='FORMATTED' &
      &        ,POSITION=FILE_%POSITION &
      &        ,ACTION=ACTION &
-     &        ,RECL=1000)
+     &        ,RECL=10000)
           IF(IOS.NE.0) THEN
             CALL ERROR$MSG('ERROR OPENING A FILE')
             CALL ERROR$CHVAL('IO MESSAGE',TRIM(IOMSG))
