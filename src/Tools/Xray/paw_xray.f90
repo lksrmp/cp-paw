@@ -250,6 +250,7 @@
       REAL(8) :: TOTAL ! TOTAL SPECTRUM (SUM_POL SUM_K SUM_SPIN SPECTRUM)
       REAL(8) :: GOOG ! <G|O+ O|G> INTEGRATED FULL SPECTRUM OVER ALL POL
       REAL(8) :: NORM ! GOOG / TOTAL
+      REAL(8) :: INFTOTAL ! TOTAL SPECTRUM IF SUM OVER FINAL STATES GOES TO INFINITY
 
       TYPE(XAS_SPEC_TYPE), ALLOCATABLE, TARGET :: SPECTRA(:) ! (NSPEC) SPECTRA
       TYPE(XAS_SPEC_TYPE), POINTER :: THIS ! POINTER TO CURRENT SPECTRUM
@@ -4366,7 +4367,7 @@
 !     ** REQUIRES XAS ACTIVE AND INITIALIZED                                  **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,NSPEC,THIS,DE,SINGLEPARTICLE, &
-     &                      TOTAL,GOOG,NORM
+     &                      TOTAL,GOOG,NORM,INFTOTAL
       USE SHARED_DATA_MODULE, ONLY: ABSORB,ADETPROD
       USE MPE_MODULE
       IMPLICIT NONE
@@ -4410,6 +4411,12 @@
       COMPLEX(8) :: ADETOP ! ADET FROM OPPOSITE SPIN DIRECTION
       INTEGER(4) :: ISPINOP ! SPIN OPPOSITE TO ISPIN
       REAL(8) :: R2CORE(2)
+
+      complex(8) :: proj1
+      complex(8) :: proj2
+      complex(8) :: totalkpt
+      complex(8), allocatable :: ainv(:,:)
+      integer(4) :: k,m
 !     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('XAS$CALCULATE')
@@ -4465,6 +4472,7 @@
       TOTAL=0.D0
       GOOG=0.D0
       ADETPROD(:,:)=0.D0
+      INFTOTAL=0.D0
 
       CALL STATE$SELECT('EXCITE')
       DO IKPT=1,NKPT
@@ -4507,6 +4515,39 @@
               END IF
             ENDDO
           ENDDO
+
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          allocate(ainv(nocc,nocc))
+          call overlap$getc8a('AINV',nocc*nocc,ainv)
+          CALL OVERLAP$GETR8A('R2CORE',2,R2CORE)
+          proj1=0.D0
+          proj2=0.D0
+          do i=1,nocc
+            do j=1,nocc
+              do m=1,3
+                ! <PSI_N|EPSILON*R|C>^* AINV(N,M)^* <PSI_M^F|EPSILON*R|C>
+                proj1=proj1+conjg(DIPOLEGS(m,i))*CONJG(ainv(i,j))*DIPOLE(m,j)
+              enddo
+              do k=1,nocc
+                do m=1,3
+                  proj2=proj2+conjg(dipole(m,i))*conjg(ainv(j,i))*ainv(j,k)*dipole(m,k)
+                enddo
+              enddo
+            enddo
+          enddo
+          proj1=proj1/3
+          proj2=proj2/3
+          totalkpt=TOTALWKPT*(R2CORE(1)-proj1-conjg(proj1)+proj2)
+          if(TNEGATIVEKPT) then
+            totalkpt=totalkpt+TOTALWKPT*(R2CORE(1)-conjg(proj1)-proj1+conjg(proj2))
+          end if
+          if(TADET) then
+            totalkpt=totalkpt*conjg(ADET)*conjg(ADETOP)
+          end if
+          deallocate(ainv)
+          INFTOTAL=INFTOTAL+real(totalkpt,kind=8)
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
           ! ALLOCATE RAW SPECTRUM
           DO ISPEC=1,NSPEC
             CALL XAS$ISELECT(ISPEC)
@@ -4587,6 +4628,8 @@
       GOOG=GOOG/3.D0
       CALL OVERLAP$GETR8A('R2CORE',2,R2CORE)
       GOOG=R2CORE(1)-GOOG
+      ! combine INFTOTAL
+      CALL MPE$COMBINE('~','+',INFTOTAL)
       NORM=GOOG/TOTAL
       
       ! COMBINE SPECTRA (MAKES IT AVAILABLE AND SAME ON EVERY TASK)
@@ -5106,7 +5149,7 @@
 !     ** REQUIRES XAS SPECTRUM SELECTED                                      **
 !     **************************************************************************
       USE XAS_MODULE, ONLY: TACTIVE,TINITIALIZE,SELECTED,THIS,SINGLEPARTICLE, &
-     &                      EFAC,TOTAL,GOOG,NORM
+     &                      EFAC,TOTAL,GOOG,NORM,INFTOTAL
       USE CLOCK_MODULE
       USE STRINGS_MODULE
       IMPLICIT NONE
@@ -5208,6 +5251,7 @@
       WRITE(NFIL,FMT='("# ",A12,ES14.7)')'TOT. SIGMA',TOTAL
       WRITE(NFIL,FMT='("# ",A12,ES14.7)')'<G|O+O|G>',GOOG
       WRITE(NFIL,FMT='("# ",A12,ES14.7)')'NORM',NORM
+      WRITE(NFIL,FMT='("# ",A12,ES14.7)')'INF TOT.',INFTOTAL
       WRITE(NFIL,'(80("#"))')
       RETURN
       END SUBROUTINE XAS_OUTPUTHEADER
