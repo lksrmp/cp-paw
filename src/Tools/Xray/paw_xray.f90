@@ -4542,7 +4542,7 @@
             totalkpt=totalkpt+TOTALWKPT*(R2CORE(1)-conjg(proj1)-proj1+conjg(proj2))
           end if
           if(TADET) then
-            totalkpt=totalkpt*conjg(ADET)*conjg(ADETOP)
+            totalkpt=totalkpt*abs(adet*adetop)**2
           end if
           deallocate(ainv)
           INFTOTAL=INFTOTAL+real(totalkpt,kind=8)
