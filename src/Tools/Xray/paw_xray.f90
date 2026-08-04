@@ -4380,8 +4380,7 @@
       REAL(8) :: EMIN
       REAL(8) :: EMAX
       INTEGER(4) :: NE
-      INTEGER(4) :: I
-      INTEGER(4) :: J
+      INTEGER(4) :: I,J,K,M
       INTEGER(4) :: NB1
       INTEGER(4) :: NB2
       INTEGER(4) :: NOCC
@@ -4393,11 +4392,13 @@
       COMPLEX(8), ALLOCATABLE :: KMAT(:,:)
       COMPLEX(8), ALLOCATABLE :: DIPOLE(:,:)
       COMPLEX(8), ALLOCATABLE :: DIPOLEGS(:,:)
+      COMPLEX(8), ALLOCATABLE :: AINV(:,:)
       REAL(8), ALLOCATABLE :: EIG(:)
       REAL(8), ALLOCATABLE :: WKPT(:)
       REAL(8) :: EFINAL
       REAL(8) :: EDIFF ! EFINAL - EGROUND
       COMPLEX(8) :: CVAR
+      COMPLEX(8) :: CVAR1
       REAL(8) :: SIGMA
       LOGICAL(4), ALLOCATABLE :: TINVARR(:)
       LOGICAL(4) :: TNEGATIVEKPT
@@ -4411,12 +4412,7 @@
       COMPLEX(8) :: ADETOP ! ADET FROM OPPOSITE SPIN DIRECTION
       INTEGER(4) :: ISPINOP ! SPIN OPPOSITE TO ISPIN
       REAL(8) :: R2CORE(2)
-
-      complex(8) :: proj1
-      complex(8) :: proj2
-      complex(8) :: totalkpt
-      complex(8), allocatable :: ainv(:,:)
-      integer(4) :: k,m
+      COMPLEX(8) :: INFTOTALKPT
 !     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('XAS$CALCULATE')
@@ -4516,37 +4512,50 @@
             ENDDO
           ENDDO
 
-          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-          allocate(ainv(nocc,nocc))
-          call overlap$getc8a('AINV',nocc*nocc,ainv)
+          ! CALCULATE THEORETICAL TOTAL INTENSITY IF THE SUM OVER FINAL STATES
+          ! WOULD BE COMPLETE (I.E. NO TRUNCATION OF FINAL STATES)
+          ! SUM_K |ADET_K|^2 <C|O^+(1-P_K^+)(1-P_K)O|C>
+          ! A_{I,J} = <PSI_J|PSI_I^F> , I,J<=NOCC
+          ! P_K=SUM_{M,N}|PSI_M> (A^-1)_{M,N}^* <PSI_N^F|
+          ALLOCATE(AINV(NOCC,NOCC))
+          CALL OVERLAP$GETC8A('AINV',NOCC*NOCC,AINV)
           CALL OVERLAP$GETR8A('R2CORE',2,R2CORE)
-          proj1=0.D0
-          proj2=0.D0
-          do i=1,nocc
-            do j=1,nocc
-              do m=1,3
-                ! <PSI_N|EPSILON*R|C>^* AINV(N,M)^* <PSI_M^F|EPSILON*R|C>
-                proj1=proj1+conjg(DIPOLEGS(m,i))*CONJG(ainv(i,j))*DIPOLE(m,j)
-              enddo
-              do k=1,nocc
-                do m=1,3
-                  proj2=proj2+conjg(dipole(m,i))*conjg(ainv(j,i))*ainv(j,k)*dipole(m,k)
-                enddo
-              enddo
-            enddo
-          enddo
-          proj1=proj1/3
-          proj2=proj2/3
-          totalkpt=TOTALWKPT*(R2CORE(1)-proj1-conjg(proj1)+proj2)
-          if(TNEGATIVEKPT) then
-            totalkpt=totalkpt+TOTALWKPT*(R2CORE(1)-conjg(proj1)-proj1+conjg(proj2))
-          end if
-          if(TADET) then
-            totalkpt=totalkpt*abs(adet*adetop)**2
-          end if
-          deallocate(ainv)
-          INFTOTAL=INFTOTAL+real(totalkpt,kind=8)
-          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          CVAR=0.D0
+          CVAR1=0.D0
+          DO I=1,NOCC
+            DO J=1,NOCC
+              DO M=1,3
+                ! <C|O^+ P_K O|C>
+                CVAR=CVAR+CONJG(DIPOLEGS(M,I))*CONJG(AINV(I,J))*DIPOLE(M,J)
+              ENDDO
+              DO K=1,NOCC
+                DO M=1,3
+                  ! <C|O^+ P_K^+ P_K O|C>
+                  CVAR1=CVAR1+CONJG(DIPOLE(M,I))*CONJG(AINV(J,I))*AINV(J,K)*DIPOLE(M,K)
+                ENDDO
+              ENDDO
+            ENDDO
+          ENDDO
+          CVAR=CVAR/3
+          CVAR1=CVAR1/3
+          ! <C|O^+ (1 - P_K - P_K^+ + P_K^+ P_K) O|C>
+          INFTOTALKPT=TOTALWKPT*(R2CORE(1)-CVAR-CONJG(CVAR)+CVAR1)
+          IF(TNEGATIVEKPT) THEN
+            ! TREAT -K POINT IF NEEDED, RELATED TO K BY INVERSION SYMMETRY
+            ! RESULTS IN COMPLEX CONJUGATION OF THE OVERLAP MATRIX AND DIPOLE
+            INFTOTALKPT=INFTOTALKPT+TOTALWKPT*(R2CORE(1)-CONJG(CVAR)-CVAR+CONJG(CVAR1))
+          END IF
+          IF(TADET) THEN
+            ! |ADET_K|^2 <C|O^+(1-P_K^+)(1-P_K)O|C>
+            INFTOTALKPT=INFTOTALKPT*ABS(ADET*ADETOP)**2
+          END IF
+          DEALLOCATE(AINV)
+          IF(AIMAG(INFTOTALKPT).GT.1.D-10) THEN
+            CALL ERROR$MSG('INFTOTALKPT HAS IMAGINARY PART')
+            CALL ERROR$C8VAL('INFTOTALKPT: ',INFTOTALKPT)
+            CALL ERROR$STOP('XAS$CALCULATE')
+          END IF
+          INFTOTAL=INFTOTAL+REAL(INFTOTALKPT,KIND=8)
 
           ! ALLOCATE RAW SPECTRUM
           DO ISPEC=1,NSPEC
@@ -4621,16 +4630,23 @@
         ADETPROD(:,1)=ADETPROD(:,1)*ADETPROD(:,1)
       END IF
 
+! TODO: CHECK IF TOTAL NEEDS TO BE DIVIDED BY 3 FOR POLARIZATION AVERAGE
+!       R2CORE IS DIVIDED BY 3 FOR POLARIZATION AVERAGE
+!       GOOG IS DIVIDED BY 3
+!       TOTAL IS DIVIDED BY 3
+!       INFTOTAL IS DIVIDED BY 3 ABOVE
+
       ! COMBINE TOTAL
       CALL MPE$COMBINE('~','+',TOTAL)
+      TOTAL=TOTAL/3.D0 ! DIVIDE BY 3 FOR POLARIZATION AVERAGE
       ! COMBINE GOOG
       CALL MPE$COMBINE('~','+',GOOG)
-      GOOG=GOOG/3.D0
+      GOOG=GOOG/3.D0 ! DIVIDE BY 3 FOR POLARIZATION AVERAGE
       CALL OVERLAP$GETR8A('R2CORE',2,R2CORE)
       GOOG=R2CORE(1)-GOOG
-      ! combine INFTOTAL
+      ! COMBINE INFTOTAL
       CALL MPE$COMBINE('~','+',INFTOTAL)
-      NORM=GOOG/TOTAL
+      NORM=GOOG/INFTOTAL
       
       ! COMBINE SPECTRA (MAKES IT AVAILABLE AND SAME ON EVERY TASK)
       ! RAW SPECTRA IS ONLY AVAILABLE ON READ TASK
@@ -5248,10 +5264,10 @@
       WRITE(NFIL,FMT=-'("# ",A12,2(F8.5,SP,F8.5,"I ",S))')'POL:',THIS%POL(:)
       WRITE(NFIL,FMT=-'("# ",A12,3(F8.5,SP,F8.5,"I ",S))')'POLXYZ:',THIS%POLXYZ(:)
       WRITE(NFIL,FMT='("#")')
-      WRITE(NFIL,FMT='("# ",A12,ES14.7)')'TOT. SIGMA',TOTAL
       WRITE(NFIL,FMT='("# ",A12,ES14.7)')'<G|O+O|G>',GOOG
-      WRITE(NFIL,FMT='("# ",A12,ES14.7)')'NORM',NORM
       WRITE(NFIL,FMT='("# ",A12,ES14.7)')'INF TOT.',INFTOTAL
+      WRITE(NFIL,FMT='("# ",A12,ES14.7)')'NORM',NORM
+      WRITE(NFIL,FMT='("# ",A12,ES14.7)')'FINITE TOT.',TOTAL
       WRITE(NFIL,'(80("#"))')
       RETURN
       END SUBROUTINE XAS_OUTPUTHEADER
