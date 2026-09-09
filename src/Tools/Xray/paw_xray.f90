@@ -1866,7 +1866,7 @@
 !     **************************************************************************
 !     ** SELECT SIMULATION IN SIMULATION MODULE                               **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,GROUND,EXCITE,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
 !     **************************************************************************
@@ -1895,7 +1895,7 @@
 !     **************************************************************************
 !     ** UNSELECT SIMULATION IN SIMULATION MODULE                             **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
 !     **************************************************************************
       IF(.NOT.SELECTED) THEN
@@ -1913,7 +1913,7 @@
 !     **************************************************************************
 !     ** SELECT SIMULATION IN SIMULATION MODULE BY INDEX                      **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,GROUND,EXCITE,THIS
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: I
 !     **************************************************************************
@@ -1944,7 +1944,7 @@
 !     ** NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG ARE SIMULATION PARAMETERS     **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       INTEGER(4), INTENT(IN) :: NAT
       INTEGER(4), INTENT(IN) :: NSP
@@ -2179,7 +2179,7 @@
 !     ** SET INTEGER VALUE IN SIMULATION MODULE                               **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
@@ -2265,7 +2265,7 @@
 !     ** GET INTEGER VALUE ARRAY FROM SIMULATION MODULE                       **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
@@ -2424,7 +2424,7 @@
 !     ** SET INTEGER VALUE IN SIMULATION MODULE                               **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: VAL
@@ -2454,7 +2454,7 @@
 !     ** GET INTEGER VALUE FROM SIMULATION MODULE                             **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(OUT) :: VAL
@@ -2513,7 +2513,7 @@
 !     ** SET REAL VALUE ARRAY IN SIMULATION MODULE                            **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS,GROUND,EXCITE,S
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
@@ -2610,7 +2610,7 @@
 !     ** GET REAL VALUE ARRAY FROM SIMULATION MODULE                          **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS,GROUND,EXCITE,S
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
@@ -2715,7 +2715,7 @@
 !     ** SET REAL VALUE IN SIMULATION MODULE                                  **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(IN) :: VAL
@@ -2753,7 +2753,7 @@
 !     ** GET REAL VALUE FROM SIMULATION MODULE                                **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       REAL(8), INTENT(OUT) :: VAL
@@ -2807,7 +2807,7 @@
 !     ** SET LOGICAL VALUE IN SIMULATION MODULE                               **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(IN) :: VAL
@@ -2839,7 +2839,7 @@
 !     ** GET LOGICAL VALUE FROM SIMULATION MODULE                             **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       LOGICAL(4), INTENT(OUT) :: VAL
@@ -2916,7 +2916,7 @@
 !     ** SET CHARACTER VALUE ARRAY IN SIMULATION MODULE                       **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
@@ -2953,7 +2953,7 @@
 !     ** GET CHARACTER VALUE ARRAY FROM SIMULATION MODULE                     **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       INTEGER(4), INTENT(IN) :: LEN
@@ -2991,7 +2991,7 @@
 !     ** CAN SET VALUES BEFORE INITIALIZATION                                 **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(IN) :: VAL
@@ -3018,7 +3018,7 @@
 !     ** GET CHARACTER VALUE FROM SIMULATION MODULE                           **
 !     ** REQUIRES SELECTED SIMULATION                                         **
 !     **************************************************************************
-      USE SIMULATION_MODULE
+      USE SIMULATION_MODULE, ONLY: SELECTED,THIS
       IMPLICIT NONE
       CHARACTER(*), INTENT(IN) :: ID
       CHARACTER(*), INTENT(OUT) :: VAL
