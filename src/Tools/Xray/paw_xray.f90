@@ -1356,11 +1356,17 @@
       COMPLEX(8) :: CVAR2(2)
 
       REAL(8) :: EV
+      LOGICAL(4) :: MAXOVERLAP
 !     **************************************************************************
       ! ONLY READ IF RIXS IS ACTIVE
       CALL RIXS$GETL4('ACTIVE',TCHK)
       IF(.NOT.TCHK) RETURN
                           CALL TRACE$PUSH('XCNTL$RIXS')
+      CALL XCNTL$GETL4('MAXOVERLAP',MAXOVERLAP)
+      IF(MAXOVERLAP) THEN
+        CALL ERROR$MSG('MAXOVERLAP IS NOT PROPERLY IMPLEMENTED FOR RIXS YET')
+        CALL ERROR$STOP('XCNTL$RIXS')
+      END IF
       CALL CONSTANTS('EV',EV)
       CALL LINKEDLIST$SELECT(LL_CNTL,'~')
       CALL LINKEDLIST$SELECT(LL_CNTL,'XCNTL')
