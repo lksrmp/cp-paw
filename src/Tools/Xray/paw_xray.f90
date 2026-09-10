@@ -13640,14 +13640,14 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
 !     **************************************************************************
 !     ** CALCULATE ORTHOGONAL VECTOR TO A                                      **
 !     **************************************************************************
-! TODO: UNDERSTAND
       IMPLICIT NONE
       REAL(8), INTENT(IN) :: A(3)
       REAL(8), INTENT(OUT) :: B(3)
       REAL(8) :: VECVAR(3)
+      REAL(8), PARAMETER :: TOL=1.D-8
 !     **************************************************************************
       VECVAR = (/1.D0,0.D0,0.D0/)
-      IF(DOT_PRODUCT(A,VECVAR).EQ.NORM2(A)) THEN
+      IF(ABS(ABS(DOT_PRODUCT(A,VECVAR))-NORM2(A)).LT.TOL) THEN
         VECVAR = (/0.D0,1.D0,0.D0/)
       END IF
       CALL CROSS_PROD(A,VECVAR,B)
