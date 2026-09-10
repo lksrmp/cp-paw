@@ -13776,20 +13776,42 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
 !     **************************************************************************
 !     ** CALCULATE CONVOLUTION WITH GAUSSIAN FUNCTION                         **
 !     ** G(X,X0,SIGMA)=(1/(SIGMA*SQRT(2*PI)))*EXP(-0.5*((X-X0)/SIGMA)**2)     **
+!     ** REQUIRES X TO BE SORTED IN ASCENDING ORDER                          **
+!     ** KERNEL IS TRUNCATED AT NSIGMA*SIGMA (RELATIVE ERROR < 1.D-14)        **
 !     **************************************************************************
       IMPLICIT NONE
       REAL(8), PARAMETER :: PI=4.D0*ATAN(1.D0)
+      REAL(8), PARAMETER :: NSIGMA=8.D0
       INTEGER(4), INTENT(IN) :: N
       REAL(8), INTENT(IN) :: X(N)
       REAL(8), INTENT(INOUT) :: Y(N)
       REAL(8), INTENT(IN) :: SIGMA
       REAL(8) :: WORK(N)
       INTEGER(4) :: I,J
+      INTEGER(4) :: JBEG,JEND
       REAL(8) :: SVAR
 !     **************************************************************************
+      IF(SIGMA.LE.0.D0) RETURN ! NO BROADENING
+      JBEG=1
+      JEND=0
       DO I=1,N
+        ! TRUNCATE KERNEL AT NSIGMA*SIGMA (RELATIVE ERROR < 1.D-14)
+        DO WHILE(JEND.LT.N)
+          IF(X(JEND+1).LE.X(I)+NSIGMA*SIGMA) THEN
+            JEND=JEND+1
+          ELSE
+            EXIT
+          END IF
+        ENDDO
+        DO WHILE(JBEG.LE.N)
+          IF(X(JBEG).LT.X(I)-NSIGMA*SIGMA) THEN
+            JBEG=JBEG+1
+          ELSE
+            EXIT
+          END IF
+        ENDDO
         WORK(I)=0.D0
-        DO J=1,N
+        DO J=JBEG,JEND
           SVAR=EXP(-0.5D0*((X(I)-X(J))/SIGMA)**2)/(SIGMA*SQRT(2.D0*PI))
           WORK(I)=WORK(I)+Y(J)*SVAR
         ENDDO
