@@ -13758,9 +13758,10 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
       REAL(8) :: GAMMA2
       REAL(8) :: SVAR
 !     **************************************************************************
+      IF(GAMMA.LE.0.D0) RETURN ! NO BROADENING
+      GAMMA2=0.25D0*GAMMA*GAMMA
       DO I=1,N
         WORK(I)=0.D0
-        GAMMA2=0.25D0*GAMMA*GAMMA
         DO J=1,N
           SVAR=GAMMA/(2.D0*PI*((X(I)-X(J))**2+GAMMA2))
           WORK(I)=WORK(I)+Y(J)*SVAR
