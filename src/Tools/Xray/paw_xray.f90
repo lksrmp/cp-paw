@@ -4780,6 +4780,8 @@
       CHARACTER(6) :: ID
       REAL(8), ALLOCATABLE :: SUMK(:,:) ! (3,NE) 
       INTEGER(4) :: I
+      INTEGER(4), ALLOCATABLE :: INDE(:) ! (NB2-NOCC) BAND INDICES OF STATES
+                                         ! CONSIDERED UNOCC. IN XAS CALCULATION
 !     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
       CALL MPE$QUERY('~',NTASKS,THISTASK)
@@ -4860,6 +4862,8 @@
               CALL OVERLAP$SELECT(IKPT,ISPIN)
               CALL OVERLAP$GETI4('NB2',NB2)
               CALL OVERLAP$GETI4('NOCC',NOCC)
+              ALLOCATE(INDE(NB2-NOCC))
+              CALL OVERLAP$GETI4A('INDE',NB2-NOCC,INDE)
               CALL OVERLAP$UNSELECT
               WRITE(NFIL,'(80("#"))')
               WRITE(NFIL,'("# ",A,I4," ",A,I4)') &
@@ -4869,15 +4873,16 @@
                 DO I=1,NB2-NOCC
                   WRITE(NFIL,*) THIS%ERAW(IKPT,ISPIN)%V(I)/EV, &
      &              THIS%ERAW(IKPT,ISPIN)%V(I)/EV*THIS%SRAW(IKPT,ISPIN)%V(I), &
-     &              I+NOCC
+     &              INDE(I)
                 ENDDO
               ELSE
                 DO I=1,NB2-NOCC
                   WRITE(NFIL,*) THIS%ERAW(IKPT,ISPIN)%V(I)/EV, &
      &              THIS%SRAW(IKPT,ISPIN)%V(I), &
-     &              I+NOCC
+     &              INDE(I)
                 ENDDO
               END IF
+              DEALLOCATE(INDE)
             ENDDO
           ENDDO
           CALL FILEHANDLER$CLOSE(ID)
