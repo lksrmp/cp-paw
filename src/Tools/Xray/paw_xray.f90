@@ -10606,6 +10606,7 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
 !     **************************************************************************
       USE MPE_MODULE
       IMPLICIT NONE
+      EXTERNAL ZGEMM
       ! CHANGING THIS WILL LIKELY BREAK THINGS
       INTEGER(4), PARAMETER :: NSIM=2
       LOGICAL(4), PARAMETER :: TPR=.TRUE.
@@ -10994,17 +10995,31 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
           CALL TIMING$CLOCKON('XRAY$READSIMULATIONS_SCALARPRODUCT')
           IF(THISTASK.EQ.WTASK) THEN
             CALL TRACE$I4VAL(' CALCULATING IKPT: ',IKPT)
-            DO IB2=1,NB(2)
-              DO IB1=1,NB(1)
-                ! NO DIM LOOP AS NDIM=1
-                ! SCALARPRODUCT (SUM OVER G VECTORS)
-                ! PW(I,J)=<PSI1(J)|PSI2(I)>
-                ! WARNING: CHECK IF SCALARPRODUCT IS CORRECT ALSO WITH CONJG
-                !          SHOULD BE THE CASE AS CALL OF ZGEMM IS DONE WITH 'C' OPTION
-                ! WARNING: CHECK WILL NOT WORK IF ONLY USING REAL WAVE FUNCTIONS AT GAMMA POINT
-                CALL LIB$SCALARPRODUCTC8(.FALSE.,NGG(1),1,PSIK1(:,1,IB1),1,PSIK2(:,1,IB2),PW(IB2,IB1))
-              ENDDO ! END IB1
-            ENDDO ! END IB2
+
+!---------------------------------------------
+! THIS DOES THE SAME AS BELOW BUT IS MUCH FASTER
+            ! NO DIM LOOP AS NDIM=1
+            ! PW(I,J)=<PSI1(J)|PSI2(I)>=SUM_G CONJG(PSIK1(G,J))*PSIK2(G,I)
+            ! ZGEMM('C','N') WITH A=PSIK2,B=PSIK1 YIELDS
+            ! SUM_G CONJG(PSIK2(G,I))*PSIK1(G,J)=CONJG(PW(I,J))
+            ! THEREFORE CONJUGATE THE RESULT
+            CALL ZGEMM('C','N',NB(2),NB(1),NGG(1),(1.D0,0.D0), &
+     &                 PSIK2,NGG(1),PSIK1,NGG(1),(0.D0,0.D0),PW,NB(2))
+            PW=CONJG(PW)
+!---------------------------------------------
+            ! DO IB2=1,NB(2)
+            !   DO IB1=1,NB(1)
+            !     ! NO DIM LOOP AS NDIM=1
+            !     ! SCALARPRODUCT (SUM OVER G VECTORS)
+            !     ! PW(I,J)=<PSI1(J)|PSI2(I)>
+            !     ! WARNING: CHECK IF SCALARPRODUCT IS CORRECT ALSO WITH CONJG
+            !     !          SHOULD BE THE CASE AS CALL OF ZGEMM IS DONE WITH 'C' OPTION
+            !     ! WARNING: CHECK WILL NOT WORK IF ONLY USING REAL WAVE FUNCTIONS AT GAMMA POINT
+            !     CALL LIB$SCALARPRODUCTC8(.FALSE.,NGG(1),1,PSIK1(:,1,IB1),1,PSIK2(:,1,IB2),PW(IB2,IB1))
+            !   ENDDO ! END IB1
+            ! ENDDO ! END IB2
+!---------------------------------------------
+
             PW=PW*VCELL
             CALL OVERLAP$SETC8A('PW',NB(2)*NB(1),PW)
           END IF
