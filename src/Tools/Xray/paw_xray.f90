@@ -10586,11 +10586,13 @@
       ENDDO
       J=1
       DO I=1,NB2
-        IF(J.LE.NOCC.AND.THIS%IND(J).EQ.I) THEN
-          J=J+1
-        ELSE
-          THIS%INDE(I-J+1)=I
+        IF(J.LE.NOCC) THEN
+          IF(THIS%IND(J).EQ.I) THEN
+            J=J+1
+            CYCLE
+          END IF
         END IF
+        THIS%INDE(I-J+1)=I
       ENDDO
       THIS%NSWAPPED=COUNT([(.NOT.ANY(THIS%IND == I),I=1,NOCC)])
       IF(THIS%NSWAPPED.GT.0) THEN
