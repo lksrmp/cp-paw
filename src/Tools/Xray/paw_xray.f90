@@ -10578,7 +10578,8 @@
       DO I=2,NOCC
         KEY=THIS%IND(I)
         J=I-1
-        DO WHILE(J.GE.1.AND.THIS%IND(J).GT.KEY)
+        DO WHILE(J.GE.1)
+          IF(THIS%IND(J).LE.KEY) EXIT
           THIS%IND(J+1)=THIS%IND(J)
           J=J-1
         ENDDO
