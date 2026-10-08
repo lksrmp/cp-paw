@@ -523,6 +523,7 @@
 
       CALL OVERLAP_COREMATRIX
 
+      CALL XRAY_DIPOLEINTEGRITY
 
       CALL XRAY$WRITEOVERLAP
 
@@ -10634,6 +10635,385 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
                           CALL TRACE$POP
       RETURN
       END SUBROUTINE OVERLAP_MAXOVERLAP
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE XRAY_DIPOLEINTEGRITY  ! MARK: XRAY_DIPOLEINTEGRITY
+!     **************************************************************************
+!     ** TEST WHETHER THE STORED DIPOLE OF A SIMULATION IS A K-INDEPENDENT    **
+!     ** LINEAR FUNCTIONAL OF THE STORED PROJECTIONS OF THE SAME SIMULATION   **
+!     **     DIPOLE(M,A)=SUM_I C(M,I)*PROJ(1,A,I)                             **
+!     ** THE COEFFICIENTS C ARE SHARED BY ALL K-POINTS, SPINS AND BANDS. THE  **
+!     ** TEST IS THEREFORE INVARIANT UNDER ANY RELABELING (PHASE, ORDER,      **
+!     ** MIXING) OF THE BANDS, AND IT FAILS IF THE DIPOLE AND THE PROJECTIONS **
+!     ** OF ONE SIMULATION DO NOT BELONG TO THE SAME STATES, TO THE SAME      **
+!     ** ATOM OR TO THE SAME CORE ORBITAL. THE PROJECTOR INDEX OF THE LARGEST **
+!     ** COEFFICIENT TELLS WHERE THE STORED DIPOLE ACTUALLY SITS.             **
+!     ** REQUIRES THE PROJECTIONS AND IS THEREFORE SKIPPED WHEN THE OVERLAP   **
+!     ** IS READ FROM AN OVERLAP FILE.                                        **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE XCNTL_MODULE, ONLY: TOVERLAP
+      IMPLICIT NONE
+      INTEGER(4), PARAMETER :: NSIM=2
+      INTEGER(4) :: NFIL
+      INTEGER(4) :: NTASKS,THISTASK,RTASK,WTASK
+      INTEGER(4) :: NKPT,NSPIN
+      INTEGER(4) :: IKPT,ISPIN,ISIM
+      INTEGER(4) :: NBX,NDIMX,NPROX,NPROXX
+      INTEGER(4) :: NAT,NSP,NSPX,LNXX
+      INTEGER(4) :: I,J,M,IAT,LN,ISP,LX,ILOC,JLOC
+      REAL(8) :: D2SUM,CVAR,CMAX,RESID
+      COMPLEX(8), ALLOCATABLE :: PROJX(:,:,:)
+      COMPLEX(8), ALLOCATABLE :: DIPX(:,:)
+      COMPLEX(8), ALLOCATABLE :: ATA(:,:)
+      COMPLEX(8), ALLOCATABLE :: ATD(:,:)
+      COMPLEX(8), ALLOCATABLE :: ATA1(:,:) ! NORMAL EQUATIONS OF THE OCCUPIED BANDS
+      COMPLEX(8), ALLOCATABLE :: ATD1(:,:)
+      COMPLEX(8), ALLOCATABLE :: ATA2(:,:) ! NORMAL EQUATIONS OF THE EMPTY BANDS
+      COMPLEX(8), ALLOCATABLE :: ATD2(:,:)
+      REAL(8), ALLOCATABLE :: OCCX(:)
+      COMPLEX(8), ALLOCATABLE :: PROJY(:,:,:)
+      INTEGER(4), ALLOCATABLE :: INDX(:)
+      INTEGER(4), ALLOCATABLE :: INDEX(:)
+      INTEGER(4) :: NOCCOV
+      COMPLEX(8), ALLOCATABLE :: DIP1(:,:)
+      COMPLEX(8), ALLOCATABLE :: DIP2(:,:)
+      COMPLEX(8), ALLOCATABLE :: PROJ1X(:,:) ! (NB1,NPRO) OCCUPIED BANDS
+      COMPLEX(8), ALLOCATABLE :: PROJ2X(:,:) ! (NB2,NPRO) EMPTY BANDS
+      REAL(8) :: D2SUM1,D2SUM2,CVAR1,CVAR2,RESID1,RESID2
+      INTEGER(4) :: NB1X,NB2X
+      COMPLEX(8), ALLOCATABLE :: AINV(:,:)
+      COMPLEX(8), ALLOCATABLE :: CCOEF(:,:)
+      INTEGER(4), ALLOCATABLE :: ISPECIES(:)
+      INTEGER(4), ALLOCATABLE :: LNX(:)
+      INTEGER(4), ALLOCATABLE :: LOX(:,:)
+      INTEGER(4), ALLOCATABLE :: MAP(:,:)
+      CHARACTER(8) :: ID
+!     **************************************************************************
+      CALL XCNTL$GETL4('TOVERLAP',TOVERLAP)
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL KSMAP$READTASK(RTASK)
+      IF(RTASK.EQ.0) RETURN
+      CALL FILEHANDLER$UNIT('PROT',NFIL)
+      IF(TOVERLAP) THEN
+        IF(THISTASK.EQ.RTASK) THEN
+          WRITE(NFIL,'(A)') ''
+          WRITE(NFIL,'(80("#"))')
+          WRITE(NFIL,FMT='(A)') 'DIPOLE INTEGRITY CHECK'
+          WRITE(NFIL,'(80("#"))')
+          WRITE(NFIL,FMT='(A)') 'SKIPPED: THE PROJECTIONS ARE NOT CONTAINED IN AN'
+          WRITE(NFIL,FMT='(A)') 'OVERLAP FILE. RUN FROM THE SIMULATIONS (!GROUND,'
+          WRITE(NFIL,FMT='(A)') '!EXCITE) TO TEST DIPOLE AGAINST PROJECTIONS.'
+        END IF
+        RETURN
+      END IF
+      CALL SIMULATION$SELECT('GROUND')
+      CALL SIMULATION$GETI4('NKPT',NKPT)
+      CALL SIMULATION$GETI4('NSPIN',NSPIN)
+      CALL SIMULATION$UNSELECT
+      IF(THISTASK.EQ.RTASK) THEN
+        WRITE(NFIL,'(A)') ''
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A)') 'DIPOLE INTEGRITY CHECK (DIPOLE VERSUS PROJECTIONS)'
+        WRITE(NFIL,'(80("#"))')
+        WRITE(NFIL,FMT='(A)') 'THE DIPOLE OF A SIMULATION IS BUILT FROM ITS OWN'
+        WRITE(NFIL,FMT='(A)') 'PROJECTIONS, DIPOLE(M,A)=SUM_I C(M,I)*PROJ(1,A,I),'
+        WRITE(NFIL,FMT='(A)') 'WITH COEFFICIENTS C THAT ARE THE SAME FOR ALL'
+        WRITE(NFIL,FMT='(A)') 'K-POINTS, SPINS AND BANDS. THE TEST FITS C OVER ALL'
+        WRITE(NFIL,FMT='(A)') 'BANDS AND K-POINTS AND REPORTS THE RELATIVE RESIDUAL.'
+        WRITE(NFIL,FMT='(A)') 'IT IS INVARIANT UNDER ANY RELABELING OF THE BANDS, SO'
+        WRITE(NFIL,FMT='(A)') 'A LARGE RESIDUAL MEANS THAT THE STORED DIPOLE AND THE'
+        WRITE(NFIL,FMT='(A)') 'STORED PROJECTIONS DO NOT BELONG TO THE SAME STATES,'
+        WRITE(NFIL,FMT='(A)') 'TO THE SAME ATOM OR TO THE SAME CORE ORBITAL.'
+      END IF
+
+      DO ISIM=1,NSIM
+        IF(ISIM.EQ.1) THEN
+          ID='GROUND'
+        ELSE
+          ID='EXCITE'
+        END IF
+        ! ==================================================================
+        ! == DIMENSIONS                                                    ==
+        ! ==================================================================
+        NPROXX=0
+        DO IKPT=1,NKPT
+          DO ISPIN=1,NSPIN
+            ! ONLY THE TASK THAT HOLDS THIS K-POINT AND SPIN MAY ASK FOR
+            ! ITS DIMENSIONS
+            CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+            IF(THISTASK.NE.WTASK) CYCLE
+            CALL STATE$SELECT(ID)
+            CALL STATE$GETI4('NPRO',IKPT,ISPIN,NPROX)
+            CALL STATE$UNSELECT
+            NPROXX=MAX(NPROXX,NPROX)
+          ENDDO
+        ENDDO
+        ! ALL TASKS MUST USE THE SAME DIMENSIONS
+        CALL MPE$COMBINE('~','MAX',NPROXX)
+        IF(NPROXX.LE.0) THEN
+          CALL ERROR$MSG('NUMBER OF PROJECTORS NOT AVAILABLE')
+          CALL ERROR$CHVAL('SIMULATION: ',ID)
+          CALL ERROR$STOP('XRAY_DIPOLEINTEGRITY')
+        END IF
+        ALLOCATE(ATA(NPROXX,NPROXX))
+        ALLOCATE(AINV(NPROXX,NPROXX))
+        ALLOCATE(ATD(NPROXX,3))
+        ALLOCATE(CCOEF(NPROXX,3))
+        ALLOCATE(ATA1(NPROXX,NPROXX))
+        ALLOCATE(ATD1(NPROXX,3))
+        ALLOCATE(ATA2(NPROXX,NPROXX))
+        ALLOCATE(ATD2(NPROXX,3))
+        ATA(:,:)=(0.D0,0.D0)
+        ATD(:,:)=(0.D0,0.D0)
+        ATA1(:,:)=(0.D0,0.D0)
+        ATD1(:,:)=(0.D0,0.D0)
+        ATA2(:,:)=(0.D0,0.D0)
+        ATD2(:,:)=(0.D0,0.D0)
+        D2SUM=0.D0
+        D2SUM1=0.D0
+        D2SUM2=0.D0
+        DO IKPT=1,NKPT
+          DO ISPIN=1,NSPIN
+            CALL KSMAP$WORKTASK(IKPT,ISPIN,WTASK)
+            IF(THISTASK.NE.WTASK) CYCLE
+            CALL STATE$SELECT(ID)
+            CALL STATE$GETI4('NB',IKPT,ISPIN,NBX)
+            CALL STATE$GETI4('NDIM',IKPT,ISPIN,NDIMX)
+            CALL STATE$GETI4('NPRO',IKPT,ISPIN,NPROX)
+            IF(NDIMX.NE.1) THEN
+              CALL ERROR$MSG('DIPOLE INTEGRITY TEST IMPLEMENTED FOR NDIM=1')
+              CALL ERROR$I4VAL('NDIM: ',NDIMX)
+              CALL ERROR$STOP('XRAY_DIPOLEINTEGRITY')
+            END IF
+            IF(NPROX.NE.NPROXX) THEN
+              CALL ERROR$MSG('NUMBER OF PROJECTORS DIFFERS BETWEEN K-POINTS')
+              CALL ERROR$STOP('XRAY_DIPOLEINTEGRITY')
+            END IF
+            ALLOCATE(PROJX(NDIMX,NBX,NPROX))
+            CALL STATE$GETC8A('PROJ',IKPT,ISPIN,NDIMX*NBX*NPROX,PROJX)
+            CALL STATE$UNSELECT
+            ! ==============================================================
+            ! == THE DIPOLE OF THE EXCITED SIMULATION IS READ THROUGH      ==
+            ! == OVERLAP$GETC8A, WHICH APPLIES THE MAXIMUM-OVERLAP MATCHING ==
+            ! == (IND, INDE) TO ITS BAND INDEX. THE PROJECTIONS ARE STORED  ==
+            ! == IN THE NATURAL ORDER, SO THE SAME PERMUTATION HAS TO BE    ==
+            ! == APPLIED TO THEM BEFORE THE TWO CAN BE COMPARED.            ==
+            ! ==============================================================
+            IF(ISIM.EQ.2) THEN
+              CALL OVERLAP$SELECT(IKPT,ISPIN)
+              CALL OVERLAP$GETI4('NOCC',NOCCOV)
+              CALL OVERLAP$UNSELECT
+              IF(NOCCOV.GT.0.AND.NOCCOV.LT.NBX) THEN
+                ALLOCATE(INDX(NOCCOV))
+                ALLOCATE(INDEX(NBX-NOCCOV))
+                ALLOCATE(PROJY(NDIMX,NBX,NPROX))
+                CALL OVERLAP$SELECT(IKPT,ISPIN)
+                CALL OVERLAP$GETI4A('IND',NOCCOV,INDX)
+                CALL OVERLAP$GETI4A('INDE',NBX-NOCCOV,INDEX)
+                CALL OVERLAP$UNSELECT
+                DO I=1,NOCCOV
+                  PROJY(:,I,:)=PROJX(:,INDX(I),:)
+                ENDDO
+                DO I=NOCCOV+1,NBX
+                  PROJY(:,I,:)=PROJX(:,INDEX(I-NOCCOV),:)
+                ENDDO
+                PROJX(:,:,:)=PROJY(:,:,:)
+                DEALLOCATE(PROJY)
+                DEALLOCATE(INDX)
+                DEALLOCATE(INDEX)
+              END IF
+            END IF
+            ALLOCATE(DIPX(3,NBX))
+            CALL OVERLAP$SELECT(IKPT,ISPIN)
+            IF(ISIM.EQ.1) THEN
+              CALL OVERLAP$GETC8A('DIPOLEGS',3*NBX,DIPX)
+            ELSE
+              CALL OVERLAP$GETC8A('DIPOLE',3*NBX,DIPX)
+            END IF
+            CALL OVERLAP$UNSELECT
+            D2SUM=D2SUM+SUM(ABS(DIPX)**2)
+            CALL ZGEMM('C','N',NPROX,NPROX,NBX,(1.D0,0.D0),PROJX,NBX, &
+     &                 PROJX,NBX,(1.D0,0.D0),ATA,NPROXX)
+            ! DIPX IS STORED AS (3,NB), SO IT IS PASSED TRANSPOSED
+            CALL ZGEMM('C','T',NPROX,3,NBX,(1.D0,0.D0),PROJX,NBX, &
+     &                 DIPX,3,(1.D0,0.D0),ATD,NPROXX)
+            ! ==============================================================
+            ! == SPLIT INTO OCCUPIED AND EMPTY BANDS                     ==
+            ! ==============================================================
+            ALLOCATE(OCCX(NBX))
+            CALL STATE$SELECT(ID)
+            CALL STATE$GETR8A('OCC',IKPT,ISPIN,NBX,OCCX)
+            CALL STATE$UNSELECT
+            NB1X=0
+            DO I=1,NBX
+              IF(OCCX(I).GT.1.D-6) NB1X=NB1X+1
+            ENDDO
+            NB2X=NBX-NB1X
+            IF(NB1X.GT.0) THEN
+              ALLOCATE(PROJ1X(NB1X,NPROX))
+              ALLOCATE(DIP1(3,NB1X))
+              PROJ1X(:,:)=PROJX(1,1:NB1X,:)
+              DIP1(:,:)=DIPX(:,1:NB1X)
+              D2SUM1=D2SUM1+SUM(ABS(DIP1)**2)
+              CALL ZGEMM('C','N',NPROX,NPROX,NB1X,(1.D0,0.D0),PROJ1X,NB1X, &
+     &                   PROJ1X,NB1X,(1.D0,0.D0),ATA1,NPROXX)
+              CALL ZGEMM('C','T',NPROX,3,NB1X,(1.D0,0.D0),PROJ1X,NB1X, &
+     &                   DIP1,3,(1.D0,0.D0),ATD1,NPROXX)
+              DEALLOCATE(DIP1)
+              DEALLOCATE(PROJ1X)
+            END IF
+            IF(NB2X.GT.0) THEN
+              ALLOCATE(PROJ2X(NB2X,NPROX))
+              ALLOCATE(DIP2(3,NB2X))
+              PROJ2X(:,:)=PROJX(1,NB1X+1:NBX,:)
+              DIP2(:,:)=DIPX(:,NB1X+1:NBX)
+              D2SUM2=D2SUM2+SUM(ABS(DIP2)**2)
+              CALL ZGEMM('C','N',NPROX,NPROX,NB2X,(1.D0,0.D0),PROJ2X,NB2X, &
+     &                   PROJ2X,NB2X,(1.D0,0.D0),ATA2,NPROXX)
+              CALL ZGEMM('C','T',NPROX,3,NB2X,(1.D0,0.D0),PROJ2X,NB2X, &
+     &                   DIP2,3,(1.D0,0.D0),ATD2,NPROXX)
+              DEALLOCATE(DIP2)
+              DEALLOCATE(PROJ2X)
+            END IF
+            DEALLOCATE(OCCX)
+            DEALLOCATE(DIPX)
+            DEALLOCATE(PROJX)
+          ENDDO
+        ENDDO
+        CALL MPE$COMBINE('~','+',ATA)
+        CALL MPE$COMBINE('~','+',ATD)
+        CALL MPE$COMBINE('~','+',D2SUM)
+        CALL MPE$COMBINE('~','+',ATA1)
+        CALL MPE$COMBINE('~','+',ATD1)
+        CALL MPE$COMBINE('~','+',D2SUM1)
+        CALL MPE$COMBINE('~','+',ATA2)
+        CALL MPE$COMBINE('~','+',ATD2)
+        CALL MPE$COMBINE('~','+',D2SUM2)
+
+        IF(THISTASK.EQ.RTASK) THEN
+          RESID=0.D0
+          CMAX=0.D0
+          ILOC=0
+          JLOC=0
+          IF(D2SUM.GT.1.D-30) THEN
+            CALL LIB$INVERTC8(NPROXX,ATA,AINV)
+            IF(AINV(1,1).NE.AINV(1,1)) THEN
+              WRITE(NFIL,FMT='(A)') 'NORMAL EQUATIONS SINGULAR'
+              RESID=-1.D0
+            ELSE
+              CCOEF(:,:)=(0.D0,0.D0)
+              CALL ZGEMM('N','N',NPROXX,3,NPROXX,(1.D0,0.D0),AINV,NPROXX, &
+     &                   ATD,NPROXX,(0.D0,0.D0),CCOEF,NPROXX)
+              CVAR=0.D0
+              DO M=1,3
+                DO I=1,NPROXX
+                  CVAR=CVAR-2.D0*REAL(CONJG(CCOEF(I,M))*ATD(I,M),KIND=8)
+                  DO J=1,NPROXX
+                    CVAR=CVAR+REAL(CONJG(CCOEF(I,M))*ATA(I,J)*CCOEF(J,M), &
+     &                             KIND=8)
+                  ENDDO
+                ENDDO
+              ENDDO
+              RESID=SQRT(MAX(0.D0,(D2SUM+CVAR)/D2SUM))
+              ! ==============================================================
+              ! == MISFIT OF THE SAME COEFFICIENTS IN THE TWO BAND SECTORS  ==
+              ! ==============================================================
+              RESID1=0.D0
+              RESID2=0.D0
+              CVAR1=0.D0
+              CVAR2=0.D0
+              DO M=1,3
+                DO I=1,NPROXX
+                  CVAR1=CVAR1-2.D0*REAL(CONJG(CCOEF(I,M))*ATD1(I,M),KIND=8)
+                  CVAR2=CVAR2-2.D0*REAL(CONJG(CCOEF(I,M))*ATD2(I,M),KIND=8)
+                  DO J=1,NPROXX
+                    CVAR1=CVAR1+REAL(CONJG(CCOEF(I,M))*ATA1(I,J)*CCOEF(J,M), &
+     &                               KIND=8)
+                    CVAR2=CVAR2+REAL(CONJG(CCOEF(I,M))*ATA2(I,J)*CCOEF(J,M), &
+     &                               KIND=8)
+                  ENDDO
+                ENDDO
+              ENDDO
+              IF(D2SUM1.GT.1.D-30) RESID1=SQRT(MAX(0.D0,(D2SUM1+CVAR1)/D2SUM1))
+              IF(D2SUM2.GT.1.D-30) RESID2=SQRT(MAX(0.D0,(D2SUM2+CVAR2)/D2SUM2))
+              DO M=1,3
+                DO I=1,NPROXX
+                  IF(ABS(CCOEF(I,M)).GT.CMAX) THEN
+                    CMAX=ABS(CCOEF(I,M))
+                    ILOC=I
+                    JLOC=M
+                  END IF
+                ENDDO
+              ENDDO
+            END IF
+          END IF
+          ! ==================================================================
+          ! == LOCATE THE LARGEST COEFFICIENT                                ==
+          ! ==================================================================
+          CALL SIMULATION$ISELECT(ISIM)
+          CALL SIMULATION$GETI4('NAT',NAT)
+          CALL SIMULATION$GETI4('NSP',NSPX)
+          CALL SIMULATION$GETI4('LNXX',LNXX)
+          ALLOCATE(ISPECIES(NAT))
+          ALLOCATE(LNX(NSPX))
+          ALLOCATE(LOX(LNXX,NSPX))
+          ALLOCATE(MAP(NAT,LNXX))
+          CALL SIMULATION$GETI4A('ISPECIES',NAT,ISPECIES)
+          CALL SIMULATION$GETI4A('LNX',NSPX,LNX)
+          CALL SIMULATION$GETI4A('LOX',LNXX*NSPX,LOX)
+          CALL SIMULATION$GETI4A('MAP',NAT*LNXX,MAP)
+          CALL SIMULATION$UNSELECT
+          IAT=0
+          LN=0
+          IF(ILOC.GT.0) THEN
+            DO I=1,NAT
+              ISP=ISPECIES(I)
+              DO J=1,LNX(ISP)
+                LX=LOX(J,ISP)
+                IF(ILOC.GT.MAP(I,J).AND.ILOC.LE.MAP(I,J)+2*LX+1) THEN
+                  IAT=I
+                  LN=J
+                END IF
+              ENDDO
+            ENDDO
+          END IF
+          WRITE(NFIL,FMT='(A,I2,A,A)') 'SIMULATION ',ISIM,': ',ID
+          IF(RESID.LT.0.D0) THEN
+            WRITE(NFIL,FMT='(A)') '   RELATIVE RESIDUAL: NOT AVAILABLE'
+          ELSE
+            WRITE(NFIL,FMT='(A,ES12.4)') '   RELATIVE RESIDUAL: ',RESID
+            WRITE(NFIL,FMT='(A,ES12.4,A,ES12.4)') '   OCCUPIED BANDS: ',RESID1, &
+     &        '   EMPTY BANDS: ',RESID2
+          END IF
+          IF(IAT.GT.0) THEN
+            WRITE(NFIL,FMT='(A,I6,A,I4,A,F12.6)') '   LARGEST COEFFICIENT AT '// &
+     &        'PROJECTOR ',ILOC,' OF ATOM ',IAT,' WITH |C|=',CMAX
+            WRITE(NFIL,FMT='(A,I6,A,I4,A,I4)') '   THAT IS ATOM ',IAT, &
+     &        ', SPECIES ',ISPECIES(IAT),', L=',LOX(LN,ISPECIES(IAT))
+          ELSE
+            WRITE(NFIL,FMT='(A)') '   LARGEST COEFFICIENT NOT LOCALIZED'
+          END IF
+          IF(RESID.GE.1.D-6) THEN
+            WRITE(NFIL,FMT='(A)') '   THE STORED DIPOLE IS NOT A FUNCTIONAL OF THE'
+            WRITE(NFIL,FMT='(A)') '   STORED PROJECTIONS OF THIS SIMULATION.'
+          END IF
+          DEALLOCATE(MAP)
+          DEALLOCATE(LOX)
+          DEALLOCATE(LNX)
+          DEALLOCATE(ISPECIES)
+        END IF
+        DEALLOCATE(CCOEF)
+        DEALLOCATE(ATD)
+        DEALLOCATE(AINV)
+        DEALLOCATE(ATA)
+        DEALLOCATE(ATD1)
+        DEALLOCATE(ATA1)
+        DEALLOCATE(ATD2)
+        DEALLOCATE(ATA2)
+      ENDDO ! END ISIM
+      RETURN
+      END SUBROUTINE XRAY_DIPOLEINTEGRITY
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE OVERLAP_COREMATRIX ! MARK: OVERLAP_COREMATRIX
