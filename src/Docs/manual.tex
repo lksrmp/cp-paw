@@ -8770,7 +8770,7 @@ where
 \section{The X-ray Spectrum Tool: paw\_xray}
 The paw\_xray tool allows calculation of X-ray absorption spectra (XAS) or
 resonant inelastic X-ray scattering (RIXS) spectra. The RIXS calculation
-is implemented but not yet documented. 
+is implemented but requires more refinement and is not yet documented. 
 
 The tool requires either two files 
 produced by the !CONTROL!ANALYSE!OVL option for a ground state and a
@@ -8787,35 +8787,36 @@ on the theoretical background. The auxiliary orbitals are being devided by
 $\sqrt{\langle \psi^{aux}_n|\psi^{aux}_n\rangle}$ in order to make the projection
 fractional. This is not yet documented here.}
 
-\subsection{Auxiliary orbital DOS}
+\subsection{Lehman amplitudes}
 Furthermore, a ''root\_xas.pdos'' file is created. This is the file format used
 by the paw\_dos tool. It contains the occupied states from the excited 
-simulation. The unoccupied states are replaced by auxiliary states 
-$|\psi_n^{aux}\rangle$.
+simulation. The unoccupied states are replaced by Lehman amplitudes
+$|\phi_{k,n}^{GF}\rangle$.
 These are superpositions of one unoccupied and all occupied states that produce
 the same XAS amplitude for a single-particle dipole transition operator as the 
 Slater-determinant final states produce for the many-body dipole transition 
 operator.
 \begin{eqnarray}
-  |\psi_n^{aux}\rangle =& \bigl[ |\psi_n\rangle - \sum_i^{N_{occ}}\kappa_{n,i}
-  |\psi_i\rangle \bigr] (-1)^{N_{occ}}A_{det}
+  |\phi_{k,n}^{GF}\rangle =& \bigl[ |\psi_{k,n}\rangle - \sum_i^{N_{occ}}\kappa_{n,i}^k
+  |\psi_{k,i}\rangle \bigr] (-1)^{N_{occ}}A_{det}^k
 \end{eqnarray}
-where $A_{det}$ is the determinant of the overlap matrix between occupied
-states in the ground and excited state and $\kappa_{n,i}$ are the expansion
-coefficients of the unoccupied state $|\psi_n\rangle$ in the occupied
+where $A_{det}^k$ is the determinant of the overlap matrix between occupied
+states in the ground and excited state and $\kappa_{n,i}^k$ are the expansion
+coefficients of the unoccupied state $|\psi_{k,n}\rangle$ in the occupied
 states of the ground state.
 \textcolor{red}{WARNING: Currently, the radius RAD/RCOV is ignored for the
 projections. The default value of R(ASA)=1.10533 covalent radii is used for 
 all atoms.}
+\textcolor{red}{This should be adapted to the notation in the paper.}
 
-\subsection{Weighted X-Ray DOS}
+\subsection{Transition-projected DOS}
 In order to visualize the contributions of different atomic orbitals to the
 XAS spectrum, a weighted X-Ray DOS is calculated. This is done by weighting
-the unoccupied DOS with the XAS cross section for each unoccupied state.
+the DOS of the Lehman amplitudes with the XAS cross section for each Lehman amplitude.
 As input a dosraw file created by the paw\_dos tool is required. It contains
 the projected density of states for every set per k-point, spin, and band.
 
-In combination with the auxiliary orbital DOS, the weighted X-Ray DOS
+In combination with the Lehman amplitudes, the transition-projected DOS
 can be used to analyze the character of the unoccupied states that
 contribute to the XAS spectrum.
 
@@ -8826,7 +8827,7 @@ A typical workflow to calculate and analyze XAS spectra is:
   \item run paw\_dos with ''\_xas.pdos'' as input
   \item use ''\_xas.dosraw'' as input for paw\_xray under !XCNTL!XAS!DOS
   \item run using the ''.overlap'' file created in step 1
-  \item weighted DOS is created for each spectrum in file appended by ''dos''
+  \item the transition-projected DOS is created for each spectrum in file appended by ''dosraw''
 \end{enumerate}
 
 \subsection{Beam direction and polarisation}
@@ -8881,6 +8882,21 @@ A visual representation of the angles is given in Fig. \ref{fig:xray_angles}.
   \label{fig:xray_polarisation}
 \end{figure}
 
+\subsection{Maximum overlap}
+For some systems, the HOMO and LUMO in the core-hole calculation may be a 
+mixture of the HOMO and LUMO of the ground-state calculation. As the code is 
+restricted to the addition of a single excited electron, excitations above the
+LUMO are suppressed by a small value of $|A_{det}|^2$.
+
+Therefore, occupied states are defined by giving the largest overlap $|A_{det}|^2$
+between ground-state and core-hole calculation. They might be different from the
+states occupied in the core-hole calculation itself. The energy difference is
+usually very small and is approximated as the difference in Kohn-Sham eigenvalues
+of the swapped states.
+
+This swapping is active by default and can be controlled via the !XCNTL:MAXOVERLAP
+flag.
+
 %==========================================================================
 \subsection{Command}
 %==========================================================================
@@ -8901,7 +8917,7 @@ the paw\_xray tool. The extension should be ``.xcntl''.
   !EXCITE FILE='excited.ovl' !END
   !OVERLAP_x FILE='overlap.overlap' !END
   !COREHOLE ATOM='O_3' NCORE=1 LCORE=0 !END
-  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G'
+  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G' MAXOVERLAP=T
     EMIN[EV]=520.0 EMAX[EV]=540.0 DE[EV]=0.1 EFAC=T
     NORMAL=0.0 0.0 1.0 KDIR=0.0 1.0 -1.0 POL=1.0 0.0 0.0 0.0
     !SPECTRUM FILE='xas1.dat' !END
@@ -8924,6 +8940,24 @@ the paw\_xray tool. The extension should be ``.xcntl''.
 %----------------------------------------------------------------------
 \brules{mandatory}
 \bdescr{defines the operation of the tool}
+
+\mbax{\key{MAXOVERLAP}
+\vdescr{if true, the occupied states are defined by the largest overlap
+between ground-state and core-hole calculation; if false, the occupied
+states are defined by the core-hole calculation itself. 
+Determined using QR decomposition with column pivoting of the overlap matrix.}
+\vformat{logical}
+\vrules{optional}
+\vdefault{T}}
+
+\mbax{\key{NORMALIZE}
+\vdescr{if true, the cross-section from each k-point is normalized by the 
+fraction of the total cross-section without approximations and the total
+cross-section under approximations. \textcolor{red}{Elaborate more or reference paper.}}
+\vformat{logical}
+\vrules{optional}
+\vdefault{F}
+}
 
 
 %----------------------------------------------------------------------
@@ -9239,7 +9273,7 @@ dipole matrix elements for a given band, k-point, and spin channel}
 \block{!XCNTL!XAS!DOS}
 %----------------------------------------------------------------------
 \brules{optional}
-\bdescr{calculates the weighted X-Ray DOS using the provided dosraw file}
+\bdescr{calculates the transition-projected DOS using the provided dosraw file}
 
 \mbax{\key{FILE}
 \vdescr{file name of the dosraw file created by paw\_dos tool}
