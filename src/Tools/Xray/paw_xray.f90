@@ -886,8 +886,6 @@
       REAL(8)   ,PARAMETER     :: PI=4.D0*ATAN(1.D0)
       LOGICAL(4) :: TCHK
       LOGICAL(4) :: TCHK1
-      LOGICAL(4) :: TCHK2
-      LOGICAL(4) :: TCHK3
       CHARACTER(256) :: FILENAME
       INTEGER(4) :: NSPEC
       INTEGER(4) :: ISPEC
@@ -938,69 +936,25 @@
       CALL LINKEDLIST$SELECT(LL_CNTL,'XAS')
 
       ! SINGLEPARTICLE
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'SINGLEPARTICLE',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'SINGLEPARTICLE',1,TCHK1)
-        CALL XAS$SETL4('SINGLEPARTICLE',TCHK1)
-      ELSE
-        CALL XAS$SETL4('SINGLEPARTICLE',.FALSE.) ! DEFAULT
-      END IF
+      CALL GETL4DEFAULT('SINGLEPARTICLE',.FALSE.,TCHK1)
+      CALL XAS$SETL4('SINGLEPARTICLE',TCHK1)
 
       ! RAW
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'RAW',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'RAW',1,TCHK)
-        CALL XAS$SETL4('RAW',TCHK)
-      ELSE
-        CALL XAS$SETL4('RAW',.FALSE.) ! DEFAULT
-      END IF
+      CALL GETL4DEFAULT('RAW',.FALSE.,TCHK1)
+      CALL XAS$SETL4('RAW',TCHK1)
 
       ! KPTSPIN
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'KPTSPIN',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'KPTSPIN',1,TCHK)
-        CALL XAS$SETL4('KPTSPIN',TCHK)
-      ELSE
-        CALL XAS$SETL4('KPTSPIN',.FALSE.) ! DEFAULT
-      END IF
+      CALL GETL4DEFAULT('KPTSPIN',.FALSE.,TCHK1)
+      CALL XAS$SETL4('KPTSPIN',TCHK1)
 
       ! EFAC
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'EFAC',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'EFAC',1,TCHK)
-        CALL XAS$SETL4('EFAC',TCHK)
-      ELSE
-        CALL XAS$SETL4('EFAC',.TRUE.) ! DEFAULT
-      END IF
+      CALL GETL4DEFAULT('EFAC',.TRUE.,TCHK1)
+      CALL XAS$SETL4('EFAC',TCHK1)
       
-      ! EMIN[EV]
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'EMIN[EV]',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'EMIN[EV]',1,EMIN)
-        EMIN=EMIN*EV
-      ELSE
-        EMIN=-HUGE(1.D0) ! MINIMUM ENERGY NOT SET
-      END IF
+      ! ENERGY WINDOW AND STEP
+      CALL GETENERGYGRID
       CALL XAS$SETR8('EMIN',EMIN)
-
-      ! EMAX[EV]
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'EMAX[EV]',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'EMAX[EV]',1,EMAX)
-        EMAX=EMAX*EV
-      ELSE
-        EMAX=HUGE(1.D0) ! MAXIMUM ENERGY NOT SET
-      END IF
       CALL XAS$SETR8('EMAX',EMAX)
-
-      ! DE[EV]
-      CALL LINKEDLIST$EXISTD(LL_CNTL,'DE[EV]',1,TCHK)
-      IF(TCHK) THEN
-        CALL LINKEDLIST$GET(LL_CNTL,'DE[EV]',1,DE)
-        DE=DE*EV
-      ELSE
-        DE=1.D-2*EV
-      END IF
       CALL XAS$SETR8('DE',DE)
 
       ! EBROAD[EV]
@@ -1272,6 +1226,22 @@
         CALL LINKEDLIST$GET(LL_CNTL,'FILE',1,FILENAME)
         CALL XASDOS$SETCH('FILE',TRIM(ADJUSTL(FILENAME)))
 
+        ! ENERGY WINDOW AND STEP
+        CALL GETENERGYGRID
+        CALL XASDOS$SETR8('EMIN',EMIN)
+        CALL XASDOS$SETR8('EMAX',EMAX)
+        CALL XASDOS$SETR8('DE',DE)
+      END IF
+                          CALL TRACE$POP
+      RETURN
+      CONTAINS
+        SUBROUTINE GETENERGYGRID
+!       ********************************************************************
+!       ** READ EMIN[EV], EMAX[EV] AND DE[EV] FROM THE CURRENTLY SELECTED  **
+!       ** LIST, APPLY THE DEFAULT VALUES AND CONVERT TO ATOMIC UNITS      **
+!       ********************************************************************
+        IMPLICIT NONE
+        LOGICAL(4) :: TCHK
         ! EMIN[EV]
         CALL LINKEDLIST$EXISTD(LL_CNTL,'EMIN[EV]',1,TCHK)
         IF(TCHK) THEN
@@ -1280,8 +1250,6 @@
         ELSE
           EMIN=-HUGE(1.D0) ! MINIMUM ENERGY NOT SET
         END IF
-        CALL XASDOS$SETR8('EMIN',EMIN)
-
         ! EMAX[EV]
         CALL LINKEDLIST$EXISTD(LL_CNTL,'EMAX[EV]',1,TCHK)
         IF(TCHK) THEN
@@ -1290,8 +1258,6 @@
         ELSE
           EMAX=HUGE(1.D0) ! MAXIMUM ENERGY NOT SET
         END IF
-        CALL XASDOS$SETR8('EMAX',EMAX)
-
         ! DE[EV]
         CALL LINKEDLIST$EXISTD(LL_CNTL,'DE[EV]',1,TCHK)
         IF(TCHK) THEN
@@ -1300,10 +1266,27 @@
         ELSE
           DE=1.D-2*EV
         END IF
-        CALL XASDOS$SETR8('DE',DE)
-      END IF
-                          CALL TRACE$POP
-      RETURN
+        RETURN
+        END SUBROUTINE GETENERGYGRID
+
+        SUBROUTINE GETL4DEFAULT(ID,DEFAULT,VAL)
+!       ********************************************************************
+!       ** READ LOGICAL ID FROM THE SELECTED XCNTL!XAS LIST, FALLING BACK **
+!       ** TO DEFAULT WHEN THE KEY IS ABSENT                              **
+!       ********************************************************************
+        IMPLICIT NONE
+        CHARACTER(*), INTENT(IN) :: ID
+        LOGICAL(4), INTENT(IN) :: DEFAULT
+        LOGICAL(4), INTENT(OUT) :: VAL
+        LOGICAL(4) :: TCHK
+        CALL LINKEDLIST$EXISTD(LL_CNTL,ID,1,TCHK)
+        IF(TCHK) THEN
+          CALL LINKEDLIST$GET(LL_CNTL,ID,1,VAL)
+        ELSE
+          VAL=DEFAULT
+        END IF
+        RETURN
+        END SUBROUTINE GETL4DEFAULT
       END SUBROUTINE XCNTL$XAS
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
