@@ -11370,15 +11370,10 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
           CALL OVERLAP$GETC8A('A',NOCC*NOCC,DUMMY)
           CALL LIB$DETC8(NOCC,DUMMY,ADET(IKPT,ISPIN))
           DEALLOCATE(DUMMY)
-          ALLOCATE(DUMMY(NOCC,NB1-NOCC))
-          CALL OVERLAP$GETC8A('B',NOCC*(NB1-NOCC),DUMMY)
-          DEALLOCATE(DUMMY)
-          ALLOCATE(DUMMY(NB2-NOCC,NOCC))
-          CALL OVERLAP$GETC8A('C',(NB2-NOCC)*NOCC,DUMMY)
-          DEALLOCATE(DUMMY)
-          ALLOCATE(DUMMY(NB2-NOCC,NB1-NOCC))
-          CALL OVERLAP$GETC8A('D',(NB2-NOCC)*(NB1-NOCC),DUMMY)
-          DEALLOCATE(DUMMY)
+          ! FORCE CONSTRUCTION OF THE REMAINING OVERLAP BLOCKS
+          CALL TOUCHOVERLAP('B',NOCC*(NB1-NOCC))
+          CALL TOUCHOVERLAP('C',(NB2-NOCC)*NOCC)
+          CALL TOUCHOVERLAP('D',(NB2-NOCC)*(NB1-NOCC))
           CALL OVERLAP$UNSELECT
         ENDDO
       ENDDO
@@ -11462,6 +11457,20 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
                           CALL TIMING$CLOCKOFF('XRAY$OVERLAP')
                           CALL TRACE$POP
       RETURN
+      CONTAINS
+        SUBROUTINE TOUCHOVERLAP(ID,LEN)
+!       ********************************************************************
+!       ** FORCE CONSTRUCTION OF OVERLAP BLOCK ID WITHOUT KEEPING A COPY   **
+!       ********************************************************************
+        IMPLICIT NONE
+        CHARACTER(*), INTENT(IN) :: ID
+        INTEGER(4), INTENT(IN) :: LEN
+        COMPLEX(8), ALLOCATABLE :: WORK(:)
+        ALLOCATE(WORK(LEN))
+        CALL OVERLAP$GETC8A(ID,LEN,WORK)
+        DEALLOCATE(WORK)
+        RETURN
+        END SUBROUTINE TOUCHOVERLAP
       END SUBROUTINE XRAY$OVERLAP
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
