@@ -3099,10 +3099,10 @@
         VAL=THIS%FILE
       ELSE IF(ID.EQ.'FLAG') THEN
         IF(.NOT.THIS%INITIALIZED) THEN
-        CALL ERROR$MSG('SIMULATION NOT INITIALIZED')
-        CALL ERROR$CHVAL('SELECTED SIMULATION ID: ',THIS%ID)
-        CALL ERROR$STOP('SIMULATION$GETCH')
-      END IF
+          CALL ERROR$MSG('SIMULATION NOT INITIALIZED')
+          CALL ERROR$CHVAL('SELECTED SIMULATION ID: ',THIS%ID)
+          CALL ERROR$STOP('SIMULATION$GETCH')
+        END IF
         VAL=THIS%FLAG
       ELSE
         CALL ERROR$MSG('SIMULATION GETCH ID NOT RECOGNIZED')
@@ -3372,9 +3372,9 @@
      &                        THIS(ISP)%LNX,THIS(ISP)%L(:), 'NOT USED', &
      &                        0.0D0
         ELSE
-        WRITE(NFIL,FMT=FORMAT)ISP,THIS(ISP)%GID,THIS(ISP)%ECORE, &
-     &                        THIS(ISP)%LNX,THIS(ISP)%L(:),THIS(ISP)%SYMBOL, &
-     &                        THIS(ISP)%RASA
+          WRITE(NFIL,FMT=FORMAT)ISP,THIS(ISP)%GID,THIS(ISP)%ECORE, &
+     &                          THIS(ISP)%LNX,THIS(ISP)%L(:),THIS(ISP)%SYMBOL, &
+     &                          THIS(ISP)%RASA
         END IF
       ENDDO
       WRITE(NFIL,FMT='(A)')'RADIAL REPORT'
@@ -4496,9 +4496,9 @@
       COMPLEX(8) :: ADETOP ! ADET FROM OPPOSITE SPIN DIRECTION
       INTEGER(4) :: ISPINOP ! SPIN OPPOSITE TO ISPIN
       REAL(8) :: R2CORE(2)
-      COMPLEX(8), ALLOCATABLE :: INFTOTKPTTEMP(:) ! (NKPT) DEBUG DIAGNOSTIC
-      COMPLEX(8), ALLOCATABLE :: GOOGKPTTEMP(:) ! (NKPT) DEBUG DIAGNOSTIC
-      COMPLEX(8), ALLOCATABLE :: ADETKPT(:) ! (NKPT) DEBUG DIAGNOSTIC
+      COMPLEX(8), ALLOCATABLE :: INFTOTKPTTEMP(:) ! (NKPT) PER-KPOINT ACCUMULATOR
+      COMPLEX(8), ALLOCATABLE :: GOOGKPTTEMP(:) ! (NKPT) PER-KPOINT ACCUMULATOR
+      COMPLEX(8), ALLOCATABLE :: ADETKPT(:) ! (NKPT) ADET PRODUCT PER K-POINT
 !     **************************************************************************
       IF(.NOT.TACTIVE) RETURN
                           CALL TRACE$PUSH('XAS$CALCULATE')
@@ -4586,7 +4586,7 @@
           CALL OVERLAP$SELECT(IKPT,ISPIN)
           CALL OVERLAP$GETC8('ADET',ADET)
 
-          ! ON COMBINE AFTERWARDS, IT IS DEVIDED BY NSPIN
+          ! ON COMBINE AFTERWARDS, IT IS DIVIDED BY NSPIN
           ADETKPT(IKPT)=ADETKPT(IKPT)+ADET*ADETOP
 
           CALL OVERLAP$GETI4('NB1',NB1)
@@ -4718,7 +4718,7 @@
       ENDDO ! END IKPT
       CALL STATE$UNSELECT
       
-      ! TODO: CHECK IF ADETPROD IS USED CORRECTLY FOR NPSIN=1
+      ! TODO: CHECK IF ADETPROD IS USED CORRECTLY FOR NSPIN=1
       CALL MPE$COMBINE('~','+',ADETPROD)
       IF(NSPIN.EQ.2) THEN
         ADETPROD(:,1)=ADETPROD(:,1)*ADETPROD(:,2)
@@ -10658,7 +10658,7 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
           CALL FILEHANDLER$UNIT(ID,NFIL(ISIM))
           REWIND(NFIL(ISIM))
           ! ====================================================================
-          ! == READ GENERAL QUANTATIES                                        ==
+          ! == READ GENERAL QUANTITIES                                        ==
           ! ====================================================================
           ! NAT,NSP,NKPT,NSPIN,NDIM,NPRO,LNXX,FLAG
           READ(NFIL(ISIM))NAT,NSP,NKPT,NSPIN,NDIM,NPRO(ISIM),LNXX,FLAG
@@ -11257,7 +11257,6 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
 !     ** CERTAIN VALUES ARE NOT WRITTEN TO THE FILE, AS THEY ARE NOT REQUIRED **
 !     ** THIS MIGHT LEAD TO SOME VALUES NOT BEING AVAILABLE WHEN STARTING     **
 !     ** FROM THE OVERLAP FILE                                                **
-!     ** FROM THE OVERLAP FILE                                                **
 !     **************************************************************************
       CHARACTER(8), PARAMETER :: FLAG='20260401' ! FLAG TO CATCH INCONSISTENT FILES
       LOGICAL(4) :: TOVERLAP
@@ -11621,7 +11620,7 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
             EXIT
           END IF
         ENDDO ! END IB
-        ! WARING: THIS ASSUMES THAT THE CORE ORBITAL IS AN S ORBITAL
+        ! WARNING: THIS ASSUMES THAT THE CORE ORBITAL IS AN S ORBITAL
         ! TODO: GENERALISE TO ARBITRARY ORBITALS
         ! ERROR: DOES IT REQUIRE A PHASE ON THE CORE ORBITAL?
         CALL LLOFLM(LCORE,0,LLCORE)
@@ -12404,7 +12403,7 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
           CALL ERROR$I4VAL('NB2',NB2)
           CALL ERROR$STOP('AUXORB$CALCULATE')
         END IF
-        ! CHECK IF BAND IS IN IND E.G. OCCUPIED
+        ! CHECK IF BAND IS IN IND, I.E. OCCUPIED
         IF(ANY(IND==BAND)) THEN
           CALL ERROR$MSG('BAND IN OCCUPIED ORBITALS')
           CALL ERROR$I4VAL('B',BAND)
@@ -13170,7 +13169,7 @@ PRINT *, 'OVERLAP MAXOVERLAP: ', abs(CVAR)**2
       SUBROUTINE XASDOS$VALIDATE  ! MARK: XASDOS$VALIDATE
 !     **************************************************************************
 !     ** VALIDATE XASDOS MODULE DATA                                          **
-!     ** DATA SHOULD CORRESPOND TO DATA CONTAINED IN THE EXCITATED SIMULATION **
+!     ** DATA SHOULD CORRESPOND TO DATA CONTAINED IN THE EXCITED SIMULATION   **
 !     **************************************************************************
       USE XASDOS_MODULE, ONLY: TACTIVE,NBB,NKPT,EIGVAL,EIG,SETVAL,SET,NSET,SETID
       IMPLICIT NONE
