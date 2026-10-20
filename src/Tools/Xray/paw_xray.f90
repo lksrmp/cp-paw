@@ -4895,17 +4895,10 @@
         END IF
         ! SUM OVER SPINS
         SUMK(3,:)=SUM(SUMK(1:2,:),DIM=1)
-        IF(THIS%BROADMODE.EQ.+'G') THEN
-          ! GAUSSIAN BROADENING
-          DO I=1,3
-            CALL GAUSSCONV(NE,THIS%E,SUMK(I,:),THIS%EBROAD)
-          ENDDO
-        ELSE IF(THIS%BROADMODE.EQ.+'L') THEN
-          ! LORENTZIAN BROADENING
-          DO I=1,3
-            CALL LORENTZCONV(NE,THIS%E,SUMK(I,:),THIS%EBROAD)
-          ENDDO
-        END IF
+        ! APPLY THE REQUESTED BROADENING TO SPIN 1, SPIN 2 AND THE TOTAL
+        DO I=1,3
+          CALL XAS_BROADEN(NE,THIS%E,SUMK(I,:),THIS%EBROAD,THIS%BROADMODE)
+        ENDDO
         ! ERROR: CHECK THE FACTOR OMEGA, HOW TO DEAL WITH IT? UNIT CONVERSION?
         IF(EFAC) THEN
           DO I=1,NE
@@ -4956,19 +4949,12 @@
 
         ! WRITE SPECTRUM PER K-POINT AND SPIN
         IF(TKPTSPIN) THEN
-          IF(THIS%BROADMODE.EQ.+'G') THEN
-            DO IKPT=1,NKPT
-              DO ISPIN=1,NSPIN
-                CALL GAUSSCONV(NE,THIS%E,THIS%SPECTRUM(IKPT,ISPIN,:),THIS%EBROAD)
-              ENDDO
+          DO IKPT=1,NKPT
+            DO ISPIN=1,NSPIN
+              CALL XAS_BROADEN(NE,THIS%E,THIS%SPECTRUM(IKPT,ISPIN,:), &
+     &                     THIS%EBROAD,THIS%BROADMODE)
             ENDDO
-          ELSE IF(THIS%BROADMODE.EQ.+'L') THEN
-            DO IKPT=1,NKPT
-              DO ISPIN=1,NSPIN
-                CALL LORENTZCONV(NE,THIS%E,THIS%SPECTRUM(IKPT,ISPIN,:),THIS%EBROAD)
-              ENDDO
-            ENDDO
-          END IF
+          ENDDO
           ! WRITE K-POINT AND SPIN FILE
           CALL FILEHANDLER$SETFILE(ID,.FALSE.,TRIM(ADJUSTL(THIS%FILE))//-'kpt')
           CALL FILEHANDLER$UNIT(ID,NFIL)
@@ -5007,6 +4993,26 @@
                           CALL TIMING$CLOCKOFF('XAS$OUTPUT')
                           CALL TRACE$POP
       RETURN
+      CONTAINS
+        SUBROUTINE XAS_BROADEN(N,X,Y,EBROAD,BROADMODE)
+!       ********************************************************************
+!       ** APPLY SPECTRAL BROADENING IN PLACE                               **
+!       ** BROADMODE: 'G' GAUSSIAN, 'L' LORENTZIAN, 'N' (OR ANY OTHER       **
+!       ** VALUE) LEAVES THE SPECTRUM UNCHANGED                             **
+!       ********************************************************************
+        IMPLICIT NONE
+        INTEGER(4), INTENT(IN) :: N
+        REAL(8), INTENT(IN) :: X(N)
+        REAL(8), INTENT(INOUT) :: Y(N)
+        REAL(8), INTENT(IN) :: EBROAD
+        CHARACTER(1), INTENT(IN) :: BROADMODE
+        IF(BROADMODE.EQ.+'G') THEN
+          CALL GAUSSCONV(N,X,Y,EBROAD)
+        ELSE IF(BROADMODE.EQ.+'L') THEN
+          CALL LORENTZCONV(N,X,Y,EBROAD)
+        END IF
+        RETURN
+        END SUBROUTINE XAS_BROADEN
       END SUBROUTINE XAS$OUTPUT
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
