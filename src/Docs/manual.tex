@@ -8917,7 +8917,8 @@ the paw\_xray tool. The extension should be ``.xcntl''.
   !EXCITE FILE='excited.ovl' !END
   !OVERLAP_x FILE='overlap.overlap' !END
   !COREHOLE ATOM='O_3' NCORE=1 LCORE=0 !END
-  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G' MAXOVERLAP=T
+  MAXOVERLAP=T NORMALIZE=T ESWAP=F
+  !XAS SINGLEPARTICLE=F RAW=T KPTSPIN=F EBROAD[EV]=0.3 BROADMODE='G' 
     EMIN[EV]=520.0 EMAX[EV]=540.0 DE[EV]=0.1 EFAC=T
     NORMAL=0.0 0.0 1.0 KDIR=0.0 1.0 -1.0 POL=1.0 0.0 0.0 0.0
     !SPECTRUM FILE='xas1.dat' !END
@@ -8949,6 +8950,15 @@ Determined using QR decomposition with column pivoting of the overlap matrix.}
 \vformat{logical}
 \vrules{optional}
 \vdefault{T}}
+
+\mbax{\key{ESWAP}
+\vdescr{if true, energy difference between swapped orbitals is applied to
+energy calculation; if false, the additional energy of swapping is considered.
+Unused if MAXOVERLAP is false.}
+\vformat{logical}
+\vrules{optional}
+\vdefault{T}
+}
 
 \mbax{\key{NORMALIZE}
 \vdescr{if true, the cross-section from each k-point is normalized by the 
