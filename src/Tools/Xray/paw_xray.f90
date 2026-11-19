@@ -4622,7 +4622,7 @@
             ! ABOVE:
             ! INDE=[37, 35, 34, 36, 38, 39, ...], WHERE WE MATCHED THE ENERGY
             ! EIGENVALUES IN ANTI-ORDER 29<->37 AND 31<->35
-            INDE(1:NSWAPPED)=EXTRA(1:NSWAPPED:-1)
+            INDE(1:NSWAPPED)=EXTRA(NSWAPPED:1:-1)
             K=NSWAPPED
             DO I=NOCC+1,NB2
               IF(ANY(EXTRA(1:NSWAPPED)==I)) CYCLE
@@ -5320,7 +5320,7 @@
               IF(NSWAPPED.GT.0) THEN
                 ALLOCATE(EXTRA(NSWAPPED))
                 CALL OVERLAP$GETI4A('EXTRA',NSWAPPED,EXTRA)
-                INDE(1:NSWAPPED)=EXTRA(1:NSWAPPED:-1)
+                INDE(1:NSWAPPED)=EXTRA(NSWAPPED:1:-1)
                 K=NSWAPPED
                 DO I=NOCC+1,NB
                   IF(ANY(EXTRA(1:NSWAPPED).EQ.I)) CYCLE
