@@ -5222,6 +5222,7 @@
       INTEGER(4) :: NSPIN
       INTEGER(4) :: IKPT
       INTEGER(4) :: ISPIN
+      INTEGER(4) :: I
       REAL(8) :: EGROUND
       REAL(8) :: EEXCITE
       REAL(8) :: EV
@@ -5285,7 +5286,7 @@
             ELSE
               ESWAP=0.D0
               ! IF NOT ESWAP, ONLY STATES ARE SWAPPED BUT NOT THEIR ENERGY EIGENVALUES
-              INDE(:)=(/(I, I=NOCC+1,NB)/)
+              INDE(:)=[(I, I=NOCC+1,NB2)]
             END IF
             CALL OVERLAP$UNSELECT
             DO IFINAL=1,NB-NOCC
