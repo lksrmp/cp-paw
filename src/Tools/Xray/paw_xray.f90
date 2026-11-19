@@ -5286,7 +5286,7 @@
             ELSE
               ESWAP=0.D0
               ! IF NOT ESWAP, ONLY STATES ARE SWAPPED BUT NOT THEIR ENERGY EIGENVALUES
-              INDE(:)=[(I, I=NOCC+1,NB2)]
+              INDE(:)=[(I, I=NOCC+1,NB)]
             END IF
             CALL OVERLAP$UNSELECT
             DO IFINAL=1,NB-NOCC
